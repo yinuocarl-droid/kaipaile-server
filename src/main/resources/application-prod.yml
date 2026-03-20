@@ -1,0 +1,34 @@
+spring:
+  # 数据库配置（生产环境）
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://101.43.57.62:3306/kaipai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: root123456
+
+  # Redis 配置（生产环境）
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password:
+      database: 0
+      timeout: 10000ms
+
+# MinIO 配置（生产环境）
+minio:
+  endpoint: http://127.0.0.1:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket-name: kaipai
+
+# 日志配置（生产环境，只输出 warn 以上）
+logging:
+  level:
+    com.kaipai: info
+    org.springframework.security: warn
+
+# MyBatis-Plus SQL 日志（生产环境关闭，避免性能损耗）
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
