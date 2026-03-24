@@ -1,0 +1,7 @@
+- 必须使用 Java 8+
+- 尽量使用 Stream / Optional 提升代码可读性
+- 禁止使用过时 API
+- Date使用LocalDateTime
+- 所有类、public 方法添加 Javadoc  
+- 所有 Service 方法写清楚业务描述  
+- Controller 写明请求说明、参数说明  

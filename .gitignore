@@ -1,0 +1,19 @@
+# Maven 编译产物
+target/
+*.class
+
+# IDEA 配置
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# 日志
+*.log
+logs/
+
+# 生产环境配置（含敏感信息，不提交到 git）
+src/main/resources/application-prod.yml
+
+# macOS
+.DS_Store

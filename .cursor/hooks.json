@@ -1,0 +1,8 @@
+{
+    "hooks": [
+      {
+        "event": "onSave",
+        "command": "cursor ai review"
+      }
+    ]
+  }
