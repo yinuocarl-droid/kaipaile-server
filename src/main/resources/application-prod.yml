@@ -9,9 +9,9 @@ spring:
   # Redis 配置（生产环境）
   data:
     redis:
-      host: 127.0.0.1
+      host: 101.43.57.62
       port: 6379
-      password:
+      password: kaipaiRedis888
       database: 0
       timeout: 10000ms
 

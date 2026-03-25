@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-@MapperScan("com.kaipai.module.**.mapper")
+@MapperScan("com.kaipai.module.server.**.mapper")
 public class KaipaiApplication {
 
     public static void main(String[] args) {
