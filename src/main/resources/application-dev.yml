@@ -9,18 +9,18 @@ spring:
   # Redis 配置（开发环境）
   data:
     redis:
-      host: localhost
+      host: 101.43.57.62
       port: 6379
-      password:
+      password: kaipaileRedis888
       database: 0
       timeout: 10000ms
 
-# MinIO 配置（开发环境）
-minio:
-  endpoint: http://localhost:9000
-  access-key: minioadmin
-  secret-key: minioadmin
-  bucket-name: kaipai
+# 腾讯云 COS 配置（开发环境）
+cos:
+  secret-id: ${COS_SECRET_ID}
+  secret-key: ${COS_SECRET_KEY}
+  region: ap-shanghai
+  bucket-name: kaipai-1412601014
 
 # 日志配置（开发环境，开启 debug）
 logging:

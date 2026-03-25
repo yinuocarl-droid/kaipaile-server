@@ -22,7 +22,7 @@
         <java.version>17</java.version>
         <mybatis-plus.version>3.5.5</mybatis-plus.version>
         <jjwt.version>0.12.5</jjwt.version>
-        <minio.version>8.5.7</minio.version>
+
         <knife4j.version>4.4.0</knife4j.version>
     </properties>
 
@@ -51,10 +51,10 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
-        <!-- MyBatis-Plus -->
+        <!-- MyBatis-Plus (Spring Boot 3.x 专用 starter) -->
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-boot-starter</artifactId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
 
@@ -84,11 +84,11 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- MinIO 文件存储 -->
+        <!-- 腾讯云 COS 文件存储 -->
         <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>${minio.version}</version>
+            <groupId>com.qcloud</groupId>
+            <artifactId>cos_api</artifactId>
+            <version>5.6.227</version>
         </dependency>
 
         <!-- Knife4j API 文档 -->
