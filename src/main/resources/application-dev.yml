@@ -11,7 +11,7 @@ spring:
     redis:
       host: 101.43.57.62
       port: 6379
-      password: kaipaileRedis888
+      password: kaipaiRedis888
       database: 0
       timeout: 10000ms
 
