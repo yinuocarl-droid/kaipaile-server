@@ -4,11 +4,6 @@ server:
     context-path: /api
 
 spring:
-  profiles:
-    active: dev
-  application:
-    name: kaipai-backend
-
   # 文件上传大小限制
   servlet:
     multipart:

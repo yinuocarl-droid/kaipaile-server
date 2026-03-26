@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: kaipai-backend
+  profiles:
+    active: dev
+  cloud:
+    nacos:
+      config:
+        server-addr: 101.43.57.62:8848
+        namespace: ''
+        group: DEFAULT_GROUP
+        file-extension: yml
+        enabled: ${NACOS_ENABLED:false}
+        username: nacos
+        password: kaipainacos

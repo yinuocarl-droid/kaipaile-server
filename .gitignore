@@ -15,5 +15,8 @@ logs/
 # 生产环境配置（含敏感信息，不提交到 git）
 src/main/resources/application-prod.yml
 
+# 包含 Nacos 账号密码的本地覆盖配置（如有）
+src/main/resources/bootstrap-local.yml
+
 # macOS
 .DS_Store
