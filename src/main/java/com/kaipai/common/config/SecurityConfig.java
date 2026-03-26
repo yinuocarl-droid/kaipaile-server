@@ -24,11 +24,17 @@ public class SecurityConfig {
 
     private static final String[] WHITE_LIST = {
             "/auth/**",
+            "/api/auth/**",
             "/doc.html",
+            "/api/doc.html",
             "/swagger-ui/**",
+            "/api/swagger-ui/**",
             "/swagger-ui.html",
+            "/api/swagger-ui.html",
             "/v3/api-docs/**",
+            "/api/v3/api-docs/**",
             "/webjars/**",
+            "/api/webjars/**",
             "/favicon.ico"
     };
 
@@ -36,6 +42,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
