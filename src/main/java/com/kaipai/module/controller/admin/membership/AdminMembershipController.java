@@ -2,15 +2,19 @@ package com.kaipai.module.controller.admin.membership;
 
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
+import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
+import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountExtendDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountOpenDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountQueryDTO;
+import com.kaipai.module.model.membership.dto.MembershipChangeLogItemDTO;
+import com.kaipai.module.model.membership.dto.MembershipChangeLogQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductQueryDTO;
-import com.kaipai.module.model.membership.entity.MembershipAccount;
 import com.kaipai.module.model.membership.entity.MembershipProduct;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.membership.service.MembershipChangeLogService;
 import com.kaipai.module.server.membership.service.MembershipProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,6 +36,7 @@ public class AdminMembershipController {
 
     private final MembershipProductService membershipProductService;
     private final MembershipAccountService membershipAccountService;
+    private final MembershipChangeLogService membershipChangeLogService;
 
     @Operation(summary = "会员商品列表")
     @GetMapping("/products")
@@ -51,8 +56,22 @@ public class AdminMembershipController {
     @Operation(summary = "会员账户列表")
     @GetMapping("/accounts")
     @PreAuthorize("hasAuthority('page.membership.accounts')")
-    public R<PageResult<MembershipAccount>> accounts(@Valid MembershipAccountQueryDTO query) {
+    public R<PageResult<AdminMembershipAccountItemDTO>> accounts(@Valid MembershipAccountQueryDTO query) {
         return R.ok(membershipAccountService.adminAccountList(query));
+    }
+
+    @Operation(summary = "会员账户详情")
+    @GetMapping("/accounts/{userId}")
+    @PreAuthorize("hasAuthority('page.membership.accounts')")
+    public R<AdminMembershipAccountDetailDTO> accountDetail(@PathVariable Long userId) {
+        return R.ok(membershipAccountService.adminAccountDetail(userId));
+    }
+
+    @Operation(summary = "会员变更日志")
+    @GetMapping("/logs")
+    @PreAuthorize("hasAuthority('page.membership.logs')")
+    public R<PageResult<MembershipChangeLogItemDTO>> logs(@Valid MembershipChangeLogQueryDTO query) {
+        return R.ok(membershipChangeLogService.adminLogList(query));
     }
 
     @Operation(summary = "手工开通会员")

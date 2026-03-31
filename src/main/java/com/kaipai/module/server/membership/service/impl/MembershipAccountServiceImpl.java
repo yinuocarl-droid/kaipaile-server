@@ -8,31 +8,57 @@ import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.ResultCode;
+import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
+import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountExtendDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountOpenDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountQueryDTO;
+import com.kaipai.module.model.membership.dto.MembershipChangeLogItemDTO;
+import com.kaipai.module.model.membership.dto.MembershipChangeLogQueryDTO;
 import com.kaipai.module.model.membership.entity.MembershipAccount;
 import com.kaipai.module.model.membership.entity.MembershipChangeLog;
+import com.kaipai.module.model.payment.entity.PaymentOrder;
+import com.kaipai.module.model.referral.entity.UserEntitlementGrant;
+import com.kaipai.module.model.user.entity.User;
+import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.membership.mapper.MembershipAccountMapper;
+import com.kaipai.module.server.membership.mapper.MembershipChangeLogMapper;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.membership.service.MembershipChangeLogService;
-import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
+import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
+import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountMapper, MembershipAccount> implements MembershipAccountService {
 
     private final MembershipChangeLogService membershipChangeLogService;
+    private final MembershipChangeLogMapper membershipChangeLogMapper;
+    private final UserMapper userMapper;
+    private final ActorProfileMapper actorProfileMapper;
+    private final PaymentOrderMapper paymentOrderMapper;
+    private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogger adminOperationLogger;
 
     @Override
-    public PageResult<MembershipAccount> adminAccountList(MembershipAccountQueryDTO query) {
+    public PageResult<AdminMembershipAccountItemDTO> adminAccountList(MembershipAccountQueryDTO query) {
         Page<MembershipAccount> page = new Page<>(query.getPageNo(), query.getPageSize());
         LambdaQueryWrapper<MembershipAccount> wrapper = new LambdaQueryWrapper<>();
         if (query.getUserId() != null) {
@@ -44,9 +70,91 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
         if (query.getStatus() != null) {
             wrapper.eq(MembershipAccount::getStatus, query.getStatus());
         }
-        wrapper.orderByDesc(MembershipAccount::getCreateTime);
+        if (StringUtils.hasText(query.getSourceType())) {
+            wrapper.eq(MembershipAccount::getSourceType, query.getSourceType().trim());
+        }
+        if (query.getEffectiveTimeFrom() != null) {
+            wrapper.ge(MembershipAccount::getEffectiveTime, query.getEffectiveTimeFrom());
+        }
+        if (query.getEffectiveTimeTo() != null) {
+            wrapper.le(MembershipAccount::getEffectiveTime, query.getEffectiveTimeTo());
+        }
+        if (query.getExpireTimeFrom() != null) {
+            wrapper.ge(MembershipAccount::getExpireTime, query.getExpireTimeFrom());
+        }
+        if (query.getExpireTimeTo() != null) {
+            wrapper.le(MembershipAccount::getExpireTime, query.getExpireTimeTo());
+        }
+        if (StringUtils.hasText(query.getPhone())) {
+            Set<Long> userIds = userMapper.selectList(new LambdaQueryWrapper<User>().like(User::getPhone, query.getPhone().trim()))
+                    .stream()
+                    .map(User::getUserId)
+                    .collect(Collectors.toSet());
+            if (userIds.isEmpty()) {
+                return PageResult.empty();
+            }
+            wrapper.in(MembershipAccount::getUserId, userIds);
+        }
+        wrapper.orderByDesc(MembershipAccount::getCreateTime).orderByDesc(MembershipAccount::getMembershipId);
+
         Page<MembershipAccount> result = page(page, wrapper);
-        return new PageResult<>(result.getTotal(), result.getRecords());
+        if (result.getRecords().isEmpty()) {
+            return PageResult.empty();
+        }
+
+        Set<Long> userIds = result.getRecords().stream()
+                .map(MembershipAccount::getUserId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, User> userMap = userMapper.selectBatchIds(userIds).stream()
+                .collect(Collectors.toMap(User::getUserId, Function.identity()));
+        Map<Long, ActorProfile> actorProfileMap = actorProfileMapper.selectList(new LambdaQueryWrapper<ActorProfile>()
+                        .in(ActorProfile::getUserId, userIds))
+                .stream()
+                .collect(Collectors.toMap(ActorProfile::getUserId, Function.identity(), (left, right) -> left));
+        Map<Long, MembershipChangeLog> latestLogMap = membershipChangeLogMapper.selectList(new LambdaQueryWrapper<MembershipChangeLog>()
+                        .in(MembershipChangeLog::getUserId, userIds)
+                        .orderByDesc(MembershipChangeLog::getCreateTime)
+                        .orderByDesc(MembershipChangeLog::getChangeLogId))
+                .stream()
+                .collect(Collectors.toMap(MembershipChangeLog::getUserId, Function.identity(), (left, right) -> left));
+
+        List<AdminMembershipAccountItemDTO> list = result.getRecords().stream()
+                .map(account -> toAccountItem(account, userMap.get(account.getUserId()), actorProfileMap.get(account.getUserId()), latestLogMap.get(account.getUserId())))
+                .toList();
+        return new PageResult<>(result.getTotal(), list);
+    }
+
+    @Override
+    public AdminMembershipAccountDetailDTO adminAccountDetail(Long userId) {
+        MembershipAccount account = lambdaQuery().eq(MembershipAccount::getUserId, userId).one();
+        if (account == null) {
+            throw new BizException("会员账户不存在");
+        }
+        User user = userMapper.selectById(userId);
+        ActorProfile actorProfile = actorProfileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
+                .eq(ActorProfile::getUserId, userId)
+                .last("limit 1"));
+        List<MembershipChangeLogItemDTO> changeLogs = membershipChangeLogService.adminLogList(buildDetailLogQuery(userId)).getList();
+        List<PaymentOrder> paymentOrders = paymentOrderMapper.selectList(new LambdaQueryWrapper<PaymentOrder>()
+                .eq(PaymentOrder::getUserId, userId)
+                .orderByDesc(PaymentOrder::getCreateTime)
+                .orderByDesc(PaymentOrder::getPaymentOrderId)
+                .last("limit 10"));
+        List<UserEntitlementGrant> grants = userEntitlementGrantMapper.selectList(new LambdaQueryWrapper<UserEntitlementGrant>()
+                .eq(UserEntitlementGrant::getUserId, userId)
+                .orderByDesc(UserEntitlementGrant::getCreateTime)
+                .orderByDesc(UserEntitlementGrant::getGrantId)
+                .last("limit 10"));
+
+        AdminMembershipAccountDetailDTO detail = new AdminMembershipAccountDetailDTO();
+        detail.setUserId(userId);
+        detail.setNickname(actorProfile != null && StringUtils.hasText(actorProfile.getNickName()) ? actorProfile.getNickName() : user == null ? null : user.getUserName());
+        detail.setPhone(user == null ? null : user.getPhone());
+        detail.setCurrentAccount(toCurrentAccount(account));
+        detail.setRelatedPaymentOrders(paymentOrders.stream().map(this::toPaymentSummary).toList());
+        detail.setRelatedGrants(grants.stream().map(this::toGrantSummary).toList());
+        detail.setChangeLogs(changeLogs);
+        return detail;
     }
 
     @Override
@@ -130,6 +238,71 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
                 .extraContext(accountContext(account, dto.getRemark()))
                 .operationResult(1)
                 .build());
+    }
+
+    private MembershipChangeLogQueryDTO buildDetailLogQuery(Long userId) {
+        MembershipChangeLogQueryDTO query = new MembershipChangeLogQueryDTO();
+        query.setUserId(userId);
+        query.setPageNo(1);
+        query.setPageSize(20);
+        return query;
+    }
+
+    private AdminMembershipAccountItemDTO toAccountItem(MembershipAccount account,
+                                                        User user,
+                                                        ActorProfile actorProfile,
+                                                        MembershipChangeLog latestLog) {
+        AdminMembershipAccountItemDTO item = new AdminMembershipAccountItemDTO();
+        item.setMembershipId(account.getMembershipId());
+        item.setUserId(account.getUserId());
+        item.setNickname(actorProfile != null && StringUtils.hasText(actorProfile.getNickName()) ? actorProfile.getNickName() : user == null ? null : user.getUserName());
+        item.setPhone(user == null ? null : user.getPhone());
+        item.setTier(account.getTier());
+        item.setStatus(account.getStatus());
+        item.setEffectiveTime(account.getEffectiveTime());
+        item.setExpireTime(account.getExpireTime());
+        item.setSourceType(account.getSourceType());
+        item.setSourceRefId(account.getSourceRefId());
+        item.setRecentChangeTime(latestLog == null ? null : latestLog.getCreateTime());
+        return item;
+    }
+
+    private AdminMembershipAccountDetailDTO.CurrentAccount toCurrentAccount(MembershipAccount account) {
+        AdminMembershipAccountDetailDTO.CurrentAccount currentAccount = new AdminMembershipAccountDetailDTO.CurrentAccount();
+        currentAccount.setMembershipId(account.getMembershipId());
+        currentAccount.setTier(account.getTier());
+        currentAccount.setStatus(account.getStatus());
+        currentAccount.setEffectiveTime(account.getEffectiveTime());
+        currentAccount.setExpireTime(account.getExpireTime());
+        currentAccount.setSourceType(account.getSourceType());
+        currentAccount.setSourceRefId(account.getSourceRefId());
+        return currentAccount;
+    }
+
+    private AdminMembershipAccountDetailDTO.PaymentOrderSummary toPaymentSummary(PaymentOrder order) {
+        AdminMembershipAccountDetailDTO.PaymentOrderSummary item = new AdminMembershipAccountDetailDTO.PaymentOrderSummary();
+        item.setPaymentOrderId(order.getPaymentOrderId());
+        item.setOrderNo(order.getOrderNo());
+        item.setAmount(order.getAmount());
+        item.setPayStatus(order.getPayStatus());
+        item.setPayChannel(order.getPayChannel());
+        item.setCreateTime(order.getCreateTime());
+        item.setPaidAt(order.getPaidAt());
+        return item;
+    }
+
+    private AdminMembershipAccountDetailDTO.GrantSummary toGrantSummary(UserEntitlementGrant grant) {
+        AdminMembershipAccountDetailDTO.GrantSummary item = new AdminMembershipAccountDetailDTO.GrantSummary();
+        item.setGrantId(grant.getGrantId());
+        item.setGrantType(grant.getGrantType());
+        item.setGrantCode(grant.getGrantCode());
+        item.setStatus(grant.getStatus());
+        item.setEffectiveTime(grant.getEffectiveTime());
+        item.setExpireTime(grant.getExpireTime());
+        item.setSourceType(grant.getSourceType());
+        item.setSourceRefId(grant.getSourceRefId());
+        item.setRemark(grant.getRemark());
+        return item;
     }
 
     private void logChange(Long userId, Integer beforeTier, Integer afterTier, String reason,
