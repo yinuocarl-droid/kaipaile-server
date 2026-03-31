@@ -304,6 +304,17 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         try {
             JsonNode root = objectMapper.readTree(product.getBenefitConfigJson());
             if (root instanceof ObjectNode objectNode) {
+                boolean hasBenefitArray = BENEFIT_ARRAY_FIELDS.stream().anyMatch(fieldName -> objectNode.path(fieldName).isArray());
+                if (hasBenefitArray) {
+                    return objectNode.deepCopy();
+                }
+                if (looksLikeBenefitNode(objectNode)) {
+                    ObjectNode wrapper = objectMapper.createObjectNode();
+                    ArrayNode benefitItems = objectMapper.createArrayNode();
+                    benefitItems.add(objectNode.deepCopy());
+                    wrapper.set("benefitItems", benefitItems);
+                    return wrapper;
+                }
                 return objectNode.deepCopy();
             }
             if (root instanceof ArrayNode arrayNode) {
@@ -339,10 +350,11 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
     }
 
     private int findBenefitIndex(ArrayNode benefitItems, String benefitCode) {
+        String normalizedBenefitCode = benefitCode == null ? null : benefitCode.trim();
         for (int i = 0; i < benefitItems.size(); i++) {
             JsonNode node = benefitItems.get(i);
             String currentCode = firstText(node, "benefitCode", "code", "capabilityCode", "abilityCode");
-            if (Objects.equals(currentCode, benefitCode)) {
+            if (Objects.equals(currentCode, normalizedBenefitCode)) {
                 return i;
             }
         }
