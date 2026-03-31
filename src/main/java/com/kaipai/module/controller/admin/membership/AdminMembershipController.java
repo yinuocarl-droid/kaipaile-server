@@ -9,6 +9,8 @@ import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountExtendDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountOpenDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountQueryDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitSaveDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitStatusChangeDTO;
 import com.kaipai.module.model.membership.dto.MembershipBenefitQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipChangeLogItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipChangeLogQueryDTO;
@@ -56,6 +58,40 @@ public class AdminMembershipController {
     @PreAuthorize("hasAuthority('page.membership.benefits')")
     public R<AdminMembershipBenefitOverviewDTO> benefits(@Valid MembershipBenefitQueryDTO query) {
         return R.ok(membershipProductService.adminBenefitOverview(query));
+    }
+
+    @Operation(summary = "新建会员权益")
+    @PostMapping("/benefits")
+    @PreAuthorize("hasAuthority('action.membership.benefit.create')")
+    public R<Void> createBenefit(@Valid @RequestBody MembershipBenefitSaveDTO dto) {
+        membershipProductService.createBenefit(dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "更新会员权益")
+    @PutMapping("/benefits/{id}")
+    @PreAuthorize("hasAuthority('action.membership.benefit.edit')")
+    public R<Void> updateBenefit(@PathVariable String id, @Valid @RequestBody MembershipBenefitSaveDTO dto) {
+        membershipProductService.updateBenefit(id, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "启用会员权益")
+    @PostMapping("/benefits/{id}/enable")
+    @PreAuthorize("hasAuthority('action.membership.benefit.enable')")
+    public R<Void> enableBenefit(@PathVariable String id,
+                                 @RequestBody(required = false) MembershipBenefitStatusChangeDTO dto) {
+        membershipProductService.enableBenefit(id, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "停用会员权益")
+    @PostMapping("/benefits/{id}/disable")
+    @PreAuthorize("hasAuthority('action.membership.benefit.disable')")
+    public R<Void> disableBenefit(@PathVariable String id,
+                                  @RequestBody(required = false) MembershipBenefitStatusChangeDTO dto) {
+        membershipProductService.disableBenefit(id, dto);
+        return R.ok();
     }
 
     @Operation(summary = "会员商品详情")

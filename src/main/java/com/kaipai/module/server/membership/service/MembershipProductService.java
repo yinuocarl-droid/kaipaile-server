@@ -3,6 +3,8 @@ package com.kaipai.module.server.membership.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.membership.dto.AdminMembershipBenefitOverviewDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitSaveDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitStatusChangeDTO;
 import com.kaipai.module.model.membership.dto.MembershipBenefitQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductQueryDTO;
@@ -16,6 +18,14 @@ public interface MembershipProductService extends IService<MembershipProduct> {
     PageResult<MembershipProduct> adminProductList(MembershipProductQueryDTO query);
 
     AdminMembershipBenefitOverviewDTO adminBenefitOverview(MembershipBenefitQueryDTO query);
+
+    void createBenefit(MembershipBenefitSaveDTO dto);
+
+    void updateBenefit(String benefitId, MembershipBenefitSaveDTO dto);
+
+    void enableBenefit(String benefitId, MembershipBenefitStatusChangeDTO dto);
+
+    void disableBenefit(String benefitId, MembershipBenefitStatusChangeDTO dto);
 
     MembershipProduct adminProductDetail(Long productId);
 

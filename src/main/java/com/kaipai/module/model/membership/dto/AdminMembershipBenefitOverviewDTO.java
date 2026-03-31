@@ -14,6 +14,7 @@ public class AdminMembershipBenefitOverviewDTO {
 
     @Data
     public static class BenefitItem {
+        private String benefitId;
         private Long productId;
         private String productCode;
         private String productName;

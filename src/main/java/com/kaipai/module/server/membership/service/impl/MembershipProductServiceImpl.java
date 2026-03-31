@@ -5,11 +5,15 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.membership.dto.AdminMembershipBenefitOverviewDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitSaveDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitStatusChangeDTO;
 import com.kaipai.module.model.membership.dto.MembershipBenefitQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductQueryDTO;
@@ -39,6 +43,8 @@ import org.springframework.util.StringUtils;
 @Service
 @RequiredArgsConstructor
 public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductMapper, MembershipProduct> implements MembershipProductService {
+
+    private static final List<String> BENEFIT_ARRAY_FIELDS = List.of("benefitItems", "benefits", "items", "capabilityMatrix");
 
     private final AdminOperationLogger adminOperationLogger;
     private final ObjectMapper objectMapper;
@@ -99,6 +105,49 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         overview.setBenefitItems(benefitItems);
         overview.setCapabilityMatrix(capabilityMap.values().stream().map(CapabilityMatrixAccumulator::toDTO).toList());
         return overview;
+    }
+
+    @Override
+    public void createBenefit(MembershipBenefitSaveDTO dto) {
+        MembershipProduct product = requireProduct(dto.getProductId());
+        ObjectNode root = readBenefitConfigRoot(product);
+        ArrayNode benefitItems = benefitItemsArray(root);
+        if (findBenefitIndex(benefitItems, dto.getBenefitCode()) >= 0) {
+            throw new BizException("会员权益编码已存在");
+        }
+        benefitItems.add(buildBenefitNode(dto));
+        saveBenefitConfig(product, root, "benefit_create", dto.getBenefitCode(), dto.getCapabilitySummary(), null);
+    }
+
+    @Override
+    public void updateBenefit(String benefitId, MembershipBenefitSaveDTO dto) {
+        BenefitLocator locator = parseBenefitId(benefitId);
+        if (!Objects.equals(locator.productId(), dto.getProductId())) {
+            throw new BizException("权益归属商品不匹配");
+        }
+        MembershipProduct product = requireProduct(locator.productId());
+        ObjectNode root = readBenefitConfigRoot(product);
+        ArrayNode benefitItems = benefitItemsArray(root);
+        int currentIndex = findBenefitIndex(benefitItems, locator.benefitCode());
+        if (currentIndex < 0) {
+            throw new BizException("会员权益不存在");
+        }
+        int duplicateIndex = findBenefitIndex(benefitItems, dto.getBenefitCode());
+        if (duplicateIndex >= 0 && duplicateIndex != currentIndex) {
+            throw new BizException("目标商品下已存在相同权益编码");
+        }
+        benefitItems.set(currentIndex, buildBenefitNode(dto));
+        saveBenefitConfig(product, root, "benefit_edit", dto.getBenefitCode(), dto.getCapabilitySummary(), null);
+    }
+
+    @Override
+    public void enableBenefit(String benefitId, MembershipBenefitStatusChangeDTO dto) {
+        changeBenefitStatus(benefitId, 1, "benefit_enable", dto == null ? null : dto.getReason());
+    }
+
+    @Override
+    public void disableBenefit(String benefitId, MembershipBenefitStatusChangeDTO dto) {
+        changeBenefitStatus(benefitId, 2, "benefit_disable", dto == null ? null : dto.getReason());
     }
 
     @Override
@@ -183,6 +232,28 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         return product;
     }
 
+    private void changeBenefitStatus(String benefitId, int targetStatus, String operationCode, String reason) {
+        BenefitLocator locator = parseBenefitId(benefitId);
+        MembershipProduct product = requireProduct(locator.productId());
+        ObjectNode root = readBenefitConfigRoot(product);
+        ArrayNode benefitItems = benefitItemsArray(root);
+        int index = findBenefitIndex(benefitItems, locator.benefitCode());
+        if (index < 0) {
+            throw new BizException("会员权益不存在");
+        }
+        JsonNode rawNode = benefitItems.get(index);
+        ObjectNode benefitNode = rawNode instanceof ObjectNode objectNode ? objectNode.deepCopy() : objectMapper.createObjectNode();
+        Integer currentStatus = firstInteger(benefitNode, "status", "benefitStatus", "enabledStatus", "state", "activeStatus", "isEnabled");
+        if (Objects.equals(currentStatus, targetStatus)) {
+            throw new BizException("会员权益状态已匹配");
+        }
+        benefitNode.put("status", targetStatus);
+        benefitItems.set(index, benefitNode);
+        saveBenefitConfig(product, root, operationCode, locator.benefitCode(),
+                firstText(benefitNode, "capabilitySummary", "summary", "description", "capabilityDesc", "abilityDesc"),
+                reason);
+    }
+
     private void changeStatus(Long productId, int targetStatus, String operationCode, String reason) {
         MembershipProduct product = requireProduct(productId);
         if (product.getStatus() != null && product.getStatus() == targetStatus) {
@@ -226,6 +297,105 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         return snapshot;
     }
 
+    private ObjectNode readBenefitConfigRoot(MembershipProduct product) {
+        if (!StringUtils.hasText(product.getBenefitConfigJson())) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(product.getBenefitConfigJson());
+            if (root instanceof ObjectNode objectNode) {
+                return objectNode.deepCopy();
+            }
+            if (root instanceof ArrayNode arrayNode) {
+                ObjectNode objectNode = objectMapper.createObjectNode();
+                objectNode.set("benefitItems", arrayNode.deepCopy());
+                return objectNode;
+            }
+            return objectMapper.createObjectNode();
+        } catch (Exception ex) {
+            throw new BizException("会员权益配置 JSON 无法解析");
+        }
+    }
+
+    private ArrayNode benefitItemsArray(ObjectNode root) {
+        JsonNode current = root.get("benefitItems");
+        if (current instanceof ArrayNode arrayNode) {
+            return arrayNode;
+        }
+        for (String fieldName : BENEFIT_ARRAY_FIELDS) {
+            JsonNode value = root.get(fieldName);
+            if (value instanceof ArrayNode arrayNode) {
+                ArrayNode copied = arrayNode.deepCopy();
+                root.set("benefitItems", copied);
+                if (!Objects.equals(fieldName, "benefitItems")) {
+                    root.remove(fieldName);
+                }
+                return copied;
+            }
+        }
+        ArrayNode created = objectMapper.createArrayNode();
+        root.set("benefitItems", created);
+        return created;
+    }
+
+    private int findBenefitIndex(ArrayNode benefitItems, String benefitCode) {
+        for (int i = 0; i < benefitItems.size(); i++) {
+            JsonNode node = benefitItems.get(i);
+            String currentCode = firstText(node, "benefitCode", "code", "capabilityCode", "abilityCode");
+            if (Objects.equals(currentCode, benefitCode)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private ObjectNode buildBenefitNode(MembershipBenefitSaveDTO dto) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("benefitCode", dto.getBenefitCode().trim());
+        node.put("benefitName", dto.getBenefitName().trim());
+        if (StringUtils.hasText(dto.getCapabilitySummary())) {
+            node.put("capabilitySummary", dto.getCapabilitySummary().trim());
+        }
+        node.put("status", dto.getStatus());
+        node.set("affectedPages", objectMapper.valueToTree(dto.getAffectedPages() == null ? Collections.emptyList() : dto.getAffectedPages()));
+        node.set("artifactTypes", objectMapper.valueToTree(dto.getArtifactTypes() == null ? Collections.emptyList() : dto.getArtifactTypes()));
+        return node;
+    }
+
+    private void saveBenefitConfig(MembershipProduct product,
+                                   ObjectNode root,
+                                   String operationCode,
+                                   String benefitCode,
+                                   String capabilitySummary,
+                                   String reason) {
+        Map<String, Object> beforeSnapshot = snapshot(product);
+        try {
+            product.setBenefitConfigJson(objectMapper.writeValueAsString(root));
+        } catch (Exception ex) {
+            throw new BizException("会员权益配置 JSON 无法序列化");
+        }
+        product.setLastUpdate(LocalDateTime.now());
+        updateById(product);
+
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("product_id", product.getProductId());
+        context.put("product_code", product.getProductCode());
+        context.put("membership_tier", product.getMembershipTier());
+        context.put("benefit_code", benefitCode);
+        context.put("capability_summary", capabilitySummary);
+        context.put("reason", reason);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("membership")
+                .operationCode(operationCode)
+                .targetType("membership_product")
+                .targetId(product.getProductId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(product))
+                .extraContext(context)
+                .operationResult(1)
+                .build());
+    }
+
     private List<JsonNode> parseBenefitNodes(MembershipProduct product) {
         if (!StringUtils.hasText(product.getBenefitConfigJson())) {
             return Collections.emptyList();
@@ -261,9 +431,26 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
                 || StringUtils.hasText(firstText(node, "capabilitySummary", "summary", "description", "capabilityDesc"));
     }
 
+    private String buildBenefitId(Long productId, String benefitCode) {
+        return productId + ":" + benefitCode;
+    }
+
+    private BenefitLocator parseBenefitId(String benefitId) {
+        if (!StringUtils.hasText(benefitId) || !benefitId.contains(":")) {
+            throw new BizException("会员权益标识不合法");
+        }
+        String[] parts = benefitId.split(":", 2);
+        try {
+            return new BenefitLocator(Long.parseLong(parts[0]), parts[1]);
+        } catch (NumberFormatException ex) {
+            throw new BizException("会员权益标识不合法");
+        }
+    }
+
     private AdminMembershipBenefitOverviewDTO.BenefitItem toBenefitItem(MembershipProduct product, JsonNode node, int index) {
         AdminMembershipBenefitOverviewDTO.BenefitItem item = new AdminMembershipBenefitOverviewDTO.BenefitItem();
         Integer itemStatus = firstInteger(node, "status", "benefitStatus", "enabledStatus", "state", "activeStatus", "isEnabled");
+        item.setBenefitId(buildBenefitId(product.getProductId(), resolveBenefitCode(product, node, index)));
         item.setProductId(product.getProductId());
         item.setProductCode(product.getProductCode());
         item.setProductName(product.getProductName());
@@ -390,5 +577,8 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
             item.setArtifactTypes(new ArrayList<>(artifactTypes));
             return item;
         }
+    }
+
+    private record BenefitLocator(Long productId, String benefitCode) {
     }
 }
