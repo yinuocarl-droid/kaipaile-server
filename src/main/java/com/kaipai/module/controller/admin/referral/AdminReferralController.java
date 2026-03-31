@@ -15,10 +15,10 @@ import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskQueryDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantExtendRequestDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantGrantRequestDTO;
+import com.kaipai.module.model.referral.dto.UserEntitlementGrantDetailDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantItemDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantListQueryDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantRevokeRequestDTO;
-import com.kaipai.module.model.referral.entity.UserEntitlementGrant;
 import com.kaipai.module.server.referral.service.EntitlementRuleService;
 import com.kaipai.module.server.referral.service.InviteCodeService;
 import com.kaipai.module.server.referral.service.ReferralPolicyService;
@@ -149,16 +149,22 @@ public class AdminReferralController {
     @GetMapping("/eligibility")
     @PreAuthorize("hasAuthority('page.referral.eligibility')")
     public R<PageResult<UserEntitlementGrantItemDTO>> eligibility(
-            UserEntitlementGrantListQueryDTO queryDTO) {
+            @Valid UserEntitlementGrantListQueryDTO queryDTO) {
         return R.ok(userEntitlementGrantService.adminGrantList(queryDTO));
+    }
+
+    @Operation(summary = "资格详情")
+    @GetMapping("/eligibility/{grantId}")
+    @PreAuthorize("hasAuthority('page.referral.eligibility')")
+    public R<UserEntitlementGrantDetailDTO> eligibilityDetail(@PathVariable Long grantId) {
+        return R.ok(userEntitlementGrantService.adminGrantDetail(grantId));
     }
 
     @Operation(summary = "手工发放资格")
     @PostMapping("/eligibility/grant")
     @PreAuthorize("hasAuthority('action.referral.eligibility.grant')")
     public R<UserEntitlementGrantItemDTO> grant(@Valid @RequestBody UserEntitlementGrantGrantRequestDTO request) {
-        UserEntitlementGrant entity = userEntitlementGrantService.grantManual(request);
-        return R.ok(toDTO(entity));
+        return R.ok(userEntitlementGrantService.adminGrantItem(userEntitlementGrantService.grantManual(request).getGrantId()));
     }
 
     @Operation(summary = "手工撤销资格")
@@ -175,20 +181,5 @@ public class AdminReferralController {
     public R<Void> extend(@Valid @RequestBody UserEntitlementGrantExtendRequestDTO request) {
         userEntitlementGrantService.extendGrant(request);
         return R.ok();
-    }
-
-    private UserEntitlementGrantItemDTO toDTO(UserEntitlementGrant grant) {
-        return new UserEntitlementGrantItemDTO(
-                grant.getGrantId(),
-                grant.getUserId(),
-                grant.getGrantType(),
-                grant.getGrantCode(),
-                grant.getStatus(),
-                grant.getEffectiveTime(),
-                grant.getExpireTime(),
-                grant.getSourceType(),
-                grant.getSourceRefId(),
-                grant.getRemark()
-        );
     }
 }

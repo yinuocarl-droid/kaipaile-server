@@ -13,6 +13,8 @@ public class UserEntitlementGrantItemDTO {
 
     private Long grantId;
     private Long userId;
+    private String nickname;
+    private String phone;
     private String grantType;
     private String grantCode;
     private Integer status;
