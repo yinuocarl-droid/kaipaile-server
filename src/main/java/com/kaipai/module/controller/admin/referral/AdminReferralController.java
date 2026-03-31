@@ -17,6 +17,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,6 +38,7 @@ public class AdminReferralController {
 
     @Operation(summary = "资格列表")
     @GetMapping("/eligibility")
+    @PreAuthorize("hasAuthority('page.referral.eligibility')")
     public R<PageResult<UserEntitlementGrantItemDTO>> eligibility(
             UserEntitlementGrantListQueryDTO queryDTO) {
         return R.ok(userEntitlementGrantService.adminGrantList(queryDTO));
@@ -44,6 +46,7 @@ public class AdminReferralController {
 
     @Operation(summary = "手工发放资格")
     @PostMapping("/eligibility/grant")
+    @PreAuthorize("hasAuthority('action.referral.eligibility.grant')")
     public R<UserEntitlementGrantItemDTO> grant(@Valid @RequestBody UserEntitlementGrantGrantRequestDTO request) {
         UserEntitlementGrant entity = userEntitlementGrantService.grantManual(request);
         return R.ok(toDTO(entity));
@@ -51,6 +54,7 @@ public class AdminReferralController {
 
     @Operation(summary = "手工撤销资格")
     @PostMapping("/eligibility/revoke")
+    @PreAuthorize("hasAuthority('action.referral.eligibility.revoke')")
     public R<Void> revoke(@Valid @RequestBody UserEntitlementGrantRevokeRequestDTO request) {
         userEntitlementGrantService.revokeManual(request);
         return R.ok();
@@ -58,6 +62,7 @@ public class AdminReferralController {
 
     @Operation(summary = "延期资格过期")
     @PostMapping("/eligibility/extend")
+    @PreAuthorize("hasAuthority('action.referral.eligibility.extend')")
     public R<Void> extend(@Valid @RequestBody UserEntitlementGrantExtendRequestDTO request) {
         userEntitlementGrantService.extendGrant(request);
         return R.ok();

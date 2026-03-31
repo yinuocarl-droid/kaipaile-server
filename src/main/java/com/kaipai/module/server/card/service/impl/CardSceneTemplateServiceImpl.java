@@ -3,6 +3,9 @@ package com.kaipai.module.server.card.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.kaipai.common.auth.AdminAuthContext;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.card.dto.TemplateCreateDTO;
@@ -21,7 +24,9 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,6 +34,8 @@ import java.util.stream.Collectors;
 public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateMapper, CardSceneTemplate> implements CardSceneTemplateService {
 
     private final TemplatePublishLogService publishLogService;
+    private final AdminAuthContext adminAuthContext;
+    private final AdminOperationLogger adminOperationLogger;
 
     @Override
     public PageResult<TemplateItemDTO> adminTemplateList(TemplateListQueryDTO dto) {
@@ -54,6 +61,15 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         BeanUtils.copyProperties(dto, template);
         template.setStatus(1);
         save(template);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("content")
+                .operationCode("create")
+                .targetType("card_scene_template")
+                .targetId(template.getTemplateId())
+                .afterSnapshot(snapshot(template))
+                .extraContext(snapshot(template))
+                .operationResult(1)
+                .build());
     }
 
     @Override
@@ -62,9 +78,20 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         if (template == null) {
             throw new BizException("Template not found");
         }
+        Map<String, Object> beforeSnapshot = snapshot(template);
         BeanUtils.copyProperties(dto, template);
         template.setLastUpdate(LocalDateTime.now());
         updateById(template);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("content")
+                .operationCode("edit")
+                .targetType("card_scene_template")
+                .targetId(template.getTemplateId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(template))
+                .extraContext(snapshot(template))
+                .operationResult(1)
+                .build());
     }
 
     @Override
@@ -73,6 +100,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         if (template == null) {
             throw new BizException("Template not found");
         }
+        Map<String, Object> beforeSnapshot = snapshot(template);
         template.setStatus(1);
         updateById(template);
         TemplatePublishLog log = new TemplatePublishLog();
@@ -83,7 +111,18 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         log.setPublishNote(dto.getPublishNote());
         log.setPublishedAt(LocalDateTime.now());
         log.setActionType("publish");
+        log.setPublishedBy(adminAuthContext.getCurrentAdminUserId());
         publishLogService.recordPublishLog(log);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("content")
+                .operationCode("publish")
+                .targetType("card_scene_template")
+                .targetId(template.getTemplateId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(template))
+                .extraContext(publishContext(template, dto.getPublishVersion(), dto.getPublishNote(), "publish", null))
+                .operationResult(1)
+                .build());
     }
 
     @Override
@@ -92,6 +131,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         if (template == null) {
             throw new BizException("Template not found");
         }
+        Map<String, Object> beforeSnapshot = snapshot(template);
         template.setStatus(2);
         updateById(template);
         TemplatePublishLog log = new TemplatePublishLog();
@@ -104,6 +144,44 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         log.setPublishNote(dto.getPublishNote());
         log.setPublishedAt(LocalDateTime.now());
         log.setActionType("rollback");
+        log.setPublishedBy(adminAuthContext.getCurrentAdminUserId());
         publishLogService.recordPublishLog(log);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("content")
+                .operationCode("rollback")
+                .targetType("card_scene_template")
+                .targetId(template.getTemplateId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(template))
+                .extraContext(publishContext(template, dto.getSourceVersion(), dto.getPublishNote(), "rollback", dto.getSourceVersion()))
+                .operationResult(1)
+                .build());
+    }
+
+    private Map<String, Object> snapshot(CardSceneTemplate template) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("templateId", template.getTemplateId());
+        snapshot.put("templateCode", template.getTemplateCode());
+        snapshot.put("sceneKey", template.getSceneKey());
+        snapshot.put("templateName", template.getTemplateName());
+        snapshot.put("layoutVariant", template.getLayoutVariant());
+        snapshot.put("tier", template.getTier());
+        snapshot.put("requiredLevel", template.getRequiredLevel());
+        snapshot.put("membershipRequired", template.getMembershipRequired());
+        snapshot.put("status", template.getStatus());
+        snapshot.put("sortNo", template.getSortNo());
+        return snapshot;
+    }
+
+    private Map<String, Object> publishContext(CardSceneTemplate template, String publishVersion,
+                                               String publishNote, String actionType, String sourceVersion) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("template_id", template.getTemplateId());
+        context.put("template_code", template.getTemplateCode());
+        context.put("publish_version", publishVersion);
+        context.put("publish_note", publishNote);
+        context.put("action_type", actionType);
+        context.put("source_version", sourceVersion);
+        return context;
     }
 }

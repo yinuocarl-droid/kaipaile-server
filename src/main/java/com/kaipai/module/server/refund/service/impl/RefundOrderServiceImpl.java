@@ -3,20 +3,27 @@ package com.kaipai.module.server.refund.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.kaipai.common.auth.AdminAuthContext;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.ResultCode;
+import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.refund.dto.RefundApproveDTO;
 import com.kaipai.module.model.refund.dto.RefundOrderQueryDTO;
 import com.kaipai.module.model.refund.dto.RefundOrderRespDTO;
 import com.kaipai.module.model.refund.dto.RefundRejectDTO;
 import com.kaipai.module.model.refund.entity.RefundOperateLog;
 import com.kaipai.module.model.refund.entity.RefundOrder;
+import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.refund.mapper.RefundOrderMapper;
 import com.kaipai.module.server.refund.service.RefundOrderService;
 import com.kaipai.module.server.refund.service.RefundOperateLogService;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +35,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, RefundOrder> implements RefundOrderService {
 
     private final RefundOperateLogService refundOperateLogService;
+    private final PaymentOrderMapper paymentOrderMapper;
+    private final AdminAuthContext adminAuthContext;
+    private final AdminOperationLogger adminOperationLogger;
 
     @Override
     public PageResult<RefundOrderRespDTO> adminOrderList(RefundOrderQueryDTO query) {
@@ -61,12 +71,24 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         if (!Objects.equals(order.getAuditStatus(), 0)) {
             throw new BizException("退款单状态异常");
         }
+        Map<String, Object> beforeSnapshot = snapshot(order);
         order.setAuditStatus(1);
         order.setRefundStatus(1);
         order.setAuditRemark(dto.getAuditRemark());
+        order.setAuditorId(adminAuthContext.getCurrentAdminUserId());
         order.setAuditedAt(LocalDateTime.now());
         updateById(order);
         logOperate(order.getRefundOrderId(), "approve", dto.getAuditRemark());
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("refund")
+                .operationCode("approve")
+                .targetType("refund_order")
+                .targetId(order.getRefundOrderId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(order))
+                .extraContext(buildContext(order, paymentOrderMapper.selectById(order.getPaymentOrderId()), dto.getAuditRemark()))
+                .operationResult(1)
+                .build());
     }
 
     @Override
@@ -79,12 +101,24 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         if (!Objects.equals(order.getAuditStatus(), 0)) {
             throw new BizException("退款单状态异常");
         }
+        Map<String, Object> beforeSnapshot = snapshot(order);
         order.setAuditStatus(2);
         order.setRefundStatus(3);
         order.setAuditRemark(dto.getAuditRemark());
+        order.setAuditorId(adminAuthContext.getCurrentAdminUserId());
         order.setAuditedAt(LocalDateTime.now());
         updateById(order);
         logOperate(order.getRefundOrderId(), "reject", dto.getAuditRemark());
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("refund")
+                .operationCode("reject")
+                .targetType("refund_order")
+                .targetId(order.getRefundOrderId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(order))
+                .extraContext(buildContext(order, paymentOrderMapper.selectById(order.getPaymentOrderId()), dto.getAuditRemark()))
+                .operationResult(1)
+                .build());
     }
 
     private RefundOrderRespDTO toDto(RefundOrder order) {
@@ -107,9 +141,37 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
     private void logOperate(Long refundOrderId, String actionType, String remark) {
         RefundOperateLog log = new RefundOperateLog();
         log.setRefundOrderId(refundOrderId);
-        log.setOperatorId(0L);
+        log.setOperatorId(adminAuthContext.getCurrentAdminUserId());
         log.setActionType(actionType);
         log.setRemark(remark);
         refundOperateLogService.save(log);
+    }
+
+    private Map<String, Object> snapshot(RefundOrder order) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("refundOrderId", order.getRefundOrderId());
+        snapshot.put("refundNo", order.getRefundNo());
+        snapshot.put("paymentOrderId", order.getPaymentOrderId());
+        snapshot.put("userId", order.getUserId());
+        snapshot.put("refundAmount", order.getRefundAmount());
+        snapshot.put("auditStatus", order.getAuditStatus());
+        snapshot.put("refundStatus", order.getRefundStatus());
+        snapshot.put("auditRemark", order.getAuditRemark());
+        snapshot.put("auditorId", order.getAuditorId());
+        snapshot.put("auditedAt", order.getAuditedAt());
+        return snapshot;
+    }
+
+    private Map<String, Object> buildContext(RefundOrder order, PaymentOrder paymentOrder, String auditRemark) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("refund_order_id", order.getRefundOrderId());
+        context.put("refund_no", order.getRefundNo());
+        context.put("payment_order_id", order.getPaymentOrderId());
+        context.put("payment_order_no", paymentOrder == null ? null : paymentOrder.getOrderNo());
+        context.put("refund_amount", order.getRefundAmount());
+        context.put("audit_status_after", order.getAuditStatus());
+        context.put("channel_status", order.getRefundStatus());
+        context.put("audit_remark", auditRemark);
+        return context;
     }
 }

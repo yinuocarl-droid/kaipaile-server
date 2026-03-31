@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,12 +32,14 @@ public class AdminContentController {
 
     @Operation(summary = "模板列表")
     @GetMapping("/templates")
+    @PreAuthorize("hasAuthority('page.content.templates')")
     public R<PageResult<TemplateItemDTO>> list(@Valid TemplateListQueryDTO queryDTO) {
         return R.ok(templateService.adminTemplateList(queryDTO));
     }
 
     @Operation(summary = "新建模板")
     @PostMapping("/templates")
+    @PreAuthorize("hasAuthority('action.content.template.create')")
     public R<Void> create(@Valid @RequestBody TemplateCreateDTO dto) {
         templateService.createTemplate(dto);
         return R.ok();
@@ -44,6 +47,7 @@ public class AdminContentController {
 
     @Operation(summary = "更新模板")
     @PutMapping("/templates/{id}")
+    @PreAuthorize("hasAuthority('action.content.template.edit')")
     public R<Void> update(@PathVariable Long id, @Valid @RequestBody TemplateUpdateDTO dto) {
         dto.setTemplateId(id);
         templateService.updateTemplate(dto);
@@ -52,6 +56,7 @@ public class AdminContentController {
 
     @Operation(summary = "发布模板")
     @PostMapping("/templates/{id}/publish")
+    @PreAuthorize("hasAuthority('action.content.template.publish')")
     public R<Void> publish(@PathVariable Long id, @Valid @RequestBody TemplatePublishDTO dto) {
         dto.setTemplateId(id);
         templateService.publishTemplate(dto);
@@ -60,6 +65,7 @@ public class AdminContentController {
 
     @Operation(summary = "回滚模板")
     @PostMapping("/templates/{id}/rollback")
+    @PreAuthorize("hasAuthority('action.content.template.rollback')")
     public R<Void> rollback(@PathVariable Long id, @Valid @RequestBody TemplateRollbackDTO dto) {
         dto.setTemplateId(id);
         templateService.rollbackTemplate(dto);

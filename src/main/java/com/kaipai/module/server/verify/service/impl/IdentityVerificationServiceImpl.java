@@ -2,6 +2,9 @@ package com.kaipai.module.server.verify.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.kaipai.common.auth.AdminAuthContext;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
@@ -20,6 +23,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +35,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
 
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
+    private final AdminAuthContext adminAuthContext;
+    private final AdminOperationLogger adminOperationLogger;
 
     private static final int STATUS_PENDING = 1;
     private static final int STATUS_APPROVED = 2;
@@ -126,9 +132,10 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         if (currentStatus == null || currentStatus != STATUS_PENDING) {
             throw new BizException("只有待审核记录可以操作");
         }
+        Map<String, Object> beforeSnapshot = snapshot(record);
         record.setStatus(newStatus);
         record.setReviewedAt(LocalDateTime.now());
-        record.setReviewerId(0L);
+        record.setReviewerId(adminAuthContext.getCurrentAdminUserId());
         if (newStatus == STATUS_REJECTED) {
             record.setRejectReason(req.getRemark());
         } else {
@@ -147,5 +154,38 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             profile.setIsCertified(newStatus == STATUS_APPROVED);
             actorProfileMapper.updateById(profile);
         }
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("verify")
+                .operationCode(newStatus == STATUS_APPROVED ? "approve" : "reject")
+                .targetType("identity_verification")
+                .targetId(record.getVerificationId())
+                .beforeSnapshot(beforeSnapshot)
+                .afterSnapshot(snapshot(record))
+                .extraContext(buildExtraContext(record, req))
+                .operationResult(1)
+                .build());
+    }
+
+    private Map<String, Object> snapshot(IdentityVerification record) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("verificationId", record.getVerificationId());
+        snapshot.put("userId", record.getUserId());
+        snapshot.put("status", record.getStatus());
+        snapshot.put("reviewerId", record.getReviewerId());
+        snapshot.put("rejectReason", record.getRejectReason());
+        snapshot.put("reviewedAt", record.getReviewedAt());
+        return snapshot;
+    }
+
+    private Map<String, Object> buildExtraContext(IdentityVerification record, IdentityVerificationAuditReqDTO req) {
+        Map<String, Object> extraContext = new LinkedHashMap<>();
+        extraContext.put("verification_id", record.getVerificationId());
+        extraContext.put("apply_user_id", record.getUserId());
+        extraContext.put("verify_status_after", record.getStatus());
+        extraContext.put("audit_remark", req.getRemark());
+        if (record.getStatus() != null && record.getStatus() == STATUS_REJECTED) {
+            extraContext.put("reason", req.getRemark());
+        }
+        return extraContext;
     }
 }

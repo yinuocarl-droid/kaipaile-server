@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,12 +35,14 @@ public class AdminMembershipController {
 
     @Operation(summary = "会员商品列表")
     @GetMapping("/products")
+    @PreAuthorize("hasAuthority('page.membership.products')")
     public R<PageResult<MembershipProduct>> products(@Valid MembershipProductQueryDTO query) {
         return R.ok(membershipProductService.adminProductList(query));
     }
 
     @Operation(summary = "新建会员商品")
     @PostMapping("/products")
+    @PreAuthorize("hasAuthority('action.membership.product.create')")
     public R<Void> createProduct(@Valid @RequestBody MembershipProductCreateDTO dto) {
         membershipProductService.createProduct(dto);
         return R.ok();
@@ -47,12 +50,14 @@ public class AdminMembershipController {
 
     @Operation(summary = "会员账户列表")
     @GetMapping("/accounts")
+    @PreAuthorize("hasAuthority('page.membership.accounts')")
     public R<PageResult<MembershipAccount>> accounts(@Valid MembershipAccountQueryDTO query) {
         return R.ok(membershipAccountService.adminAccountList(query));
     }
 
     @Operation(summary = "手工开通会员")
     @PostMapping("/accounts/{userId}/open")
+    @PreAuthorize("hasAuthority('action.membership.account.open')")
     public R<Void> openAccount(@PathVariable Long userId, @Valid @RequestBody MembershipAccountOpenDTO dto) {
         membershipAccountService.openAccount(userId, dto);
         return R.ok();
@@ -60,6 +65,7 @@ public class AdminMembershipController {
 
     @Operation(summary = "手工延期会员")
     @PostMapping("/accounts/{userId}/extend")
+    @PreAuthorize("hasAuthority('action.membership.account.extend')")
     public R<Void> extendAccount(@PathVariable Long userId, @Valid @RequestBody MembershipAccountExtendDTO dto) {
         membershipAccountService.extendAccount(userId, dto);
         return R.ok();
@@ -67,6 +73,7 @@ public class AdminMembershipController {
 
     @Operation(summary = "手工关闭会员")
     @PostMapping("/accounts/{userId}/close")
+    @PreAuthorize("hasAuthority('action.membership.account.close')")
     public R<Void> closeAccount(@PathVariable Long userId, @Valid @RequestBody MembershipAccountCloseDTO dto) {
         membershipAccountService.closeAccount(userId, dto);
         return R.ok();

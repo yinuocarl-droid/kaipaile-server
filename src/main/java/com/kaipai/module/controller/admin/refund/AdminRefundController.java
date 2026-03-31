@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,12 +29,14 @@ public class AdminRefundController {
 
     @Operation(summary = "退款单列表")
     @GetMapping("/orders")
+    @PreAuthorize("hasAuthority('page.refund.orders')")
     public R<PageResult<RefundOrderRespDTO>> orders(@Valid RefundOrderQueryDTO query) {
         return R.ok(refundOrderService.adminOrderList(query));
     }
 
     @Operation(summary = "审核通过退款")
     @PostMapping("/{id}/approve")
+    @PreAuthorize("hasAuthority('action.refund.approve')")
     public R<Void> approve(@PathVariable Long id, @Valid @RequestBody RefundApproveDTO dto) {
         refundOrderService.approveRefund(id, dto);
         return R.ok();
@@ -41,6 +44,7 @@ public class AdminRefundController {
 
     @Operation(summary = "审核拒绝退款")
     @PostMapping("/{id}/reject")
+    @PreAuthorize("hasAuthority('action.refund.reject')")
     public R<Void> reject(@PathVariable Long id, @Valid @RequestBody RefundRejectDTO dto) {
         refundOrderService.rejectRefund(id, dto);
         return R.ok();

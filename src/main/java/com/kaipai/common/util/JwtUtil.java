@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Date;
 
 @Component
@@ -25,8 +26,26 @@ public class JwtUtil {
         Date expireDate = new Date(now.getTime() + (long) expireDays * 24 * 60 * 60 * 1000);
         return Jwts.builder()
                 .subject(String.valueOf(userId))
+                .claim("loginType", "USER")
                 .claim("phone", phone)
                 .claim("userType", userType)
+                .issuedAt(now)
+                .expiration(expireDate)
+                .signWith(getSecretKey())
+                .compact();
+    }
+
+    public String generateAdminToken(Long adminUserId, String account, String userName,
+                                     Collection<String> roleCodes, Collection<String> permissions) {
+        Date now = new Date();
+        Date expireDate = new Date(now.getTime() + (long) expireDays * 24 * 60 * 60 * 1000);
+        return Jwts.builder()
+                .subject(String.valueOf(adminUserId))
+                .claim("loginType", "ADMIN")
+                .claim("account", account)
+                .claim("userName", userName)
+                .claim("roleCodes", roleCodes)
+                .claim("permissions", permissions)
                 .issuedAt(now)
                 .expiration(expireDate)
                 .signWith(getSecretKey())
