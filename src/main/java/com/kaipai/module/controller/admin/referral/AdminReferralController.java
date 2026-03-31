@@ -2,6 +2,10 @@ package com.kaipai.module.controller.admin.referral;
 
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
+import com.kaipai.module.model.referral.dto.AdminReferralRiskDecisionDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRiskDetailDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRiskQueryDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantExtendRequestDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantGrantRequestDTO;
 import com.kaipai.module.model.referral.dto.UserEntitlementGrantItemDTO;
@@ -19,6 +23,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,6 +40,44 @@ public class AdminReferralController {
     private final ReferralPolicyService referralPolicyService;
     private final UserEntitlementGrantService userEntitlementGrantService;
     private final EntitlementRuleService entitlementRuleService;
+
+    @Operation(summary = "异常邀请列表")
+    @GetMapping("/risk/list")
+    @PreAuthorize("hasAuthority('page.referral.risk')")
+    public R<PageResult<AdminReferralRiskItemDTO>> riskList(@Valid AdminReferralRiskQueryDTO query) {
+        return R.ok(referralRecordService.adminRiskList(query));
+    }
+
+    @Operation(summary = "异常邀请详情")
+    @GetMapping("/risk/{id}")
+    @PreAuthorize("hasAuthority('page.referral.risk')")
+    public R<AdminReferralRiskDetailDTO> riskDetail(@PathVariable Long id) {
+        return R.ok(referralRecordService.adminRiskDetail(id));
+    }
+
+    @Operation(summary = "异常邀请通过")
+    @PostMapping("/risk/{id}/approve")
+    @PreAuthorize("hasAuthority('action.referral.risk.approve')")
+    public R<Void> approveRisk(@PathVariable Long id, @RequestBody(required = false) AdminReferralRiskDecisionDTO request) {
+        referralRecordService.approveRisk(id, request == null ? new AdminReferralRiskDecisionDTO() : request);
+        return R.ok();
+    }
+
+    @Operation(summary = "异常邀请作废")
+    @PostMapping("/risk/{id}/invalidate")
+    @PreAuthorize("hasAuthority('action.referral.risk.invalidate')")
+    public R<Void> invalidateRisk(@PathVariable Long id, @RequestBody(required = false) AdminReferralRiskDecisionDTO request) {
+        referralRecordService.invalidateRisk(id, request == null ? new AdminReferralRiskDecisionDTO() : request);
+        return R.ok();
+    }
+
+    @Operation(summary = "标记异常邀请复核完成")
+    @PostMapping("/risk/{id}/resolve")
+    @PreAuthorize("hasAuthority('action.referral.risk.resolve')")
+    public R<Void> resolveRisk(@PathVariable Long id, @RequestBody(required = false) AdminReferralRiskDecisionDTO request) {
+        referralRecordService.resolveRisk(id, request == null ? new AdminReferralRiskDecisionDTO() : request);
+        return R.ok();
+    }
 
     @Operation(summary = "资格列表")
     @GetMapping("/eligibility")
