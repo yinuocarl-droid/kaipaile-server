@@ -10,6 +10,8 @@ public class MembershipProductQueryDTO {
     private int pageNo = 1;
     @Min(1)
     private int pageSize = 20;
+    private String productCode;
+    private String productName;
     private Integer membershipTier;
     private Integer status;
 }

@@ -12,6 +12,9 @@ import com.kaipai.module.model.membership.dto.MembershipChangeLogItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipChangeLogQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductQueryDTO;
+import com.kaipai.module.model.membership.dto.MembershipProductSortDTO;
+import com.kaipai.module.model.membership.dto.MembershipProductStatusChangeDTO;
+import com.kaipai.module.model.membership.dto.MembershipProductUpdateDTO;
 import com.kaipai.module.model.membership.entity.MembershipProduct;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.membership.service.MembershipChangeLogService;
@@ -24,6 +27,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -45,11 +49,50 @@ public class AdminMembershipController {
         return R.ok(membershipProductService.adminProductList(query));
     }
 
+    @Operation(summary = "会员商品详情")
+    @GetMapping("/products/{id}")
+    @PreAuthorize("hasAuthority('page.membership.products')")
+    public R<MembershipProduct> productDetail(@PathVariable Long id) {
+        return R.ok(membershipProductService.adminProductDetail(id));
+    }
+
     @Operation(summary = "新建会员商品")
     @PostMapping("/products")
     @PreAuthorize("hasAuthority('action.membership.product.create')")
     public R<Void> createProduct(@Valid @RequestBody MembershipProductCreateDTO dto) {
         membershipProductService.createProduct(dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "更新会员商品")
+    @PutMapping("/products/{id}")
+    @PreAuthorize("hasAuthority('action.membership.product.edit')")
+    public R<Void> updateProduct(@PathVariable Long id, @Valid @RequestBody MembershipProductUpdateDTO dto) {
+        membershipProductService.updateProduct(id, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "启用会员商品")
+    @PostMapping("/products/{id}/enable")
+    @PreAuthorize("hasAuthority('action.membership.product.enable')")
+    public R<Void> enableProduct(@PathVariable Long id, @RequestBody(required = false) MembershipProductStatusChangeDTO dto) {
+        membershipProductService.enableProduct(id, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "停用会员商品")
+    @PostMapping("/products/{id}/disable")
+    @PreAuthorize("hasAuthority('action.membership.product.disable')")
+    public R<Void> disableProduct(@PathVariable Long id, @RequestBody(required = false) MembershipProductStatusChangeDTO dto) {
+        membershipProductService.disableProduct(id, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "调整会员商品排序")
+    @PostMapping("/products/{id}/sort")
+    @PreAuthorize("hasAuthority('action.membership.product.sort')")
+    public R<Void> sortProduct(@PathVariable Long id, @Valid @RequestBody MembershipProductSortDTO dto) {
+        membershipProductService.sortProduct(id, dto);
         return R.ok();
     }
 
