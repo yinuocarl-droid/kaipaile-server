@@ -8,17 +8,22 @@ import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordDetailDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordItemDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordQueryDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDecisionDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskQueryDTO;
 import com.kaipai.module.model.referral.entity.InviteCode;
 import com.kaipai.module.model.referral.entity.ReferralRecord;
+import com.kaipai.module.model.referral.entity.UserEntitlementGrant;
 import com.kaipai.module.model.system.entity.AdminOperationLog;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.referral.mapper.InviteCodeMapper;
 import com.kaipai.module.server.referral.mapper.ReferralRecordMapper;
+import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
 import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.system.mapper.AdminOperationLogMapper;
 import com.kaipai.module.server.user.mapper.UserMapper;
@@ -52,8 +57,63 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
     private final InviteCodeMapper inviteCodeMapper;
+    private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
     private final AdminOperationLogger adminOperationLogger;
+
+    @Override
+    public PageResult<AdminReferralRecordItemDTO> adminRecordList(AdminReferralRecordQueryDTO query) {
+        Page<ReferralRecord> page = new Page<>(query.getPageNo(), query.getPageSize());
+        LambdaQueryWrapper<ReferralRecord> wrapper = buildRecordQuery(query);
+        wrapper.orderByDesc(ReferralRecord::getRegisteredAt).orderByDesc(ReferralRecord::getReferralId);
+        Page<ReferralRecord> result = page(page, wrapper);
+        if (result.getRecords().isEmpty()) {
+            return PageResult.empty();
+        }
+
+        Set<Long> userIds = new LinkedHashSet<>();
+        result.getRecords().forEach(record -> {
+            userIds.add(record.getInviterUserId());
+            userIds.add(record.getInviteeUserId());
+        });
+        Map<Long, User> userMap = userIds.isEmpty()
+                ? Collections.emptyMap()
+                : userMapper.selectBatchIds(userIds).stream().collect(Collectors.toMap(User::getUserId, Function.identity()));
+        Map<Long, ActorProfile> actorProfileMap = userIds.isEmpty()
+                ? Collections.emptyMap()
+                : actorProfileMapper.selectList(new LambdaQueryWrapper<ActorProfile>().in(ActorProfile::getUserId, userIds))
+                .stream()
+                .collect(Collectors.toMap(ActorProfile::getUserId, Function.identity(), (left, right) -> left));
+
+        List<AdminReferralRecordItemDTO> list = result.getRecords().stream()
+                .map(record -> toRecordItem(record, userMap, actorProfileMap))
+                .toList();
+        return new PageResult<>(result.getTotal(), list);
+    }
+
+    @Override
+    public AdminReferralRecordDetailDTO adminRecordDetail(Long referralId) {
+        ReferralRecord record = getById(referralId);
+        if (record == null) {
+            throw new BizException("邀请记录不存在");
+        }
+        User inviter = userMapper.selectById(record.getInviterUserId());
+        User invitee = userMapper.selectById(record.getInviteeUserId());
+        ActorProfile inviterProfile = selectActorProfile(record.getInviterUserId());
+        ActorProfile inviteeProfile = selectActorProfile(record.getInviteeUserId());
+        List<UserEntitlementGrant> grants = userEntitlementGrantMapper.selectList(new LambdaQueryWrapper<UserEntitlementGrant>()
+                .eq(UserEntitlementGrant::getUserId, record.getInviteeUserId())
+                .orderByDesc(UserEntitlementGrant::getCreateTime)
+                .orderByDesc(UserEntitlementGrant::getGrantId)
+                .last("limit 10"));
+
+        AdminReferralRecordDetailDTO detail = new AdminReferralRecordDetailDTO();
+        detail.setRecordInfo(toRecordDetailInfo(record));
+        detail.setInviterInfo(toRecordUserInfo(inviter, inviterProfile));
+        detail.setInviteeInfo(toRecordUserInfo(invitee, inviteeProfile));
+        detail.setRiskInfo(buildRecordRiskInfo(record, grants));
+        return detail;
+    }
 
     @Override
     public PageResult<AdminReferralRiskItemDTO> adminRiskList(AdminReferralRiskQueryDTO query) {
@@ -173,6 +233,55 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         return wrapper;
     }
 
+    private LambdaQueryWrapper<ReferralRecord> buildRecordQuery(AdminReferralRecordQueryDTO query) {
+        LambdaQueryWrapper<ReferralRecord> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(query.getInviteCode())) {
+            wrapper.eq(ReferralRecord::getInviteCodeSnapshot, query.getInviteCode().trim());
+        }
+        if (query.getInviterUserId() != null) {
+            wrapper.eq(ReferralRecord::getInviterUserId, query.getInviterUserId());
+        }
+        if (query.getInviteeUserId() != null) {
+            wrapper.eq(ReferralRecord::getInviteeUserId, query.getInviteeUserId());
+        }
+        if (query.getStatus() != null) {
+            wrapper.eq(ReferralRecord::getStatus, query.getStatus());
+        }
+        if (query.getRiskFlag() != null) {
+            wrapper.eq(ReferralRecord::getRiskFlag, query.getRiskFlag());
+        }
+        if (query.getRegisteredAtFrom() != null) {
+            wrapper.ge(ReferralRecord::getRegisteredAt, query.getRegisteredAtFrom());
+        }
+        if (query.getRegisteredAtTo() != null) {
+            wrapper.le(ReferralRecord::getRegisteredAt, query.getRegisteredAtTo());
+        }
+        if (query.getValidatedAtFrom() != null) {
+            wrapper.ge(ReferralRecord::getValidatedAt, query.getValidatedAtFrom());
+        }
+        if (query.getValidatedAtTo() != null) {
+            wrapper.le(ReferralRecord::getValidatedAt, query.getValidatedAtTo());
+        }
+        return wrapper;
+    }
+
+    private AdminReferralRecordItemDTO toRecordItem(ReferralRecord record,
+                                                    Map<Long, User> userMap,
+                                                    Map<Long, ActorProfile> actorProfileMap) {
+        AdminReferralRecordItemDTO item = new AdminReferralRecordItemDTO();
+        item.setReferralId(record.getReferralId());
+        item.setInviterUserId(record.getInviterUserId());
+        item.setInviterName(resolveDisplayName(userMap.get(record.getInviterUserId()), actorProfileMap.get(record.getInviterUserId())));
+        item.setInviteCode(record.getInviteCodeSnapshot());
+        item.setInviteeUserId(record.getInviteeUserId());
+        item.setInviteeName(resolveDisplayName(userMap.get(record.getInviteeUserId()), actorProfileMap.get(record.getInviteeUserId())));
+        item.setStatus(record.getStatus());
+        item.setRiskFlag(record.getRiskFlag());
+        item.setRegisteredAt(record.getRegisteredAt());
+        item.setValidatedAt(record.getValidatedAt());
+        return item;
+    }
+
     private AdminReferralRiskItemDTO toRiskItem(ReferralRecord record,
                                                 Map<Long, User> userMap,
                                                 Map<Long, ActorProfile> actorProfileMap) {
@@ -206,6 +315,20 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         return info;
     }
 
+    private AdminReferralRecordDetailDTO.RecordInfo toRecordDetailInfo(ReferralRecord record) {
+        AdminReferralRecordDetailDTO.RecordInfo info = new AdminReferralRecordDetailDTO.RecordInfo();
+        info.setReferralId(record.getReferralId());
+        info.setInviteCode(record.getInviteCodeSnapshot());
+        info.setInviteCodeId(record.getInviteCodeId());
+        info.setStatus(record.getStatus());
+        info.setRiskFlag(record.getRiskFlag());
+        info.setRiskReason(record.getRiskReason());
+        info.setRegisterDeviceFingerprint(record.getRegisterDeviceFingerprint());
+        info.setRegisteredAt(record.getRegisteredAt());
+        info.setValidatedAt(record.getValidatedAt());
+        return info;
+    }
+
     private AdminReferralRiskDetailDTO.UserInfo toUserInfo(User user, ActorProfile actorProfile) {
         if (user == null && actorProfile == null) {
             return null;
@@ -220,11 +343,40 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         return info;
     }
 
+    private AdminReferralRecordDetailDTO.UserInfo toRecordUserInfo(User user, ActorProfile actorProfile) {
+        if (user == null && actorProfile == null) {
+            return null;
+        }
+        AdminReferralRecordDetailDTO.UserInfo info = new AdminReferralRecordDetailDTO.UserInfo();
+        info.setUserId(user == null ? actorProfile.getUserId() : user.getUserId());
+        info.setUserName(user == null ? null : user.getUserName());
+        info.setPhone(user == null ? null : user.getPhone());
+        info.setNickname(actorProfile != null && StringUtils.hasText(actorProfile.getNickName()) ? actorProfile.getNickName() : user == null ? null : user.getUserName());
+        info.setRealAuthStatus(user == null ? null : user.getRealAuthStatus());
+        info.setValidInviteCount(user == null ? null : user.getValidInviteCount());
+        return info;
+    }
+
     private AdminReferralRiskDetailDTO.RiskInfo toRiskInfo(ReferralRecord record) {
         AdminReferralRiskDetailDTO.RiskInfo info = new AdminReferralRiskDetailDTO.RiskInfo();
         info.setCurrentStatus(record.getStatus());
         info.setRiskFlag(record.getRiskFlag());
         info.setRiskReason(record.getRiskReason());
+        return info;
+    }
+
+    private AdminReferralRecordDetailDTO.RiskInfo buildRecordRiskInfo(ReferralRecord record, List<UserEntitlementGrant> grants) {
+        AdminReferralRecordDetailDTO.RiskInfo info = new AdminReferralRecordDetailDTO.RiskInfo();
+        info.setStatus(record.getStatus());
+        info.setRiskFlag(record.getRiskFlag());
+        info.setRiskReason(record.getRiskReason());
+        info.setRegisterDeviceFingerprint(record.getRegisterDeviceFingerprint());
+        info.setSameDeviceHitCount(buildDeviceHitSummary(record).getHitCount());
+        info.setRelatedGrantCodes(grants.stream()
+                .map(UserEntitlementGrant::getGrantCode)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList());
         return info;
     }
 

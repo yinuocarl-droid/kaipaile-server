@@ -2,6 +2,9 @@ package com.kaipai.module.controller.admin.referral;
 
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordDetailDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordItemDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralRecordQueryDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDecisionDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
@@ -40,6 +43,20 @@ public class AdminReferralController {
     private final ReferralPolicyService referralPolicyService;
     private final UserEntitlementGrantService userEntitlementGrantService;
     private final EntitlementRuleService entitlementRuleService;
+
+    @Operation(summary = "邀请记录列表")
+    @GetMapping("/records")
+    @PreAuthorize("hasAuthority('page.referral.records')")
+    public R<PageResult<AdminReferralRecordItemDTO>> recordList(@Valid AdminReferralRecordQueryDTO query) {
+        return R.ok(referralRecordService.adminRecordList(query));
+    }
+
+    @Operation(summary = "邀请记录详情")
+    @GetMapping({"/records/{id}", "/{id}"})
+    @PreAuthorize("hasAuthority('page.referral.records')")
+    public R<AdminReferralRecordDetailDTO> recordDetail(@PathVariable Long id) {
+        return R.ok(referralRecordService.adminRecordDetail(id));
+    }
 
     @Operation(summary = "异常邀请列表")
     @GetMapping("/risk/list")
