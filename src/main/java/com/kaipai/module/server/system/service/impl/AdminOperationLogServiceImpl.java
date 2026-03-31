@@ -32,8 +32,20 @@ public class AdminOperationLogServiceImpl extends ServiceImpl<AdminOperationLogM
         if (StringUtils.hasText(query.getOperationCode())) {
             wrapper.eq(AdminOperationLog::getOperationCode, query.getOperationCode().trim());
         }
+        if (StringUtils.hasText(query.getTargetType())) {
+            wrapper.eq(AdminOperationLog::getTargetType, query.getTargetType().trim());
+        }
+        if (StringUtils.hasText(query.getRequestId())) {
+            wrapper.eq(AdminOperationLog::getRequestId, query.getRequestId().trim());
+        }
         if (query.getResult() != null) {
             wrapper.eq(AdminOperationLog::getOperationResult, query.getResult());
+        }
+        if (query.getDateFrom() != null) {
+            wrapper.ge(AdminOperationLog::getCreateTime, query.getDateFrom());
+        }
+        if (query.getDateTo() != null) {
+            wrapper.le(AdminOperationLog::getCreateTime, query.getDateTo());
         }
         wrapper.orderByDesc(AdminOperationLog::getCreateTime).orderByDesc(AdminOperationLog::getOperationLogId);
         Page<AdminOperationLog> result = page(page, wrapper);

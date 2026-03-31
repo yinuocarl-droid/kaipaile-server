@@ -10,14 +10,20 @@ import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.system.dto.AdminRoleCopyDTO;
 import com.kaipai.module.model.system.dto.AdminRoleQueryDTO;
 import com.kaipai.module.model.system.dto.AdminRoleRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleSaveDTO;
+import com.kaipai.module.model.system.dto.AdminRoleStatusChangeDTO;
 import com.kaipai.module.model.system.entity.AdminRole;
+import com.kaipai.module.model.system.entity.AdminUserRole;
 import com.kaipai.module.server.system.mapper.AdminRoleMapper;
 import com.kaipai.module.server.system.service.AdminRoleService;
+import com.kaipai.module.server.system.service.AdminUserRoleService;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -32,6 +38,7 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
 
     private final ObjectMapper objectMapper;
     private final AdminOperationLogger adminOperationLogger;
+    private final AdminUserRoleService adminUserRoleService;
 
     @Override
     public PageResult<AdminRoleRespDTO> adminRoleList(AdminRoleQueryDTO query) {
@@ -51,6 +58,15 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         Page<AdminRole> result = page(page, wrapper);
         List<AdminRoleRespDTO> list = result.getRecords().stream().map(this::toResp).toList();
         return new PageResult<>(result.getTotal(), list);
+    }
+
+    @Override
+    public AdminRoleRespDTO adminRoleDetail(Long adminRoleId) {
+        AdminRole role = getById(adminRoleId);
+        if (role == null) {
+            throw new BizException("后台角色不存在");
+        }
+        return toResp(role);
     }
 
     @Override
@@ -97,6 +113,70 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
                 .operationResult(1)
                 .build());
         return toResp(getById(adminRoleId));
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO changeRoleStatus(AdminRoleStatusChangeDTO dto) {
+        AdminRole role = getById(dto.getAdminRoleId());
+        if (role == null) {
+            throw new BizException("后台角色不存在");
+        }
+        Integer beforeStatus = role.getStatus();
+        Integer targetStatus = dto.getStatus();
+        if (targetStatus == null || !List.of(1, 2).contains(targetStatus)) {
+            throw new BizException("角色状态不合法");
+        }
+        if (beforeStatus != null && beforeStatus.equals(targetStatus)) {
+            throw new BizException("角色当前状态已是目标状态");
+        }
+        AdminRole beforeRole = copyRole(role);
+        role.setStatus(targetStatus);
+        role.setRemark(dto.getReason());
+        updateById(role);
+        long boundCount = adminUserRoleService.lambdaQuery()
+                .eq(AdminUserRole::getAdminRoleId, role.getAdminRoleId())
+                .count();
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode(targetStatus == 1 ? "enable" : "disable")
+                .targetType("admin_role")
+                .targetId(role.getAdminRoleId())
+                .beforeSnapshot(snapshot(beforeRole))
+                .afterSnapshot(snapshot(role))
+                .extraContext(buildStatusContext(role, beforeStatus, targetStatus, boundCount, dto.getReason()))
+                .operationResult(1)
+                .build());
+        return toResp(getById(role.getAdminRoleId()));
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO copyRole(AdminRoleCopyDTO dto) {
+        AdminRole source = getById(dto.getSourceRoleId());
+        if (source == null) {
+            throw new BizException("源角色不存在");
+        }
+        ensureRoleCodeUnique(dto.getRoleCode(), null);
+        AdminRole copy = new AdminRole();
+        copy.setRoleCode(dto.getRoleCode().trim());
+        copy.setRoleName(dto.getRoleName().trim());
+        copy.setRemark(dto.getRemark());
+        copy.setStatus(1);
+        copy.setMenuPermissionsJson(source.getMenuPermissionsJson());
+        copy.setPagePermissionsJson(source.getPagePermissionsJson());
+        copy.setActionPermissionsJson(source.getActionPermissionsJson());
+        save(copy);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("copy")
+                .targetType("admin_role")
+                .targetId(copy.getAdminRoleId())
+                .afterSnapshot(snapshot(copy))
+                .extraContext(buildCopyContext(source, copy))
+                .operationResult(1)
+                .build());
+        return toResp(copy);
     }
 
     private void ensureRoleCodeUnique(String roleCode, Long excludeRoleId) {
@@ -157,5 +237,32 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
 
     private AdminRoleRespDTO snapshot(AdminRole role) {
         return toResp(role);
+    }
+
+    private Map<String, Object> buildStatusContext(AdminRole role, Integer before, Integer after,
+                                                   long boundCount, String reason) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("role_id", role.getAdminRoleId());
+        context.put("role_code", role.getRoleCode());
+        context.put("status_before", before);
+        context.put("status_after", after);
+        context.put("bound_admin_user_count", boundCount);
+        context.put("reason", reason);
+        context.put("menu_permissions_snapshot", role.getMenuPermissionsJson());
+        context.put("page_permissions_snapshot", role.getPagePermissionsJson());
+        context.put("action_permissions_snapshot", role.getActionPermissionsJson());
+        return context;
+    }
+
+    private Map<String, Object> buildCopyContext(AdminRole source, AdminRole copy) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("source_role_id", source.getAdminRoleId());
+        context.put("source_role_code", source.getRoleCode());
+        context.put("new_role_id", copy.getAdminRoleId());
+        context.put("new_role_code", copy.getRoleCode());
+        context.put("menu_permissions_snapshot", copy.getMenuPermissionsJson());
+        context.put("page_permissions_snapshot", copy.getPagePermissionsJson());
+        context.put("action_permissions_snapshot", copy.getActionPermissionsJson());
+        return context;
     }
 }
