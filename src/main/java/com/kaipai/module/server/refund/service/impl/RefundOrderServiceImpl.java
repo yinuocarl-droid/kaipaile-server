@@ -11,6 +11,7 @@ import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.refund.dto.RefundApproveDTO;
+import com.kaipai.module.model.refund.dto.RefundOrderDetailDTO;
 import com.kaipai.module.model.refund.dto.RefundOrderQueryDTO;
 import com.kaipai.module.model.refund.dto.RefundOrderRespDTO;
 import com.kaipai.module.model.refund.dto.RefundRejectDTO;
@@ -59,6 +60,38 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         Page<RefundOrder> result = page(page, wrapper);
         List<RefundOrderRespDTO> records = result.getRecords().stream().map(this::toDto).collect(Collectors.toList());
         return new PageResult<>(result.getTotal(), records);
+    }
+
+    @Override
+    public RefundOrderDetailDTO adminOrderDetail(Long refundOrderId) {
+        RefundOrder order = getById(refundOrderId);
+        if (order == null) {
+            throw new BizException("退款单不存在");
+        }
+        PaymentOrder paymentOrder = paymentOrderMapper.selectById(order.getPaymentOrderId());
+        RefundOrderDetailDTO dto = new RefundOrderDetailDTO();
+        dto.setRefundOrderId(order.getRefundOrderId());
+        dto.setRefundNo(order.getRefundNo());
+        dto.setPaymentOrderId(order.getPaymentOrderId());
+        dto.setPaymentOrderNo(paymentOrder == null ? null : paymentOrder.getOrderNo());
+        dto.setUserId(order.getUserId());
+        dto.setRefundAmount(order.getRefundAmount());
+        dto.setRefundReason(order.getRefundReason());
+        dto.setAuditStatus(order.getAuditStatus());
+        dto.setRefundStatus(order.getRefundStatus());
+        dto.setAuditRemark(order.getAuditRemark());
+        dto.setAuditorId(order.getAuditorId());
+        dto.setAuditedAt(order.getAuditedAt());
+        dto.setChannelRefundNo(order.getChannelRefundNo());
+        dto.setRefundedAt(order.getRefundedAt());
+        if (paymentOrder != null) {
+            dto.setPaymentAmount(paymentOrder.getAmount());
+            dto.setPaymentStatus(paymentOrder.getPayStatus());
+            dto.setPayChannel(paymentOrder.getPayChannel());
+            dto.setPaidAt(paymentOrder.getPaidAt());
+        }
+        dto.setOperateLogs(refundOperateLogService.listByRefundOrderId(refundOrderId));
+        return dto;
     }
 
     @Override
