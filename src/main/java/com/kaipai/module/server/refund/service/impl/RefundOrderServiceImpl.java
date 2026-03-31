@@ -22,6 +22,7 @@ import com.kaipai.module.server.refund.mapper.RefundOrderMapper;
 import com.kaipai.module.server.refund.service.RefundOrderService;
 import com.kaipai.module.server.refund.service.RefundOperateLogService;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -44,8 +46,21 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
     public PageResult<RefundOrderRespDTO> adminOrderList(RefundOrderQueryDTO query) {
         Page<RefundOrder> page = new Page<>(query.getPageNo(), query.getPageSize());
         LambdaQueryWrapper<RefundOrder> wrapper = new LambdaQueryWrapper<>();
-        if (query.getRefundNo() != null) {
-            wrapper.eq(RefundOrder::getRefundNo, query.getRefundNo());
+        if (StringUtils.hasText(query.getRefundNo())) {
+            wrapper.eq(RefundOrder::getRefundNo, query.getRefundNo().trim());
+        }
+        if (StringUtils.hasText(query.getPaymentOrderNo())) {
+            List<Long> paymentOrderIds = paymentOrderMapper.selectList(new LambdaQueryWrapper<PaymentOrder>()
+                            .select(PaymentOrder::getPaymentOrderId)
+                            .like(PaymentOrder::getOrderNo, query.getPaymentOrderNo().trim()))
+                    .stream()
+                    .map(PaymentOrder::getPaymentOrderId)
+                    .toList();
+            if (paymentOrderIds.isEmpty()) {
+                wrapper.in(RefundOrder::getRefundOrderId, Collections.singleton(-1L));
+            } else {
+                wrapper.in(RefundOrder::getPaymentOrderId, paymentOrderIds);
+            }
         }
         if (query.getUserId() != null) {
             wrapper.eq(RefundOrder::getUserId, query.getUserId());
@@ -56,9 +71,32 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         if (query.getRefundStatus() != null) {
             wrapper.eq(RefundOrder::getRefundStatus, query.getRefundStatus());
         }
+        if (query.getCreatedAtFrom() != null) {
+            wrapper.ge(RefundOrder::getCreateTime, query.getCreatedAtFrom());
+        }
+        if (query.getCreatedAtTo() != null) {
+            wrapper.le(RefundOrder::getCreateTime, query.getCreatedAtTo());
+        }
+        if (query.getAuditedAtFrom() != null) {
+            wrapper.ge(RefundOrder::getAuditedAt, query.getAuditedAtFrom());
+        }
+        if (query.getAuditedAtTo() != null) {
+            wrapper.le(RefundOrder::getAuditedAt, query.getAuditedAtTo());
+        }
         wrapper.orderByDesc(RefundOrder::getCreateTime);
         Page<RefundOrder> result = page(page, wrapper);
-        List<RefundOrderRespDTO> records = result.getRecords().stream().map(this::toDto).collect(Collectors.toList());
+        Map<Long, PaymentOrder> paymentOrderMap = result.getRecords().stream()
+                .map(RefundOrder::getPaymentOrderId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.collectingAndThen(Collectors.toList(),
+                        ids -> ids.isEmpty()
+                                ? Collections.<Long, PaymentOrder>emptyMap()
+                                : paymentOrderMapper.selectBatchIds(ids).stream()
+                                .collect(Collectors.toMap(PaymentOrder::getPaymentOrderId, paymentOrder -> paymentOrder))));
+        List<RefundOrderRespDTO> records = result.getRecords().stream()
+                .map(order -> toDto(order, paymentOrderMap.get(order.getPaymentOrderId())))
+                .collect(Collectors.toList());
         return new PageResult<>(result.getTotal(), records);
     }
 
@@ -70,26 +108,8 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         }
         PaymentOrder paymentOrder = paymentOrderMapper.selectById(order.getPaymentOrderId());
         RefundOrderDetailDTO dto = new RefundOrderDetailDTO();
-        dto.setRefundOrderId(order.getRefundOrderId());
-        dto.setRefundNo(order.getRefundNo());
-        dto.setPaymentOrderId(order.getPaymentOrderId());
-        dto.setPaymentOrderNo(paymentOrder == null ? null : paymentOrder.getOrderNo());
-        dto.setUserId(order.getUserId());
-        dto.setRefundAmount(order.getRefundAmount());
-        dto.setRefundReason(order.getRefundReason());
-        dto.setAuditStatus(order.getAuditStatus());
-        dto.setRefundStatus(order.getRefundStatus());
-        dto.setAuditRemark(order.getAuditRemark());
-        dto.setAuditorId(order.getAuditorId());
-        dto.setAuditedAt(order.getAuditedAt());
-        dto.setChannelRefundNo(order.getChannelRefundNo());
-        dto.setRefundedAt(order.getRefundedAt());
-        if (paymentOrder != null) {
-            dto.setPaymentAmount(paymentOrder.getAmount());
-            dto.setPaymentStatus(paymentOrder.getPayStatus());
-            dto.setPayChannel(paymentOrder.getPayChannel());
-            dto.setPaidAt(paymentOrder.getPaidAt());
-        }
+        dto.setRefundInfo(toRefundInfo(order));
+        dto.setPaymentOrderInfo(toPaymentOrderInfo(paymentOrder));
         dto.setOperateLogs(refundOperateLogService.listByRefundOrderId(refundOrderId));
         return dto;
     }
@@ -154,21 +174,56 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
                 .build());
     }
 
-    private RefundOrderRespDTO toDto(RefundOrder order) {
+    private RefundOrderRespDTO toDto(RefundOrder order, PaymentOrder paymentOrder) {
         RefundOrderRespDTO dto = new RefundOrderRespDTO();
         dto.setRefundOrderId(order.getRefundOrderId());
         dto.setRefundNo(order.getRefundNo());
         dto.setPaymentOrderId(order.getPaymentOrderId());
+        dto.setPaymentOrderNo(paymentOrder == null ? null : paymentOrder.getOrderNo());
         dto.setUserId(order.getUserId());
         dto.setRefundAmount(order.getRefundAmount());
         dto.setAuditStatus(order.getAuditStatus());
         dto.setRefundStatus(order.getRefundStatus());
         dto.setRefundReason(order.getRefundReason());
         dto.setAuditRemark(order.getAuditRemark());
+        dto.setCreateTime(order.getCreateTime());
         dto.setAuditedAt(order.getAuditedAt());
         dto.setChannelRefundNo(order.getChannelRefundNo());
         dto.setRefundedAt(order.getRefundedAt());
         return dto;
+    }
+
+    private RefundOrderDetailDTO.RefundInfo toRefundInfo(RefundOrder order) {
+        RefundOrderDetailDTO.RefundInfo info = new RefundOrderDetailDTO.RefundInfo();
+        info.setRefundOrderId(order.getRefundOrderId());
+        info.setRefundNo(order.getRefundNo());
+        info.setPaymentOrderId(order.getPaymentOrderId());
+        info.setUserId(order.getUserId());
+        info.setRefundAmount(order.getRefundAmount());
+        info.setRefundReason(order.getRefundReason());
+        info.setAuditStatus(order.getAuditStatus());
+        info.setRefundStatus(order.getRefundStatus());
+        info.setAuditRemark(order.getAuditRemark());
+        info.setAuditorId(order.getAuditorId());
+        info.setCreateTime(order.getCreateTime());
+        info.setAuditedAt(order.getAuditedAt());
+        info.setChannelRefundNo(order.getChannelRefundNo());
+        info.setRefundedAt(order.getRefundedAt());
+        return info;
+    }
+
+    private RefundOrderDetailDTO.PaymentOrderInfo toPaymentOrderInfo(PaymentOrder paymentOrder) {
+        if (paymentOrder == null) {
+            return null;
+        }
+        RefundOrderDetailDTO.PaymentOrderInfo info = new RefundOrderDetailDTO.PaymentOrderInfo();
+        info.setPaymentOrderId(paymentOrder.getPaymentOrderId());
+        info.setPaymentOrderNo(paymentOrder.getOrderNo());
+        info.setPaymentAmount(paymentOrder.getAmount());
+        info.setPaymentStatus(paymentOrder.getPayStatus());
+        info.setPayChannel(paymentOrder.getPayChannel());
+        info.setPaidAt(paymentOrder.getPaidAt());
+        return info;
     }
 
     private void logOperate(Long refundOrderId, String actionType, String remark) {

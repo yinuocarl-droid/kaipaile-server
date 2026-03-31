@@ -9,43 +9,56 @@ import java.util.List;
 @Data
 public class AdminPaymentOrderDetailDTO {
 
-    private Long paymentOrderId;
+    private OrderInfo orderInfo;
 
-    private String orderNo;
+    private ProductInfo productInfo;
 
-    private Long userId;
+    private PaymentInfo paymentInfo;
 
-    private String bizType;
+    private RefundSummary refundSummary;
 
-    private Long bizRefId;
+    @Data
+    public static class OrderInfo {
+        private Long paymentOrderId;
+        private String orderNo;
+        private Long userId;
+        private String bizType;
+        private Long bizRefId;
+        private Long productId;
+        private BigDecimal amount;
+        private String currencyCode;
+        private Integer payStatus;
+        private String payChannel;
+        private LocalDateTime createTime;
+        private LocalDateTime paidAt;
+        private LocalDateTime closedAt;
+        private LocalDateTime lastUpdate;
+    }
 
-    private Long productId;
+    @Data
+    public static class ProductInfo {
+        private Long productId;
+        private String productCode;
+        private String productName;
+        private Integer membershipTier;
+        private Integer durationDays;
+    }
 
-    private String productCode;
+    @Data
+    public static class PaymentInfo {
+        private Integer transactionCount;
+        private List<AdminPaymentTransactionListItemDTO> transactions;
+    }
 
-    private String productName;
-
-    private Integer membershipTier;
-
-    private Integer durationDays;
-
-    private BigDecimal amount;
-
-    private String currencyCode;
-
-    private Integer payStatus;
-
-    private String payChannel;
-
-    private LocalDateTime createTime;
-
-    private LocalDateTime paidAt;
-
-    private LocalDateTime closedAt;
-
-    private LocalDateTime lastUpdate;
-
-    private Integer transactionCount;
-
-    private List<AdminPaymentTransactionListItemDTO> transactions;
+    @Data
+    public static class RefundSummary {
+        private Integer totalRefundCount;
+        private BigDecimal totalRefundAmount;
+        private Long latestRefundOrderId;
+        private String latestRefundNo;
+        private Integer latestAuditStatus;
+        private Integer latestRefundStatus;
+        private LocalDateTime latestAuditedAt;
+        private LocalDateTime latestRefundedAt;
+    }
 }

@@ -12,14 +12,22 @@ import com.kaipai.module.model.payment.dto.AdminPaymentOrderQueryDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentTransactionListItemDTO;
 import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.payment.entity.PaymentTransaction;
+import com.kaipai.module.model.refund.entity.RefundOrder;
+import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.membership.mapper.MembershipProductMapper;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.payment.mapper.PaymentTransactionMapper;
 import com.kaipai.module.server.payment.service.PaymentOrderService;
+import com.kaipai.module.server.refund.mapper.RefundOrderMapper;
+import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,8 +38,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, PaymentOrder> implements PaymentOrderService {
 
+    private static final List<String> MEMBERSHIP_BIZ_TYPES = List.of("membership_purchase", "membership_renewal");
+
     private final PaymentTransactionMapper paymentTransactionMapper;
     private final MembershipProductMapper membershipProductMapper;
+    private final RefundOrderMapper refundOrderMapper;
+    private final UserMapper userMapper;
 
     @Override
     public PageResult<AdminPaymentOrderListItemDTO> adminOrderList(AdminPaymentOrderQueryDTO query) {
@@ -59,66 +71,70 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         List<PaymentTransaction> transactions = paymentTransactionMapper.selectList(new LambdaQueryWrapper<PaymentTransaction>()
                 .eq(PaymentTransaction::getPaymentOrderId, order.getPaymentOrderId())
                 .orderByDesc(PaymentTransaction::getCreateTime));
+        List<RefundOrder> refundOrders = refundOrderMapper.selectList(new LambdaQueryWrapper<RefundOrder>()
+                .eq(RefundOrder::getPaymentOrderId, order.getPaymentOrderId())
+                .orderByDesc(RefundOrder::getCreateTime)
+                .orderByDesc(RefundOrder::getRefundOrderId));
         AdminPaymentOrderDetailDTO dto = new AdminPaymentOrderDetailDTO();
-        dto.setPaymentOrderId(order.getPaymentOrderId());
-        dto.setOrderNo(order.getOrderNo());
-        dto.setUserId(order.getUserId());
-        dto.setBizType(order.getBizType());
-        dto.setBizRefId(order.getBizRefId());
-        dto.setProductId(order.getProductId());
-        dto.setAmount(order.getAmount());
-        dto.setCurrencyCode(order.getCurrencyCode());
-        dto.setPayStatus(order.getPayStatus());
-        dto.setPayChannel(order.getPayChannel());
-        dto.setCreateTime(order.getCreateTime());
-        dto.setPaidAt(order.getPaidAt());
-        dto.setClosedAt(order.getClosedAt());
-        dto.setLastUpdate(order.getLastUpdate());
-        if (product != null) {
-            dto.setProductCode(product.getProductCode());
-            dto.setProductName(product.getProductName());
-            dto.setMembershipTier(product.getMembershipTier());
-            dto.setDurationDays(product.getDurationDays());
-        }
         List<AdminPaymentTransactionListItemDTO> transactionItems = transactions.stream()
                 .map(transaction -> toTransactionListItem(transaction, order))
                 .collect(Collectors.toList());
-        dto.setTransactions(transactionItems);
-        dto.setTransactionCount(transactionItems.size());
+        dto.setOrderInfo(toOrderInfo(order));
+        dto.setProductInfo(toProductInfo(order, product));
+        dto.setPaymentInfo(toPaymentInfo(transactionItems));
+        dto.setRefundSummary(toRefundSummary(refundOrders));
         return dto;
     }
 
     private LambdaQueryWrapper<PaymentOrder> buildOrderQuery(AdminPaymentOrderQueryDTO query) {
         LambdaQueryWrapper<PaymentOrder> wrapper = new LambdaQueryWrapper<>();
-        if (query.getOrderNo() != null && !query.getOrderNo().isBlank()) {
+        if (StringUtils.hasText(query.getOrderNo())) {
             wrapper.like(PaymentOrder::getOrderNo, query.getOrderNo().trim());
         }
         if (query.getUserId() != null) {
             wrapper.eq(PaymentOrder::getUserId, query.getUserId());
         }
+        if (StringUtils.hasText(query.getPhone())) {
+            Set<Long> userIds = userMapper.selectList(new LambdaQueryWrapper<User>()
+                            .select(User::getUserId)
+                            .like(User::getPhone, query.getPhone().trim()))
+                    .stream()
+                    .map(User::getUserId)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            if (userIds.isEmpty()) {
+                wrapper.in(PaymentOrder::getPaymentOrderId, Collections.singleton(-1L));
+                return wrapper;
+            }
+            wrapper.in(PaymentOrder::getUserId, userIds);
+        }
         if (query.getPayStatus() != null) {
             wrapper.eq(PaymentOrder::getPayStatus, query.getPayStatus());
         }
-        if (query.getPayChannel() != null && !query.getPayChannel().isBlank()) {
+        if (StringUtils.hasText(query.getPayChannel())) {
             wrapper.eq(PaymentOrder::getPayChannel, query.getPayChannel().trim());
         }
-        if (query.getBizType() != null && !query.getBizType().isBlank()) {
+        wrapper.in(PaymentOrder::getBizType, MEMBERSHIP_BIZ_TYPES);
+        if (StringUtils.hasText(query.getBizType())) {
             wrapper.eq(PaymentOrder::getBizType, query.getBizType().trim());
         }
         if (query.getProductId() != null) {
             wrapper.eq(PaymentOrder::getProductId, query.getProductId());
         }
-        if (query.getCreateTimeFrom() != null) {
-            wrapper.ge(PaymentOrder::getCreateTime, query.getCreateTimeFrom());
+        LocalDateTime createdAtFrom = firstNonNull(query.getCreatedAtFrom(), query.getCreateTimeFrom());
+        LocalDateTime createdAtTo = firstNonNull(query.getCreatedAtTo(), query.getCreateTimeTo());
+        LocalDateTime paidAtFrom = firstNonNull(query.getPaidAtFrom(), query.getPaidTimeFrom());
+        LocalDateTime paidAtTo = firstNonNull(query.getPaidAtTo(), query.getPaidTimeTo());
+        if (createdAtFrom != null) {
+            wrapper.ge(PaymentOrder::getCreateTime, createdAtFrom);
         }
-        if (query.getCreateTimeTo() != null) {
-            wrapper.le(PaymentOrder::getCreateTime, query.getCreateTimeTo());
+        if (createdAtTo != null) {
+            wrapper.le(PaymentOrder::getCreateTime, createdAtTo);
         }
-        if (query.getPaidTimeFrom() != null) {
-            wrapper.ge(PaymentOrder::getPaidAt, query.getPaidTimeFrom());
+        if (paidAtFrom != null) {
+            wrapper.ge(PaymentOrder::getPaidAt, paidAtFrom);
         }
-        if (query.getPaidTimeTo() != null) {
-            wrapper.le(PaymentOrder::getPaidAt, query.getPaidTimeTo());
+        if (paidAtTo != null) {
+            wrapper.le(PaymentOrder::getPaidAt, paidAtTo);
         }
         return wrapper;
     }
@@ -157,6 +173,63 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         return dto;
     }
 
+    private AdminPaymentOrderDetailDTO.OrderInfo toOrderInfo(PaymentOrder order) {
+        AdminPaymentOrderDetailDTO.OrderInfo info = new AdminPaymentOrderDetailDTO.OrderInfo();
+        info.setPaymentOrderId(order.getPaymentOrderId());
+        info.setOrderNo(order.getOrderNo());
+        info.setUserId(order.getUserId());
+        info.setBizType(order.getBizType());
+        info.setBizRefId(order.getBizRefId());
+        info.setProductId(order.getProductId());
+        info.setAmount(order.getAmount());
+        info.setCurrencyCode(order.getCurrencyCode());
+        info.setPayStatus(order.getPayStatus());
+        info.setPayChannel(order.getPayChannel());
+        info.setCreateTime(order.getCreateTime());
+        info.setPaidAt(order.getPaidAt());
+        info.setClosedAt(order.getClosedAt());
+        info.setLastUpdate(order.getLastUpdate());
+        return info;
+    }
+
+    private AdminPaymentOrderDetailDTO.ProductInfo toProductInfo(PaymentOrder order, MembershipProduct product) {
+        AdminPaymentOrderDetailDTO.ProductInfo info = new AdminPaymentOrderDetailDTO.ProductInfo();
+        info.setProductId(order.getProductId());
+        if (product != null) {
+            info.setProductCode(product.getProductCode());
+            info.setProductName(product.getProductName());
+            info.setMembershipTier(product.getMembershipTier());
+            info.setDurationDays(product.getDurationDays());
+        }
+        return info;
+    }
+
+    private AdminPaymentOrderDetailDTO.PaymentInfo toPaymentInfo(List<AdminPaymentTransactionListItemDTO> transactionItems) {
+        AdminPaymentOrderDetailDTO.PaymentInfo info = new AdminPaymentOrderDetailDTO.PaymentInfo();
+        info.setTransactionCount(transactionItems.size());
+        info.setTransactions(transactionItems);
+        return info;
+    }
+
+    private AdminPaymentOrderDetailDTO.RefundSummary toRefundSummary(List<RefundOrder> refundOrders) {
+        AdminPaymentOrderDetailDTO.RefundSummary summary = new AdminPaymentOrderDetailDTO.RefundSummary();
+        summary.setTotalRefundCount(refundOrders.size());
+        summary.setTotalRefundAmount(refundOrders.stream()
+                .map(RefundOrder::getRefundAmount)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+        if (!refundOrders.isEmpty()) {
+            RefundOrder latest = refundOrders.get(0);
+            summary.setLatestRefundOrderId(latest.getRefundOrderId());
+            summary.setLatestRefundNo(latest.getRefundNo());
+            summary.setLatestAuditStatus(latest.getAuditStatus());
+            summary.setLatestRefundStatus(latest.getRefundStatus());
+            summary.setLatestAuditedAt(latest.getAuditedAt());
+            summary.setLatestRefundedAt(latest.getRefundedAt());
+        }
+        return summary;
+    }
+
     private AdminPaymentTransactionListItemDTO toTransactionListItem(PaymentTransaction transaction, PaymentOrder order) {
         AdminPaymentTransactionListItemDTO dto = new AdminPaymentTransactionListItemDTO();
         dto.setTransactionId(transaction.getTransactionId());
@@ -170,5 +243,9 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         dto.setCallbackTime(transaction.getCallbackTime());
         dto.setCreateTime(transaction.getCreateTime());
         return dto;
+    }
+
+    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime fallback) {
+        return primary != null ? primary : fallback;
     }
 }

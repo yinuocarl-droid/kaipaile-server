@@ -19,6 +19,8 @@ public class AdminPaymentOrderQueryDTO {
 
     private Long userId;
 
+    private String phone;
+
     private Integer payStatus;
 
     private String payChannel;
@@ -34,8 +36,20 @@ public class AdminPaymentOrderQueryDTO {
     private LocalDateTime createTimeTo;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private LocalDateTime createdAtFrom;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private LocalDateTime createdAtTo;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private LocalDateTime paidTimeFrom;
 
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private LocalDateTime paidTimeTo;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private LocalDateTime paidAtFrom;
+
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+    private LocalDateTime paidAtTo;
 }
