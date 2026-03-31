@@ -3,10 +3,14 @@ package com.kaipai.module.server.membership.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.membership.dto.AdminMembershipBenefitOverviewDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductSortDTO;
@@ -16,18 +20,28 @@ import com.kaipai.module.model.membership.entity.MembershipProduct;
 import com.kaipai.module.server.membership.mapper.MembershipProductMapper;
 import com.kaipai.module.server.membership.service.MembershipProductService;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductMapper, MembershipProduct> implements MembershipProductService {
 
     private final AdminOperationLogger adminOperationLogger;
+    private final ObjectMapper objectMapper;
 
     @Override
     public PageResult<MembershipProduct> adminProductList(MembershipProductQueryDTO query) {
@@ -48,6 +62,43 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         wrapper.orderByAsc(MembershipProduct::getSortNo).orderByDesc(MembershipProduct::getLastUpdate);
         Page<MembershipProduct> result = page(page, wrapper);
         return new PageResult<>(result.getTotal(), result.getRecords());
+    }
+
+    @Override
+    public AdminMembershipBenefitOverviewDTO adminBenefitOverview(MembershipBenefitQueryDTO query) {
+        LambdaQueryWrapper<MembershipProduct> wrapper = new LambdaQueryWrapper<>();
+        if (query.getMembershipTier() != null) {
+            wrapper.eq(MembershipProduct::getMembershipTier, query.getMembershipTier());
+        }
+        wrapper.orderByAsc(MembershipProduct::getSortNo).orderByDesc(MembershipProduct::getLastUpdate);
+
+        List<MembershipProduct> products = list(wrapper);
+        List<AdminMembershipBenefitOverviewDTO.BenefitItem> benefitItems = new ArrayList<>();
+        Map<String, CapabilityMatrixAccumulator> capabilityMap = new LinkedHashMap<>();
+
+        for (MembershipProduct product : products) {
+            List<JsonNode> benefitNodes = parseBenefitNodes(product);
+            for (int index = 0; index < benefitNodes.size(); index++) {
+                AdminMembershipBenefitOverviewDTO.BenefitItem item = toBenefitItem(product, benefitNodes.get(index), index);
+                if (query.getStatus() != null && !Objects.equals(item.getStatus(), query.getStatus())) {
+                    continue;
+                }
+                benefitItems.add(item);
+                capabilityMap.computeIfAbsent(item.getBenefitCode(),
+                                ignored -> new CapabilityMatrixAccumulator(item.getBenefitCode(), item.getBenefitName()))
+                        .merge(item);
+            }
+        }
+
+        benefitItems.sort(Comparator.comparing(AdminMembershipBenefitOverviewDTO.BenefitItem::getMembershipTier,
+                        Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(AdminMembershipBenefitOverviewDTO.BenefitItem::getProductId, Comparator.nullsLast(Long::compareTo))
+                .thenComparing(AdminMembershipBenefitOverviewDTO.BenefitItem::getBenefitCode, Comparator.nullsLast(String::compareTo)));
+
+        AdminMembershipBenefitOverviewDTO overview = new AdminMembershipBenefitOverviewDTO();
+        overview.setBenefitItems(benefitItems);
+        overview.setCapabilityMatrix(capabilityMap.values().stream().map(CapabilityMatrixAccumulator::toDTO).toList());
+        return overview;
     }
 
     @Override
@@ -173,5 +224,171 @@ public class MembershipProductServiceImpl extends ServiceImpl<MembershipProductM
         snapshot.put("sortNo", product.getSortNo());
         snapshot.put("benefitConfigJson", product.getBenefitConfigJson());
         return snapshot;
+    }
+
+    private List<JsonNode> parseBenefitNodes(MembershipProduct product) {
+        if (!StringUtils.hasText(product.getBenefitConfigJson())) {
+            return Collections.emptyList();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(product.getBenefitConfigJson());
+            if (root == null || root.isNull()) {
+                return Collections.emptyList();
+            }
+            if (root.isArray()) {
+                List<JsonNode> nodes = new ArrayList<>();
+                root.forEach(nodes::add);
+                return nodes;
+            }
+            for (String fieldName : List.of("benefitItems", "benefits", "items", "capabilityMatrix")) {
+                JsonNode arrayNode = root.path(fieldName);
+                if (arrayNode.isArray()) {
+                    List<JsonNode> nodes = new ArrayList<>();
+                    arrayNode.forEach(nodes::add);
+                    return nodes;
+                }
+            }
+            return looksLikeBenefitNode(root) ? Collections.singletonList(root) : Collections.emptyList();
+        } catch (Exception ex) {
+            log.warn("failed to parse membership benefit config for productId={}", product.getProductId(), ex);
+            return Collections.emptyList();
+        }
+    }
+
+    private boolean looksLikeBenefitNode(JsonNode node) {
+        return StringUtils.hasText(firstText(node, "benefitCode", "code", "capabilityCode", "abilityCode"))
+                || StringUtils.hasText(firstText(node, "benefitName", "name", "capabilityName", "title"))
+                || StringUtils.hasText(firstText(node, "capabilitySummary", "summary", "description", "capabilityDesc"));
+    }
+
+    private AdminMembershipBenefitOverviewDTO.BenefitItem toBenefitItem(MembershipProduct product, JsonNode node, int index) {
+        AdminMembershipBenefitOverviewDTO.BenefitItem item = new AdminMembershipBenefitOverviewDTO.BenefitItem();
+        Integer itemStatus = firstInteger(node, "status", "benefitStatus", "enabledStatus", "state", "activeStatus", "isEnabled");
+        item.setProductId(product.getProductId());
+        item.setProductCode(product.getProductCode());
+        item.setProductName(product.getProductName());
+        item.setBenefitCode(resolveBenefitCode(product, node, index));
+        item.setBenefitName(resolveBenefitName(product, node, index));
+        item.setMembershipTier(product.getMembershipTier());
+        item.setCapabilitySummary(firstText(node, "capabilitySummary", "summary", "description", "capabilityDesc", "abilityDesc"));
+        item.setStatus(itemStatus != null ? itemStatus : product.getStatus());
+        item.setLastUpdate(product.getLastUpdate());
+        item.setAffectedPages(firstTextList(node, "affectedPages", "pageScopes", "pages", "scenes"));
+        item.setArtifactTypes(firstTextList(node, "artifactTypes", "artifactScopes", "artifacts", "outputs"));
+        return item;
+    }
+
+    private String resolveBenefitCode(MembershipProduct product, JsonNode node, int index) {
+        String benefitCode = firstText(node, "benefitCode", "code", "capabilityCode", "abilityCode");
+        if (StringUtils.hasText(benefitCode)) {
+            return benefitCode;
+        }
+        return product.getProductCode() + "#" + (index + 1);
+    }
+
+    private String resolveBenefitName(MembershipProduct product, JsonNode node, int index) {
+        String benefitName = firstText(node, "benefitName", "name", "capabilityName", "title");
+        if (StringUtils.hasText(benefitName)) {
+            return benefitName;
+        }
+        if (StringUtils.hasText(product.getProductName())) {
+            return product.getProductName() + "-" + (index + 1);
+        }
+        return "benefit-" + (index + 1);
+    }
+
+    private String firstText(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.path(fieldName);
+            if (value.isValueNode() && StringUtils.hasText(value.asText())) {
+                return value.asText().trim();
+            }
+        }
+        return null;
+    }
+
+    private Integer firstInteger(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.path(fieldName);
+            if (value.isInt() || value.isLong()) {
+                return value.asInt();
+            }
+            if (value.isBoolean()) {
+                return value.asBoolean() ? 1 : 2;
+            }
+            if (value.isTextual() && StringUtils.hasText(value.asText())) {
+                try {
+                    return Integer.parseInt(value.asText().trim());
+                } catch (NumberFormatException ignored) {
+                    // ignore malformed numeric strings
+                }
+            }
+        }
+        return null;
+    }
+
+    private List<String> firstTextList(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.path(fieldName);
+            if (value.isArray()) {
+                List<String> result = new ArrayList<>();
+                value.forEach(item -> {
+                    if (item.isValueNode() && StringUtils.hasText(item.asText())) {
+                        result.add(item.asText().trim());
+                    }
+                });
+                return result;
+            }
+            if (value.isTextual() && StringUtils.hasText(value.asText())) {
+                return List.of(value.asText().trim());
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    private static class CapabilityMatrixAccumulator {
+        private final String capabilityCode;
+        private final String capabilityName;
+        private final Set<Long> relatedProductIds = new LinkedHashSet<>();
+        private final Set<String> relatedProductCodes = new LinkedHashSet<>();
+        private final Set<String> affectedPages = new LinkedHashSet<>();
+        private final Set<String> artifactTypes = new LinkedHashSet<>();
+        private final Map<Integer, Boolean> tierEnabledMap = new LinkedHashMap<>();
+        private String capabilitySummary;
+
+        private CapabilityMatrixAccumulator(String capabilityCode, String capabilityName) {
+            this.capabilityCode = capabilityCode;
+            this.capabilityName = capabilityName;
+        }
+
+        private void merge(AdminMembershipBenefitOverviewDTO.BenefitItem item) {
+            if (!StringUtils.hasText(capabilitySummary) && StringUtils.hasText(item.getCapabilitySummary())) {
+                capabilitySummary = item.getCapabilitySummary();
+            }
+            if (item.getProductId() != null) {
+                relatedProductIds.add(item.getProductId());
+            }
+            if (StringUtils.hasText(item.getProductCode())) {
+                relatedProductCodes.add(item.getProductCode());
+            }
+            affectedPages.addAll(item.getAffectedPages());
+            artifactTypes.addAll(item.getArtifactTypes());
+            if (item.getMembershipTier() != null) {
+                tierEnabledMap.put(item.getMembershipTier(), Objects.equals(item.getStatus(), 1));
+            }
+        }
+
+        private AdminMembershipBenefitOverviewDTO.CapabilityMatrixItem toDTO() {
+            AdminMembershipBenefitOverviewDTO.CapabilityMatrixItem item = new AdminMembershipBenefitOverviewDTO.CapabilityMatrixItem();
+            item.setCapabilityCode(capabilityCode);
+            item.setCapabilityName(capabilityName);
+            item.setCapabilitySummary(capabilitySummary);
+            item.setTierEnabledMap(tierEnabledMap);
+            item.setRelatedProductIds(new ArrayList<>(relatedProductIds));
+            item.setRelatedProductCodes(new ArrayList<>(relatedProductCodes));
+            item.setAffectedPages(new ArrayList<>(affectedPages));
+            item.setArtifactTypes(new ArrayList<>(artifactTypes));
+            return item;
+        }
     }
 }

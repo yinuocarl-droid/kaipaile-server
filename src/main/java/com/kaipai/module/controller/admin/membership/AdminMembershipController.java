@@ -4,10 +4,12 @@ import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
+import com.kaipai.module.model.membership.dto.AdminMembershipBenefitOverviewDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountExtendDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountOpenDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountQueryDTO;
+import com.kaipai.module.model.membership.dto.MembershipBenefitQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipChangeLogItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipChangeLogQueryDTO;
 import com.kaipai.module.model.membership.dto.MembershipProductCreateDTO;
@@ -47,6 +49,13 @@ public class AdminMembershipController {
     @PreAuthorize("hasAuthority('page.membership.products')")
     public R<PageResult<MembershipProduct>> products(@Valid MembershipProductQueryDTO query) {
         return R.ok(membershipProductService.adminProductList(query));
+    }
+
+    @Operation(summary = "会员权益配置")
+    @GetMapping("/benefits")
+    @PreAuthorize("hasAuthority('page.membership.benefits')")
+    public R<AdminMembershipBenefitOverviewDTO> benefits(@Valid MembershipBenefitQueryDTO query) {
+        return R.ok(membershipProductService.adminBenefitOverview(query));
     }
 
     @Operation(summary = "会员商品详情")
