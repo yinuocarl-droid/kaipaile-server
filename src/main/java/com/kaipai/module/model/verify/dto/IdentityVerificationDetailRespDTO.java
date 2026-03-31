@@ -1,0 +1,21 @@
+package com.kaipai.module.model.verify.dto;
+
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+@Data
+public class IdentityVerificationDetailRespDTO {
+
+    private Long verificationId;
+    private Long userId;
+    private String userName;
+    private String phone;
+    private String realName;
+    private String idCardNoCipher;
+    private Integer status;
+    private String rejectReason;
+    private LocalDateTime submitTime;
+    private LocalDateTime reviewedAt;
+    private Boolean actorCertified;
+}

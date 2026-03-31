@@ -30,6 +30,9 @@ public class ActorProfile extends BaseEntity {
 
     private LocalDate birthday;
 
+    /** 出生时辰键值 */
+    private String birthHour;
+
     private Integer age;
 
     /** 身高(cm) */

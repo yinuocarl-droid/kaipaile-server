@@ -40,6 +40,15 @@ public class User extends BaseEntity {
     /** 实名状态: 0未认证, 1认证中, 2已认证, 3认证失败 */
     private Integer realAuthStatus;
 
+    /** 邀请人用户 ID */
+    private Long invitedByUserId;
+
+    /** 有效邀请数量缓存 */
+    private Integer validInviteCount;
+
+    /** 注册设备指纹 */
+    private String registerDeviceFingerprint;
+
     /** 状态: 1正常, 2禁用, 3冻结 */
     private Integer status;
 
