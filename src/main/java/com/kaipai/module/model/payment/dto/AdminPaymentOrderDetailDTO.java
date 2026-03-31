@@ -22,6 +22,7 @@ public class AdminPaymentOrderDetailDTO {
         private Long paymentOrderId;
         private String orderNo;
         private Long userId;
+        private String phone;
         private String bizType;
         private Long bizRefId;
         private Long productId;

@@ -17,13 +17,16 @@ import com.kaipai.module.model.refund.dto.RefundOrderRespDTO;
 import com.kaipai.module.model.refund.dto.RefundRejectDTO;
 import com.kaipai.module.model.refund.entity.RefundOperateLog;
 import com.kaipai.module.model.refund.entity.RefundOrder;
+import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.refund.mapper.RefundOrderMapper;
 import com.kaipai.module.server.refund.service.RefundOrderService;
 import com.kaipai.module.server.refund.service.RefundOperateLogService;
+import com.kaipai.module.server.user.mapper.UserMapper;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +44,7 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
     private final PaymentOrderMapper paymentOrderMapper;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
+    private final UserMapper userMapper;
 
     @Override
     public PageResult<RefundOrderRespDTO> adminOrderList(RefundOrderQueryDTO query) {
@@ -94,8 +98,16 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
                                 ? Collections.<Long, PaymentOrder>emptyMap()
                                 : paymentOrderMapper.selectBatchIds(ids).stream()
                                 .collect(Collectors.toMap(PaymentOrder::getPaymentOrderId, paymentOrder -> paymentOrder))));
+        Map<Long, User> userMap = result.getRecords().stream()
+                .map(RefundOrder::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.collectingAndThen(Collectors.toCollection(LinkedHashSet::new),
+                        ids -> ids.isEmpty()
+                                ? Collections.<Long, User>emptyMap()
+                                : userMapper.selectBatchIds(ids).stream()
+                                .collect(Collectors.toMap(User::getUserId, user -> user, (left, right) -> left))));
         List<RefundOrderRespDTO> records = result.getRecords().stream()
-                .map(order -> toDto(order, paymentOrderMap.get(order.getPaymentOrderId())))
+                .map(order -> toDto(order, paymentOrderMap.get(order.getPaymentOrderId()), userMap.get(order.getUserId())))
                 .collect(Collectors.toList());
         return new PageResult<>(result.getTotal(), records);
     }
@@ -108,7 +120,7 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         }
         PaymentOrder paymentOrder = paymentOrderMapper.selectById(order.getPaymentOrderId());
         RefundOrderDetailDTO dto = new RefundOrderDetailDTO();
-        dto.setRefundInfo(toRefundInfo(order));
+        dto.setRefundInfo(toRefundInfo(order, order.getUserId() == null ? null : userMapper.selectById(order.getUserId())));
         dto.setPaymentOrderInfo(toPaymentOrderInfo(paymentOrder));
         dto.setOperateLogs(refundOperateLogService.listByRefundOrderId(refundOrderId));
         return dto;
@@ -174,13 +186,14 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
                 .build());
     }
 
-    private RefundOrderRespDTO toDto(RefundOrder order, PaymentOrder paymentOrder) {
+    private RefundOrderRespDTO toDto(RefundOrder order, PaymentOrder paymentOrder, User user) {
         RefundOrderRespDTO dto = new RefundOrderRespDTO();
         dto.setRefundOrderId(order.getRefundOrderId());
         dto.setRefundNo(order.getRefundNo());
         dto.setPaymentOrderId(order.getPaymentOrderId());
         dto.setPaymentOrderNo(paymentOrder == null ? null : paymentOrder.getOrderNo());
         dto.setUserId(order.getUserId());
+        dto.setPhone(user == null ? null : user.getPhone());
         dto.setRefundAmount(order.getRefundAmount());
         dto.setAuditStatus(order.getAuditStatus());
         dto.setRefundStatus(order.getRefundStatus());
@@ -193,12 +206,13 @@ public class RefundOrderServiceImpl extends ServiceImpl<RefundOrderMapper, Refun
         return dto;
     }
 
-    private RefundOrderDetailDTO.RefundInfo toRefundInfo(RefundOrder order) {
+    private RefundOrderDetailDTO.RefundInfo toRefundInfo(RefundOrder order, User user) {
         RefundOrderDetailDTO.RefundInfo info = new RefundOrderDetailDTO.RefundInfo();
         info.setRefundOrderId(order.getRefundOrderId());
         info.setRefundNo(order.getRefundNo());
         info.setPaymentOrderId(order.getPaymentOrderId());
         info.setUserId(order.getUserId());
+        info.setPhone(user == null ? null : user.getPhone());
         info.setRefundAmount(order.getRefundAmount());
         info.setRefundReason(order.getRefundReason());
         info.setAuditStatus(order.getAuditStatus());

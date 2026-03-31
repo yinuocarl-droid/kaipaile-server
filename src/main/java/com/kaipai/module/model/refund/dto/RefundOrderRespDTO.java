@@ -13,6 +13,7 @@ public class RefundOrderRespDTO {
     private Long paymentOrderId;
     private String paymentOrderNo;
     private Long userId;
+    private String phone;
     private BigDecimal refundAmount;
     private Integer auditStatus;
     private Integer refundStatus;

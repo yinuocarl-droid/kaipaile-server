@@ -19,6 +19,7 @@ public class RefundOrderDetailDTO {
         private String refundNo;
         private Long paymentOrderId;
         private Long userId;
+        private String phone;
         private BigDecimal refundAmount;
         private String refundReason;
         private Integer auditStatus;

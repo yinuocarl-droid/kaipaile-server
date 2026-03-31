@@ -55,8 +55,9 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
             return PageResult.empty();
         }
         Map<Long, MembershipProduct> productMap = getProductMap(result.getRecords());
+        Map<Long, User> userMap = getUserMap(result.getRecords());
         List<AdminPaymentOrderListItemDTO> list = result.getRecords().stream()
-                .map(order -> toListItem(order, productMap.get(order.getProductId())))
+                .map(order -> toListItem(order, productMap.get(order.getProductId()), userMap.get(order.getUserId())))
                 .collect(Collectors.toList());
         return new PageResult<>(result.getTotal(), list);
     }
@@ -68,6 +69,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
             throw new BizException("支付订单不存在");
         }
         MembershipProduct product = order.getProductId() == null ? null : membershipProductMapper.selectById(order.getProductId());
+        User user = order.getUserId() == null ? null : userMapper.selectById(order.getUserId());
         List<PaymentTransaction> transactions = paymentTransactionMapper.selectList(new LambdaQueryWrapper<PaymentTransaction>()
                 .eq(PaymentTransaction::getPaymentOrderId, order.getPaymentOrderId())
                 .orderByDesc(PaymentTransaction::getCreateTime));
@@ -79,7 +81,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         List<AdminPaymentTransactionListItemDTO> transactionItems = transactions.stream()
                 .map(transaction -> toTransactionListItem(transaction, order))
                 .collect(Collectors.toList());
-        dto.setOrderInfo(toOrderInfo(order));
+        dto.setOrderInfo(toOrderInfo(order, user));
         dto.setProductInfo(toProductInfo(order, product));
         dto.setPaymentInfo(toPaymentInfo(transactionItems));
         dto.setRefundSummary(toRefundSummary(refundOrders));
@@ -151,11 +153,24 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
                 .collect(Collectors.toMap(MembershipProduct::getProductId, Function.identity()));
     }
 
-    private AdminPaymentOrderListItemDTO toListItem(PaymentOrder order, MembershipProduct product) {
+    private Map<Long, User> getUserMap(List<PaymentOrder> orders) {
+        Set<Long> userIds = orders.stream()
+                .map(PaymentOrder::getUserId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        if (userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return userMapper.selectBatchIds(userIds).stream()
+                .collect(Collectors.toMap(User::getUserId, Function.identity(), (left, right) -> left));
+    }
+
+    private AdminPaymentOrderListItemDTO toListItem(PaymentOrder order, MembershipProduct product, User user) {
         AdminPaymentOrderListItemDTO dto = new AdminPaymentOrderListItemDTO();
         dto.setPaymentOrderId(order.getPaymentOrderId());
         dto.setOrderNo(order.getOrderNo());
         dto.setUserId(order.getUserId());
+        dto.setPhone(user == null ? null : user.getPhone());
         dto.setBizType(order.getBizType());
         dto.setBizRefId(order.getBizRefId());
         dto.setProductId(order.getProductId());
@@ -173,11 +188,12 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         return dto;
     }
 
-    private AdminPaymentOrderDetailDTO.OrderInfo toOrderInfo(PaymentOrder order) {
+    private AdminPaymentOrderDetailDTO.OrderInfo toOrderInfo(PaymentOrder order, User user) {
         AdminPaymentOrderDetailDTO.OrderInfo info = new AdminPaymentOrderDetailDTO.OrderInfo();
         info.setPaymentOrderId(order.getPaymentOrderId());
         info.setOrderNo(order.getOrderNo());
         info.setUserId(order.getUserId());
+        info.setPhone(user == null ? null : user.getPhone());
         info.setBizType(order.getBizType());
         info.setBizRefId(order.getBizRefId());
         info.setProductId(order.getProductId());
