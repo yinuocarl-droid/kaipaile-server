@@ -5,6 +5,10 @@ import com.kaipai.common.result.R;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordItemDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordQueryDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralPolicyDetailDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralPolicyQueryDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralPolicySaveDTO;
+import com.kaipai.module.model.referral.dto.AdminReferralPolicyStatusDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDecisionDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @Tag(name = "后台邀请裂变")
 @RestController
@@ -94,6 +99,50 @@ public class AdminReferralController {
     public R<Void> resolveRisk(@PathVariable Long id, @RequestBody(required = false) AdminReferralRiskDecisionDTO request) {
         referralRecordService.resolveRisk(id, request == null ? new AdminReferralRiskDecisionDTO() : request);
         return R.ok();
+    }
+
+    @Operation(summary = "邀请规则列表")
+    @GetMapping("/policies")
+    @PreAuthorize("hasAuthority('page.referral.policies')")
+    public R<PageResult<AdminReferralPolicyDetailDTO>> policyList(@Valid AdminReferralPolicyQueryDTO query) {
+        return R.ok(referralPolicyService.adminPolicyList(query));
+    }
+
+    @Operation(summary = "邀请规则详情")
+    @GetMapping("/policies/{id}")
+    @PreAuthorize("hasAuthority('page.referral.policies')")
+    public R<AdminReferralPolicyDetailDTO> policyDetail(@PathVariable Long id) {
+        return R.ok(referralPolicyService.adminPolicyDetail(id));
+    }
+
+    @Operation(summary = "创建邀请规则")
+    @PostMapping("/policies")
+    @PreAuthorize("hasAuthority('action.referral.policy.create')")
+    public R<AdminReferralPolicyDetailDTO> createPolicy(@Valid @RequestBody AdminReferralPolicySaveDTO dto) {
+        return R.ok(referralPolicyService.createPolicy(dto));
+    }
+
+    @Operation(summary = "更新邀请规则")
+    @PutMapping("/policies/{id}")
+    @PreAuthorize("hasAuthority('action.referral.policy.edit')")
+    public R<AdminReferralPolicyDetailDTO> updatePolicy(@PathVariable Long id, @Valid @RequestBody AdminReferralPolicySaveDTO dto) {
+        return R.ok(referralPolicyService.updatePolicy(id, dto));
+    }
+
+    @Operation(summary = "启用邀请规则")
+    @PostMapping("/policies/{id}/enable")
+    @PreAuthorize("hasAuthority('action.referral.policy.enable')")
+    public R<AdminReferralPolicyDetailDTO> enablePolicy(@PathVariable Long id,
+                                                        @RequestBody(required = false) AdminReferralPolicyStatusDTO dto) {
+        return R.ok(referralPolicyService.changePolicyEnabled(id, true, dto == null ? null : dto.getReason()));
+    }
+
+    @Operation(summary = "停用邀请规则")
+    @PostMapping("/policies/{id}/disable")
+    @PreAuthorize("hasAuthority('action.referral.policy.disable')")
+    public R<AdminReferralPolicyDetailDTO> disablePolicy(@PathVariable Long id,
+                                                         @RequestBody(required = false) AdminReferralPolicyStatusDTO dto) {
+        return R.ok(referralPolicyService.changePolicyEnabled(id, false, dto == null ? null : dto.getReason()));
     }
 
     @Operation(summary = "资格列表")
