@@ -8,49 +8,41 @@ import java.time.LocalDateTime;
 @Data
 public class AdminPaymentTransactionDetailDTO {
 
-    private Long transactionId;
+    private TransactionInfo transactionInfo;
 
-    private Long paymentOrderId;
+    private CallbackPayloadSummary callbackPayloadSummary;
 
-    private String paymentOrderNo;
+    @Data
+    public static class TransactionInfo {
+        private Long transactionId;
+        private Long paymentOrderId;
+        private String paymentOrderNo;
+        private Long userId;
+        private String bizType;
+        private Long bizRefId;
+        private Long productId;
+        private String productCode;
+        private String productName;
+        private String payChannel;
+        private Integer payStatus;
+        private BigDecimal orderAmount;
+        private String currencyCode;
+        private LocalDateTime paidAt;
+        private String channelTradeNo;
+        private String channel;
+        private String tradeType;
+        private BigDecimal amount;
+        private Integer status;
+        private LocalDateTime callbackTime;
+        private LocalDateTime createTime;
+        private LocalDateTime lastUpdate;
+    }
 
-    private Long userId;
-
-    private String bizType;
-
-    private Long bizRefId;
-
-    private Long productId;
-
-    private String productCode;
-
-    private String productName;
-
-    private String payChannel;
-
-    private Integer payStatus;
-
-    private BigDecimal orderAmount;
-
-    private String currencyCode;
-
-    private LocalDateTime paidAt;
-
-    private String channelTradeNo;
-
-    private String channel;
-
-    private String tradeType;
-
-    private BigDecimal amount;
-
-    private Integer status;
-
-    private String callbackPayload;
-
-    private LocalDateTime callbackTime;
-
-    private LocalDateTime createTime;
-
-    private LocalDateTime lastUpdate;
+    @Data
+    public static class CallbackPayloadSummary {
+        private Boolean hasPayload;
+        private Integer payloadLength;
+        private String payloadPreview;
+        private LocalDateTime callbackTime;
+    }
 }

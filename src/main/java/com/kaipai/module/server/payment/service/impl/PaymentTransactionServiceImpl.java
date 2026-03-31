@@ -17,7 +17,9 @@ import com.kaipai.module.server.payment.mapper.PaymentTransactionMapper;
 import com.kaipai.module.server.payment.service.PaymentTransactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -59,54 +61,31 @@ public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactio
                 ? null
                 : membershipProductMapper.selectById(order.getProductId());
         AdminPaymentTransactionDetailDTO dto = new AdminPaymentTransactionDetailDTO();
-        dto.setTransactionId(transaction.getTransactionId());
-        dto.setPaymentOrderId(transaction.getPaymentOrderId());
-        dto.setChannelTradeNo(transaction.getChannelTradeNo());
-        dto.setChannel(transaction.getChannel());
-        dto.setTradeType(transaction.getTradeType());
-        dto.setAmount(transaction.getAmount());
-        dto.setStatus(transaction.getStatus());
-        dto.setCallbackPayload(transaction.getCallbackPayload());
-        dto.setCallbackTime(transaction.getCallbackTime());
-        dto.setCreateTime(transaction.getCreateTime());
-        dto.setLastUpdate(transaction.getLastUpdate());
-        if (order != null) {
-            dto.setPaymentOrderNo(order.getOrderNo());
-            dto.setUserId(order.getUserId());
-            dto.setBizType(order.getBizType());
-            dto.setBizRefId(order.getBizRefId());
-            dto.setProductId(order.getProductId());
-            dto.setPayChannel(order.getPayChannel());
-            dto.setPayStatus(order.getPayStatus());
-            dto.setOrderAmount(order.getAmount());
-            dto.setCurrencyCode(order.getCurrencyCode());
-            dto.setPaidAt(order.getPaidAt());
-        }
-        if (product != null) {
-            dto.setProductCode(product.getProductCode());
-            dto.setProductName(product.getProductName());
-        }
+        dto.setTransactionInfo(toTransactionInfo(transaction, order, product));
+        dto.setCallbackPayloadSummary(toCallbackPayloadSummary(transaction));
         return dto;
     }
 
     private LambdaQueryWrapper<PaymentTransaction> buildTransactionQuery(AdminPaymentTransactionQueryDTO query) {
         LambdaQueryWrapper<PaymentTransaction> wrapper = new LambdaQueryWrapper<>();
-        if (query.getChannelTradeNo() != null && !query.getChannelTradeNo().isBlank()) {
+        if (StringUtils.hasText(query.getChannelTradeNo())) {
             wrapper.like(PaymentTransaction::getChannelTradeNo, query.getChannelTradeNo().trim());
         }
-        if (query.getChannel() != null && !query.getChannel().isBlank()) {
+        if (StringUtils.hasText(query.getChannel())) {
             wrapper.eq(PaymentTransaction::getChannel, query.getChannel().trim());
         }
         if (query.getStatus() != null) {
             wrapper.eq(PaymentTransaction::getStatus, query.getStatus());
         }
-        if (query.getCallbackTimeFrom() != null) {
-            wrapper.ge(PaymentTransaction::getCallbackTime, query.getCallbackTimeFrom());
+        LocalDateTime callbackFrom = firstNonNull(query.getCallbackFrom(), query.getCallbackTimeFrom());
+        LocalDateTime callbackTo = firstNonNull(query.getCallbackTo(), query.getCallbackTimeTo());
+        if (callbackFrom != null) {
+            wrapper.ge(PaymentTransaction::getCallbackTime, callbackFrom);
         }
-        if (query.getCallbackTimeTo() != null) {
-            wrapper.le(PaymentTransaction::getCallbackTime, query.getCallbackTimeTo());
+        if (callbackTo != null) {
+            wrapper.le(PaymentTransaction::getCallbackTime, callbackTo);
         }
-        if (query.getPaymentOrderNo() != null && !query.getPaymentOrderNo().isBlank()) {
+        if (StringUtils.hasText(query.getPaymentOrderNo())) {
             List<Long> orderIds = paymentOrderMapper.selectList(new LambdaQueryWrapper<PaymentOrder>()
                             .select(PaymentOrder::getPaymentOrderId)
                             .like(PaymentOrder::getOrderNo, query.getPaymentOrderNo().trim()))
@@ -147,5 +126,60 @@ public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactio
         dto.setCallbackTime(transaction.getCallbackTime());
         dto.setCreateTime(transaction.getCreateTime());
         return dto;
+    }
+
+    private AdminPaymentTransactionDetailDTO.TransactionInfo toTransactionInfo(PaymentTransaction transaction,
+                                                                               PaymentOrder order,
+                                                                               MembershipProduct product) {
+        AdminPaymentTransactionDetailDTO.TransactionInfo info = new AdminPaymentTransactionDetailDTO.TransactionInfo();
+        info.setTransactionId(transaction.getTransactionId());
+        info.setPaymentOrderId(transaction.getPaymentOrderId());
+        info.setChannelTradeNo(transaction.getChannelTradeNo());
+        info.setChannel(transaction.getChannel());
+        info.setTradeType(transaction.getTradeType());
+        info.setAmount(transaction.getAmount());
+        info.setStatus(transaction.getStatus());
+        info.setCallbackTime(transaction.getCallbackTime());
+        info.setCreateTime(transaction.getCreateTime());
+        info.setLastUpdate(transaction.getLastUpdate());
+        if (order != null) {
+            info.setPaymentOrderNo(order.getOrderNo());
+            info.setUserId(order.getUserId());
+            info.setBizType(order.getBizType());
+            info.setBizRefId(order.getBizRefId());
+            info.setProductId(order.getProductId());
+            info.setPayChannel(order.getPayChannel());
+            info.setPayStatus(order.getPayStatus());
+            info.setOrderAmount(order.getAmount());
+            info.setCurrencyCode(order.getCurrencyCode());
+            info.setPaidAt(order.getPaidAt());
+        }
+        if (product != null) {
+            info.setProductCode(product.getProductCode());
+            info.setProductName(product.getProductName());
+        }
+        return info;
+    }
+
+    private AdminPaymentTransactionDetailDTO.CallbackPayloadSummary toCallbackPayloadSummary(PaymentTransaction transaction) {
+        AdminPaymentTransactionDetailDTO.CallbackPayloadSummary summary = new AdminPaymentTransactionDetailDTO.CallbackPayloadSummary();
+        String payload = transaction.getCallbackPayload();
+        summary.setHasPayload(StringUtils.hasText(payload));
+        summary.setPayloadLength(payload == null ? 0 : payload.length());
+        summary.setPayloadPreview(buildPayloadPreview(payload));
+        summary.setCallbackTime(transaction.getCallbackTime());
+        return summary;
+    }
+
+    private String buildPayloadPreview(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            return null;
+        }
+        String normalized = payload.trim();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
+    }
+
+    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime fallback) {
+        return primary != null ? primary : fallback;
     }
 }
