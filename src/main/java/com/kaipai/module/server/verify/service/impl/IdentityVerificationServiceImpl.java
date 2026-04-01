@@ -104,7 +104,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             throw new BizException("请先将档案完成度提升到 70%");
         }
 
-        IdentityVerification record = latestRecord != null ? latestRecord : new IdentityVerification();
+        IdentityVerification record = new IdentityVerification();
         record.setUserId(userId);
         record.setRealName(realName);
         record.setIdCardNoCipher(maskIdCard(normalizedIdCardNo));
@@ -114,12 +114,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         record.setReviewerId(null);
         record.setReviewedAt(null);
         record.setSnapshotProfileCompletion(profileCompletion);
-        if (record.getVerificationId() == null) {
-            save(record);
-        } else {
-            record.setCreateTime(LocalDateTime.now());
-            updateById(record);
-        }
+        save(record);
 
         User updateUser = new User();
         updateUser.setUserId(userId);
