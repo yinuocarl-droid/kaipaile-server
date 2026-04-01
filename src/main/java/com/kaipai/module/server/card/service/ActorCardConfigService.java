@@ -10,4 +10,6 @@ public interface ActorCardConfigService extends IService<ActorCardConfig> {
     ActorCardConfigRespDTO actorConfig(Long actorId, String sceneKey);
 
     ActorCardConfigRespDTO saveActorConfig(Long currentUserId, ActorCardConfigSaveDTO dto);
+
+    ActorCardConfigRespDTO applyLuckyColor(Long currentUserId, String sceneKey, String luckyColor);
 }

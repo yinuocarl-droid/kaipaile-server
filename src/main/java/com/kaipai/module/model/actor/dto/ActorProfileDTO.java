@@ -1,5 +1,6 @@
 package com.kaipai.module.model.actor.dto;
 
+import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -51,4 +52,6 @@ public class ActorProfileDTO {
     private String realName;
 
     private Boolean isCertified;
+
+    private ActorLevelInfoRespDTO capabilitySummary;
 }

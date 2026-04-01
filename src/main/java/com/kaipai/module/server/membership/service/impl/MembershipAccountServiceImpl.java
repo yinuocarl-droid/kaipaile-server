@@ -9,7 +9,10 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.fortune.entity.FortuneReport;
+import com.kaipai.module.model.level.dto.ActorLevelCapabilityRespDTO;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
+import com.kaipai.module.model.level.dto.ActorShareCapabilityRespDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
@@ -24,6 +27,7 @@ import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.referral.entity.UserEntitlementGrant;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
+import com.kaipai.module.server.fortune.mapper.FortuneReportMapper;
 import com.kaipai.module.server.membership.mapper.MembershipAccountMapper;
 import com.kaipai.module.server.membership.mapper.MembershipChangeLogMapper;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
@@ -56,6 +60,7 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
     private final MembershipChangeLogMapper membershipChangeLogMapper;
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
+    private final FortuneReportMapper fortuneReportMapper;
     private final PaymentOrderMapper paymentOrderMapper;
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogger adminOperationLogger;
@@ -91,7 +96,115 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
         dto.setIsCertified(isCertified);
         dto.setProfileCompletion(profileCompletion);
         dto.setMembershipTier(resolveMembershipTier(membershipAccount));
+        dto.setLevelCapability(buildLevelCapability(level, user));
+        dto.setShareCapability(buildShareCapability(level, dto.getMembershipTier(), hasFortuneReport(userId)));
         return dto;
+    }
+
+    private ActorLevelCapabilityRespDTO buildLevelCapability(int level, User user) {
+        ActorLevelCapabilityRespDTO dto = new ActorLevelCapabilityRespDTO();
+        switch (level) {
+            case 0 -> {
+                dto.setMaxScenes(0);
+                dto.setCanCustomColor(false);
+                dto.setCanCustomLayout(false);
+                dto.setAiQuotaPerMonth(0);
+                dto.setCanUseLuckyColor(false);
+                dto.setPaidSkinFreePreview(false);
+            }
+            case 1 -> {
+                dto.setMaxScenes(2);
+                dto.setCanCustomColor(false);
+                dto.setCanCustomLayout(false);
+                dto.setAiQuotaPerMonth(resolveAiQuotaPerMonth(level, user));
+                dto.setCanUseLuckyColor(false);
+                dto.setPaidSkinFreePreview(false);
+            }
+            case 2 -> {
+                dto.setMaxScenes(3);
+                dto.setCanCustomColor(false);
+                dto.setCanCustomLayout(false);
+                dto.setAiQuotaPerMonth(resolveAiQuotaPerMonth(level, user));
+                dto.setCanUseLuckyColor(false);
+                dto.setPaidSkinFreePreview(false);
+            }
+            case 3 -> {
+                dto.setMaxScenes(3);
+                dto.setCanCustomColor(true);
+                dto.setCanCustomLayout(false);
+                dto.setAiQuotaPerMonth(resolveAiQuotaPerMonth(level, user));
+                dto.setCanUseLuckyColor(false);
+                dto.setPaidSkinFreePreview(false);
+            }
+            case 4 -> {
+                dto.setMaxScenes(5);
+                dto.setCanCustomColor(true);
+                dto.setCanCustomLayout(true);
+                dto.setAiQuotaPerMonth(resolveAiQuotaPerMonth(level, user));
+                dto.setCanUseLuckyColor(false);
+                dto.setPaidSkinFreePreview(false);
+            }
+            default -> {
+                dto.setMaxScenes(5);
+                dto.setCanCustomColor(true);
+                dto.setCanCustomLayout(true);
+                dto.setAiQuotaPerMonth(resolveAiQuotaPerMonth(level, user));
+                dto.setCanUseLuckyColor(true);
+                dto.setPaidSkinFreePreview(true);
+            }
+        }
+        return dto;
+    }
+
+    private ActorShareCapabilityRespDTO buildShareCapability(int level, String membershipTier, boolean hasFortuneReport) {
+        ActorShareCapabilityRespDTO dto = new ActorShareCapabilityRespDTO();
+        boolean isMember = !"none".equals(membershipTier);
+        dto.setCanUseBasicCard(level > 0);
+        dto.setCanUsePersonalizedTheme(isMember);
+        dto.setCanUseCustomMiniProgramCard(isMember);
+        dto.setCanUseCustomPoster(isMember);
+        dto.setCanUseCustomInviteCard(isMember);
+        dto.setCanApplyFortuneTheme(isMember && level >= 5 && hasFortuneReport);
+        if (!isMember) {
+            dto.getReasonCodes().add("member_required");
+        }
+        if (level == 0) {
+            dto.getReasonCodes().add("verify_required");
+        }
+        if (!hasFortuneReport) {
+            dto.getReasonCodes().add("fortune_missing");
+        }
+        if (level < 5) {
+            dto.getReasonCodes().add("level_required");
+        }
+        return dto;
+    }
+
+    private boolean hasFortuneReport(Long userId) {
+        FortuneReport report = fortuneReportMapper.selectOne(new LambdaQueryWrapper<FortuneReport>()
+                .eq(FortuneReport::getUserId, userId)
+                .orderByDesc(FortuneReport::getReportMonth)
+                .orderByDesc(FortuneReport::getCreateTime)
+                .last("limit 1"));
+        return report != null && StringUtils.hasText(report.getLuckyColor());
+    }
+
+    private int resolveAiQuotaPerMonth(int level, User user) {
+        if (level <= 0) {
+            return 0;
+        }
+        if (user != null
+                && user.getCreateTime() != null
+                && user.getCreateTime().plusDays(31).isAfter(LocalDateTime.now())
+                && level <= 2) {
+            return 3;
+        }
+        return switch (level) {
+            case 1, 2 -> 1;
+            case 3 -> 3;
+            case 4 -> 4;
+            default -> 5;
+        };
     }
 
     private String resolveMembershipTier(MembershipAccount membershipAccount) {

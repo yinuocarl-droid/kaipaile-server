@@ -18,6 +18,7 @@ import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorExperienceMapper;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
+import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
 
     private final ActorExperienceMapper actorExperienceMapper;
     private final UserMapper userMapper;
+    private final MembershipAccountService membershipAccountService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -170,6 +172,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         dto.setContactPhone(includePrivate ? firstNonBlank(profile == null ? null : profile.getPhone(), user.getPhone(), "") : null);
         dto.setRealName(includePrivate ? firstNonBlank(profile == null ? null : profile.getRealName(), null, null) : null);
         dto.setIsCertified(resolveCertified(profile, user));
+        dto.setCapabilitySummary(membershipAccountService.actorLevelInfo(userId));
         return dto;
     }
 

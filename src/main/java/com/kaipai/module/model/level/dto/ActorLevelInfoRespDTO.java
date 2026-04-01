@@ -16,4 +16,8 @@ public class ActorLevelInfoRespDTO {
     private Integer profileCompletion;
 
     private String membershipTier;
+
+    private ActorLevelCapabilityRespDTO levelCapability;
+
+    private ActorShareCapabilityRespDTO shareCapability;
 }

@@ -62,6 +62,8 @@ public class SecurityConfig {
                                 "/api/actor/*",
                                 "/card/scene-templates",
                                 "/api/card/scene-templates",
+                                "/card/personalization",
+                                "/api/card/personalization",
                                 "/card/config",
                                 "/api/card/config").permitAll()
                         .requestMatchers(WHITE_LIST).permitAll()

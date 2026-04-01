@@ -82,6 +82,43 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
         return toResp(config);
     }
 
+    @Override
+    public ActorCardConfigRespDTO applyLuckyColor(Long currentUserId, String sceneKey, String luckyColor) {
+        if (!StringUtils.hasText(luckyColor)) {
+            throw new BizException("幸运色数据缺失");
+        }
+        String normalizedSceneKey = normalizeSceneKey(sceneKey);
+        ActorCardConfig config = getOne(new LambdaQueryWrapper<ActorCardConfig>()
+                .eq(ActorCardConfig::getUserId, currentUserId)
+                .eq(ActorCardConfig::getSceneKey, normalizedSceneKey)
+                .orderByDesc(ActorCardConfig::getLastUpdate)
+                .orderByDesc(ActorCardConfig::getConfigId)
+                .last("limit 1"), false);
+        if (config == null) {
+            ActorCardConfigRespDTO defaults = buildDefaultConfig(currentUserId, normalizedSceneKey);
+            config = new ActorCardConfig();
+            config.setUserId(currentUserId);
+            config.setSceneKey(normalizedSceneKey);
+            config.setLayoutVariant(defaults.getLayoutVariant());
+            config.setAccentColor(defaults.getAccentColor());
+            config.setBackgroundColor(defaults.getBackgroundColor());
+            config.setHighlightedExperienceIds(writeJson(defaults.getHighlightedExperiences()));
+            config.setHighlightedPhotoUrls(writeJson(defaults.getHighlightedPhotos()));
+            config.setTagOrderJson(writeJson(defaults.getTagOrder()));
+        }
+        ActorProfile profile = actorProfileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
+                .eq(ActorProfile::getUserId, currentUserId)
+                .last("limit 1"));
+        config.setActorProfileId(profile == null ? null : profile.getActorProfileId());
+        config.setPrimaryColor(luckyColor.trim());
+        if (config.getConfigId() == null) {
+            save(config);
+        } else {
+            updateById(config);
+        }
+        return toResp(config);
+    }
+
     private ActorCardConfigRespDTO toResp(ActorCardConfig config) {
         ActorCardConfigRespDTO dto = new ActorCardConfigRespDTO();
         dto.setActorId(config.getUserId());

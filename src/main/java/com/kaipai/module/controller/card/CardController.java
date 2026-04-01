@@ -4,8 +4,10 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.card.dto.ActorCardConfigRespDTO;
 import com.kaipai.module.model.card.dto.ActorCardConfigSaveDTO;
+import com.kaipai.module.model.card.dto.ActorPersonalizationRespDTO;
 import com.kaipai.module.model.card.dto.ActorSceneTemplateRespDTO;
 import com.kaipai.module.server.card.service.ActorCardConfigService;
+import com.kaipai.module.server.card.service.ActorPersonalizationService;
 import com.kaipai.module.server.card.service.ActorSharePreferenceService;
 import com.kaipai.module.server.card.service.CardSceneTemplateService;
 import com.kaipai.module.server.card.service.TemplatePublishLogService;
@@ -31,6 +33,7 @@ public class CardController {
 
     private final CardSceneTemplateService templateService;
     private final ActorCardConfigService cardConfigService;
+    private final ActorPersonalizationService actorPersonalizationService;
     private final ActorSharePreferenceService sharePreferenceService;
     private final TemplatePublishLogService publishLogService;
 
@@ -47,6 +50,15 @@ public class CardController {
         return R.ok(cardConfigService.actorConfig(actorId, sceneKey));
     }
 
+    @Operation(summary = "获取演员端个性化汇总")
+    @GetMapping("/personalization")
+    public R<ActorPersonalizationRespDTO> personalization(Authentication authentication,
+                                                          @RequestParam Long actorId,
+                                                          @RequestParam(value = "scene", required = false) String sceneKey,
+                                                          @RequestParam(value = "loadFortune", defaultValue = "false") boolean loadFortune) {
+        return R.ok(actorPersonalizationService.resolve(actorId, sceneKey, loadFortune, resolveCurrentUserId(authentication)));
+    }
+
     @Operation(summary = "保存演员名片配置")
     @PostMapping("/config")
     public R<ActorCardConfigRespDTO> saveConfig(Authentication authentication,
@@ -59,5 +71,9 @@ public class CardController {
             throw new BizException("未登录或登录态失效");
         }
         return userId;
+    }
+
+    private Long resolveCurrentUserId(Authentication authentication) {
+        return authentication != null && authentication.getPrincipal() instanceof Long userId ? userId : null;
     }
 }
