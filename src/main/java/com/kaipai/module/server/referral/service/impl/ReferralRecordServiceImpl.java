@@ -8,6 +8,8 @@ import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.referral.dto.ActorInviteStatsRespDTO;
+import com.kaipai.module.model.referral.dto.ActorReferralRecordRespDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordItemDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRecordQueryDTO;
@@ -60,6 +62,46 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
     private final AdminOperationLogger adminOperationLogger;
+
+    @Override
+    public ActorInviteStatsRespDTO actorStats(Long userId) {
+        List<ReferralRecord> records = list(new LambdaQueryWrapper<ReferralRecord>()
+                .eq(ReferralRecord::getInviterUserId, userId));
+        ActorInviteStatsRespDTO dto = new ActorInviteStatsRespDTO();
+        dto.setTotalInviteCount(records.size());
+        dto.setValidInviteCount((int) records.stream().filter(record -> Objects.equals(record.getStatus(), STATUS_VALID)).count());
+        dto.setFlaggedInviteCount((int) records.stream().filter(this::isFlaggedRecord).count());
+        dto.setPendingInviteCount(Math.max(0, dto.getTotalInviteCount() - dto.getValidInviteCount() - dto.getFlaggedInviteCount()));
+        return dto;
+    }
+
+    @Override
+    public List<ActorReferralRecordRespDTO> actorRecords(Long userId) {
+        List<ReferralRecord> records = list(new LambdaQueryWrapper<ReferralRecord>()
+                .eq(ReferralRecord::getInviterUserId, userId)
+                .orderByDesc(ReferralRecord::getRegisteredAt)
+                .orderByDesc(ReferralRecord::getReferralId));
+        if (records.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Set<Long> inviteeUserIds = records.stream()
+                .map(ReferralRecord::getInviteeUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, User> inviteeUserMap = inviteeUserIds.isEmpty()
+                ? Collections.emptyMap()
+                : userMapper.selectBatchIds(inviteeUserIds).stream().collect(Collectors.toMap(User::getUserId, Function.identity()));
+        Map<Long, ActorProfile> inviteeProfileMap = inviteeUserIds.isEmpty()
+                ? Collections.emptyMap()
+                : actorProfileMapper.selectList(new LambdaQueryWrapper<ActorProfile>().in(ActorProfile::getUserId, inviteeUserIds))
+                .stream()
+                .collect(Collectors.toMap(ActorProfile::getUserId, Function.identity(), (left, right) -> left));
+
+        return records.stream()
+                .map(record -> toActorRecord(record, inviteeUserMap.get(record.getInviteeUserId()), inviteeProfileMap.get(record.getInviteeUserId())))
+                .toList();
+    }
 
     @Override
     public PageResult<AdminReferralRecordItemDTO> adminRecordList(AdminReferralRecordQueryDTO query) {
@@ -499,6 +541,37 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         context.put("decision", action);
         context.put("remark", request == null ? null : request.getRemark());
         return context;
+    }
+
+    private ActorReferralRecordRespDTO toActorRecord(ReferralRecord record, User inviteeUser, ActorProfile inviteeProfile) {
+        ActorReferralRecordRespDTO dto = new ActorReferralRecordRespDTO();
+        dto.setId(record.getReferralId());
+        dto.setInviteeNickname(maskInviteeNickname(resolveDisplayName(inviteeUser, inviteeProfile)));
+        dto.setRegisteredAt(record.getRegisteredAt());
+        dto.setIsValid(Objects.equals(record.getStatus(), STATUS_VALID));
+        dto.setFlagged(isFlaggedRecord(record));
+        dto.setValidatedAt(record.getValidatedAt());
+        return dto;
+    }
+
+    private String maskInviteeNickname(String value) {
+        String source = value == null ? "" : value.trim();
+        if (source.isEmpty()) {
+            return "新用户";
+        }
+        if (source.length() <= 1) {
+            return source + "*";
+        }
+        if (source.length() == 2) {
+            return source.charAt(0) + "*";
+        }
+        int maskedLength = Math.min(source.length() - 2, 3);
+        return source.charAt(0) + "*".repeat(maskedLength) + source.charAt(source.length() - 1);
+    }
+
+    private boolean isFlaggedRecord(ReferralRecord record) {
+        return !Objects.equals(record.getRiskFlag(), RISK_FLAG_NORMAL)
+                || Objects.equals(record.getStatus(), STATUS_UNDER_REVIEW);
     }
 
     private ActorProfile selectActorProfile(Long userId) {
