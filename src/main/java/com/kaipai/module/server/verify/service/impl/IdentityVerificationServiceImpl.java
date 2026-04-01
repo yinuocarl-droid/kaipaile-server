@@ -12,6 +12,8 @@ import com.kaipai.module.model.verify.dto.IdentityVerificationAuditReqDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationDetailRespDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationListItemDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationListReqDTO;
+import com.kaipai.module.model.verify.dto.IdentityVerificationStatusRespDTO;
+import com.kaipai.module.model.verify.dto.IdentityVerificationSubmitReqDTO;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
@@ -20,7 +22,11 @@ import com.kaipai.module.server.verify.service.IdentityVerificationService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -41,6 +47,93 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     private static final int STATUS_PENDING = 1;
     private static final int STATUS_APPROVED = 2;
     private static final int STATUS_REJECTED = 3;
+
+    @Override
+    public IdentityVerificationStatusRespDTO currentStatus(Long userId) {
+        User user = userMapper.selectById(userId);
+        IdentityVerification latestRecord = selectLatestByUserId(userId);
+        if (latestRecord == null) {
+            IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
+            dto.setStatus(user == null || user.getRealAuthStatus() == null ? 0 : user.getRealAuthStatus());
+            return dto;
+        }
+        return toStatusResp(latestRecord);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public IdentityVerificationStatusRespDTO submit(Long userId, IdentityVerificationSubmitReqDTO req) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("用户不存在");
+        }
+
+        String realName = req.getRealName() == null ? "" : req.getRealName().trim();
+        if (realName.isEmpty()) {
+            throw new BizException("真实姓名不能为空");
+        }
+        String normalizedIdCardNo = normalizeIdCardNo(req.getIdCardNo());
+        String idCardHash = hashIdCard(normalizedIdCardNo);
+
+        IdentityVerification latestRecord = selectLatestByUserId(userId);
+        if (latestRecord != null) {
+            Integer latestStatus = latestRecord.getStatus();
+            if (latestStatus != null && latestStatus == STATUS_PENDING) {
+                throw new BizException("当前已有待审核认证申请");
+            }
+            if (latestStatus != null && latestStatus == STATUS_APPROVED) {
+                throw new BizException("已完成实名认证，无需重复提交");
+            }
+        }
+
+        IdentityVerification duplicateRecord = getOne(new QueryWrapper<IdentityVerification>().lambda()
+                .eq(IdentityVerification::getIdCardHash, idCardHash)
+                .ne(IdentityVerification::getUserId, userId)
+                .orderByDesc(IdentityVerification::getCreateTime)
+                .orderByDesc(IdentityVerification::getVerificationId)
+                .last("LIMIT 1"), false);
+        if (duplicateRecord != null) {
+            throw new BizException("该身份证号已被其他账号提交");
+        }
+
+        ActorProfile profile = actorProfileMapper.selectOne(new QueryWrapper<ActorProfile>().lambda()
+                .eq(ActorProfile::getUserId, userId)
+                .last("LIMIT 1"));
+        int profileCompletion = calculateProfileCompletion(profile);
+        if (profileCompletion < 70) {
+            throw new BizException("请先将档案完成度提升到 70%");
+        }
+
+        IdentityVerification record = latestRecord != null ? latestRecord : new IdentityVerification();
+        record.setUserId(userId);
+        record.setRealName(realName);
+        record.setIdCardNoCipher(maskIdCard(normalizedIdCardNo));
+        record.setIdCardHash(idCardHash);
+        record.setStatus(STATUS_PENDING);
+        record.setRejectReason(null);
+        record.setReviewerId(null);
+        record.setReviewedAt(null);
+        record.setSnapshotProfileCompletion(profileCompletion);
+        if (record.getVerificationId() == null) {
+            save(record);
+        } else {
+            record.setCreateTime(LocalDateTime.now());
+            updateById(record);
+        }
+
+        User updateUser = new User();
+        updateUser.setUserId(userId);
+        updateUser.setRealAuthStatus(STATUS_PENDING);
+        userMapper.updateById(updateUser);
+
+        if (profile != null) {
+            profile.setRealName(realName);
+            profile.setIsCertified(Boolean.FALSE);
+            actorProfileMapper.updateById(profile);
+        }
+
+        return toStatusResp(record);
+    }
 
     @Override
     public PageResult<IdentityVerificationListItemDTO> adminList(IdentityVerificationListReqDTO req) {
@@ -114,11 +207,13 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void approve(Long id, IdentityVerificationAuditReqDTO req) {
         review(id, req, STATUS_APPROVED);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void reject(Long id, IdentityVerificationAuditReqDTO req) {
         review(id, req, STATUS_REJECTED);
     }
@@ -152,6 +247,9 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         );
         if (profile != null) {
             profile.setIsCertified(newStatus == STATUS_APPROVED);
+            if (newStatus == STATUS_APPROVED) {
+                profile.setRealName(record.getRealName());
+            }
             actorProfileMapper.updateById(profile);
         }
         adminOperationLogger.log(AdminOperationLogCommand.builder()
@@ -187,5 +285,93 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             extraContext.put("reason", req.getRemark());
         }
         return extraContext;
+    }
+
+    private IdentityVerification selectLatestByUserId(Long userId) {
+        return getOne(new QueryWrapper<IdentityVerification>()
+                .eq("user_id", userId)
+                .orderByDesc("create_time")
+                .orderByDesc("verification_id")
+                .last("LIMIT 1"), false);
+    }
+
+    private IdentityVerificationStatusRespDTO toStatusResp(IdentityVerification record) {
+        IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
+        dto.setStatus(record.getStatus());
+        dto.setRealName(record.getRealName());
+        dto.setIdCardNo(record.getIdCardNoCipher());
+        dto.setRejectReason(record.getRejectReason());
+        dto.setSubmittedAt(record.getCreateTime());
+        dto.setReviewedAt(record.getReviewedAt());
+        return dto;
+    }
+
+    private String normalizeIdCardNo(String idCardNo) {
+        String normalized = idCardNo == null ? "" : idCardNo.replace(" ", "").trim().toUpperCase();
+        if (!normalized.matches("\\d{17}[\\dX]")) {
+            throw new BizException("身份证号格式不正确");
+        }
+        return normalized;
+    }
+
+    private int calculateProfileCompletion(ActorProfile profile) {
+        if (profile == null) {
+            return 0;
+        }
+
+        int score = 0;
+        if (hasText(profile.getAvatarUrl())) {
+            score += 10;
+        }
+        if (hasText(profile.getNickName()) && profile.getGender() != null && profile.getAge() != null
+                && profile.getHeight() != null && hasText(profile.getLocationCity())) {
+            score += 15;
+        }
+        if (hasText(profile.getPhotoUrls())) {
+            score += 15;
+        }
+        if (hasText(profile.getVideoUrl())) {
+            score += 15;
+        }
+        if (hasText(profile.getIntro()) && profile.getIntro().trim().length() >= 20) {
+            score += 10;
+        }
+        if (hasText(profile.getSkillTag())) {
+            score += 5;
+        }
+        if (hasText(profile.getExperienceDesc())) {
+            score += 15;
+        }
+        if (hasText(profile.getStyleTag())) {
+            score += 10;
+        }
+        return score;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String maskIdCard(String idCardNo) {
+        String normalized = idCardNo == null ? "" : idCardNo.trim().toUpperCase();
+        if (normalized.length() < 8) {
+            return normalized;
+        }
+        return normalized.substring(0, 3) + "***********" + normalized.substring(normalized.length() - 4);
+    }
+
+    private String hashIdCard(String idCardNo) {
+        String normalized = idCardNo == null ? "" : idCardNo.trim().toUpperCase();
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(normalized.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte value : bytes) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 not supported", ex);
+        }
     }
 }

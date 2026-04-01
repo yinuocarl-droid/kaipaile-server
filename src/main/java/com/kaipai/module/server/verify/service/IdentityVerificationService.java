@@ -6,9 +6,15 @@ import com.kaipai.module.model.verify.dto.IdentityVerificationAuditReqDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationDetailRespDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationListItemDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationListReqDTO;
+import com.kaipai.module.model.verify.dto.IdentityVerificationStatusRespDTO;
+import com.kaipai.module.model.verify.dto.IdentityVerificationSubmitReqDTO;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
 
 public interface IdentityVerificationService extends IService<IdentityVerification> {
+
+    IdentityVerificationStatusRespDTO currentStatus(Long userId);
+
+    IdentityVerificationStatusRespDTO submit(Long userId, IdentityVerificationSubmitReqDTO req);
 
     PageResult<IdentityVerificationListItemDTO> adminList(IdentityVerificationListReqDTO req);
 
