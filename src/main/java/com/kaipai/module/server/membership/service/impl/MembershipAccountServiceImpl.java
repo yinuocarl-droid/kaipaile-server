@@ -34,6 +34,7 @@ import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.membership.service.MembershipChangeLogService;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
+import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,7 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
     private final FortuneReportMapper fortuneReportMapper;
     private final PaymentOrderMapper paymentOrderMapper;
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
+    private final ReferralRecordService referralRecordService;
     private final AdminOperationLogger adminOperationLogger;
 
     @Override
@@ -86,7 +88,7 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
                 .orderByDesc(MembershipAccount::getMembershipId)
                 .last("limit 1")
                 .one();
-        int inviteCount = user.getValidInviteCount() == null ? 0 : user.getValidInviteCount();
+        int inviteCount = referralRecordService.countValidInviteCount(userId);
         int level = calculateLevel(inviteCount, isCertified, profileCompletion);
 
         ActorLevelInfoRespDTO dto = new ActorLevelInfoRespDTO();

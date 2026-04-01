@@ -21,6 +21,8 @@ public interface ReferralRecordService extends IService<ReferralRecord> {
 
     List<ActorReferralRecordRespDTO> actorRecords(Long userId);
 
+    int countValidInviteCount(Long userId);
+
     PageResult<AdminReferralRecordItemDTO> adminRecordList(AdminReferralRecordQueryDTO query);
 
     AdminReferralRecordDetailDTO adminRecordDetail(Long referralId);

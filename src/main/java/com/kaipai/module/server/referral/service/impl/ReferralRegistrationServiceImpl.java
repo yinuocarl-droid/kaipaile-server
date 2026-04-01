@@ -41,16 +41,21 @@ public class ReferralRegistrationServiceImpl implements ReferralRegistrationServ
     private final UserMapper userMapper;
 
     @Override
-    public void bindInviteOnRegister(User user, RegisterReqDTO registerReq) {
+    public InviteCode prepareInviteOnRegister(User user, RegisterReqDTO registerReq) {
         user.setRegisterDeviceFingerprint(normalizeDeviceFingerprint(registerReq.getDeviceFingerprint()));
         if (!StringUtils.hasText(registerReq.getInviteCode())) {
-            return;
+            return null;
         }
 
         InviteCode inviteCode = resolveInviteCode(registerReq.getInviteCode());
         User inviter = requireInviter(inviteCode.getUserId());
         user.setInvitedByUserId(inviter.getUserId());
-        if (user.getUserId() == null) {
+        return inviteCode;
+    }
+
+    @Override
+    public void persistInviteOnRegister(User user, InviteCode inviteCode) {
+        if (inviteCode == null || user.getUserId() == null) {
             return;
         }
         persistReferralRecord(user, inviteCode);

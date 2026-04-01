@@ -104,6 +104,17 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
     }
 
     @Override
+    public int countValidInviteCount(Long userId) {
+        if (userId == null) {
+            return 0;
+        }
+        Long count = baseMapper.selectCount(new LambdaQueryWrapper<ReferralRecord>()
+                .eq(ReferralRecord::getInviterUserId, userId)
+                .eq(ReferralRecord::getStatus, STATUS_VALID));
+        return count == null ? 0 : count.intValue();
+    }
+
+    @Override
     public PageResult<AdminReferralRecordItemDTO> adminRecordList(AdminReferralRecordQueryDTO query) {
         Page<ReferralRecord> page = new Page<>(query.getPageNo(), query.getPageSize());
         LambdaQueryWrapper<ReferralRecord> wrapper = buildRecordQuery(query);
@@ -221,6 +232,7 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
             record.setValidatedAt(LocalDateTime.now());
         }
         updateById(record);
+        refreshInviterValidInviteCount(record.getInviterUserId());
         logRiskAction("approve", record, beforeSnapshot, request);
     }
 
@@ -232,6 +244,7 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         record.setStatus(STATUS_INVALID);
         record.setRiskFlag(RISK_FLAG_NORMAL);
         updateById(record);
+        refreshInviterValidInviteCount(record.getInviterUserId());
         logRiskAction("invalidate", record, beforeSnapshot, request);
     }
 
@@ -243,6 +256,7 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         record.setStatus(record.getValidatedAt() == null ? STATUS_PENDING : STATUS_VALID);
         record.setRiskFlag(RISK_FLAG_NORMAL);
         updateById(record);
+        refreshInviterValidInviteCount(record.getInviterUserId());
         logRiskAction("resolve", record, beforeSnapshot, request);
     }
 
@@ -572,6 +586,16 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
     private boolean isFlaggedRecord(ReferralRecord record) {
         return !Objects.equals(record.getRiskFlag(), RISK_FLAG_NORMAL)
                 || Objects.equals(record.getStatus(), STATUS_UNDER_REVIEW);
+    }
+
+    private void refreshInviterValidInviteCount(Long inviterUserId) {
+        if (inviterUserId == null) {
+            return;
+        }
+        User update = new User();
+        update.setUserId(inviterUserId);
+        update.setValidInviteCount(countValidInviteCount(inviterUserId));
+        userMapper.updateById(update);
     }
 
     private ActorProfile selectActorProfile(Long userId) {

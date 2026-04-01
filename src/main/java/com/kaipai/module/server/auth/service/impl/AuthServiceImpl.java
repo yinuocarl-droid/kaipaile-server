@@ -7,8 +7,10 @@ import com.kaipai.common.util.JwtUtil;
 import com.kaipai.module.model.auth.dto.LoginReqDTO;
 import com.kaipai.module.model.auth.dto.LoginRespDTO;
 import com.kaipai.module.model.auth.dto.RegisterReqDTO;
+import com.kaipai.module.model.referral.entity.InviteCode;
 import com.kaipai.module.server.auth.service.AuthService;
 import com.kaipai.module.model.user.entity.User;
+import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.referral.service.ReferralRegistrationService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +32,7 @@ public class AuthServiceImpl implements AuthService {
     private final StringRedisTemplate redisTemplate;
     private final JwtUtil jwtUtil;
     private final ReferralRegistrationService referralRegistrationService;
+    private final ReferralRecordService referralRecordService;
 
     private static final String SMS_CODE_PREFIX = "sms:code:";
     private static final long SMS_CODE_EXPIRE_MINUTES = 5;
@@ -67,9 +70,9 @@ public class AuthServiceImpl implements AuthService {
         user.setStatus(1);
         user.setCreateUserName("");
         user.setUpdateUserName("");
-        referralRegistrationService.bindInviteOnRegister(user, dto);
+        InviteCode inviteCode = referralRegistrationService.prepareInviteOnRegister(user, dto);
         userMapper.insert(user);
-        referralRegistrationService.bindInviteOnRegister(user, dto);
+        referralRegistrationService.persistInviteOnRegister(user, inviteCode);
 
         redisTemplate.delete(SMS_CODE_PREFIX + dto.getPhone());
         return buildLoginResp(user);
@@ -110,6 +113,8 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private LoginRespDTO buildLoginResp(User user) {
+        int validInviteCount = referralRecordService.countValidInviteCount(user.getUserId());
+        user.setValidInviteCount(validInviteCount);
         String token = jwtUtil.generateToken(user.getUserId(), user.getPhone(), user.getUserType());
         return LoginRespDTO.builder()
                 .token(token)
@@ -120,7 +125,7 @@ public class AuthServiceImpl implements AuthService {
                 .registeredAt(user.getCreateTime())
                 .realAuthStatus(user.getRealAuthStatus())
                 .invitedByUserId(user.getInvitedByUserId())
-                .validInviteCount(user.getValidInviteCount())
+                .validInviteCount(validInviteCount)
                 .build();
     }
 }

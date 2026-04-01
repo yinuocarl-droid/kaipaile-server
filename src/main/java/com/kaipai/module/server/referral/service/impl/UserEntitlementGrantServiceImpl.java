@@ -149,10 +149,9 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
     public UserEntitlementGrant grantManual(UserEntitlementGrantGrantRequestDTO request) {
         LambdaQueryWrapper<UserEntitlementGrant> existsFlag = new LambdaQueryWrapper<>();
         existsFlag.eq(UserEntitlementGrant::getUserId, request.getUserId())
-                .eq(UserEntitlementGrant::getGrantCode, request.getGrantCode())
-                .eq(UserEntitlementGrant::getStatus, 1);
+                .eq(UserEntitlementGrant::getGrantCode, request.getGrantCode());
         if (count(existsFlag) > 0) {
-            throw new BizException("active grant with same code already exists");
+            throw new BizException("grant with same code already exists");
         }
         UserEntitlementGrant grant = new UserEntitlementGrant();
         grant.setUserId(request.getUserId());
