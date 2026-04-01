@@ -49,8 +49,8 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     }
 
     @Override
-    public ActorProfileDTO detail(Long userId) {
-        return buildProfile(userId, false, false);
+    public ActorProfileDTO detail(Long userId, boolean includeContact) {
+        return buildProfile(userId, includeContact, false);
     }
 
     @Override
@@ -186,17 +186,43 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     }
 
     private void syncExperiences(ActorProfile profile, List<ActorWorkExperienceDTO> experiences) {
-        actorExperienceMapper.delete(new LambdaQueryWrapper<ActorExperience>()
-                .eq(ActorExperience::getUserId, profile.getUserId()));
+        List<ActorExperience> existing = actorExperienceMapper.selectList(new LambdaQueryWrapper<ActorExperience>()
+                .eq(ActorExperience::getUserId, profile.getUserId())
+                .orderByDesc(ActorExperience::getSortNo)
+                .orderByDesc(ActorExperience::getExperienceId));
         List<ActorWorkExperienceDTO> safeExperiences = safeList(experiences);
+        if (safeExperiences.isEmpty()) {
+            if (!existing.isEmpty()) {
+                actorExperienceMapper.delete(new LambdaQueryWrapper<ActorExperience>()
+                        .eq(ActorExperience::getUserId, profile.getUserId()));
+            }
+            return;
+        }
+
+        List<Long> retainedIds = new ArrayList<>();
         for (int i = 0; i < safeExperiences.size(); i++) {
             ActorWorkExperienceDTO item = safeExperiences.get(i);
             if (!StringUtils.hasText(item.getProjectName())) {
                 continue;
             }
-            ActorExperience experience = new ActorExperience();
-            experience.setUserId(profile.getUserId());
-            experience.setActorProfileId(profile.getActorProfileId());
+            ActorExperience experience = null;
+            if (item.getId() != null) {
+                for (ActorExperience current : existing) {
+                    if (Objects.equals(current.getExperienceId(), item.getId())) {
+                        experience = current;
+                        retainedIds.add(current.getExperienceId());
+                        break;
+                    }
+                }
+            }
+            boolean creating = experience == null;
+            if (creating) {
+                experience = new ActorExperience();
+                experience.setUserId(profile.getUserId());
+                experience.setActorProfileId(profile.getActorProfileId());
+            } else if (experience.getActorProfileId() == null) {
+                experience.setActorProfileId(profile.getActorProfileId());
+            }
             experience.setDramaName(item.getProjectName().trim());
             experience.setRoleName(trimToNull(item.getRoleName()));
             experience.setShootYear(parseShootYear(item.getShootDate()));
@@ -204,7 +230,22 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
             experience.setRoleDesc(trimToNull(item.getDescription()));
             experience.setSortNo(safeExperiences.size() - i);
             experience.setExtendedField(writeJson(new ExperienceExtras(safeList(item.getPhotos()))));
-            actorExperienceMapper.insert(experience);
+            if (creating) {
+                actorExperienceMapper.insert(experience);
+            } else {
+                actorExperienceMapper.updateById(experience);
+            }
+        }
+
+        if (!existing.isEmpty()) {
+            List<Long> removeIds = existing.stream()
+                    .map(ActorExperience::getExperienceId)
+                    .filter(Objects::nonNull)
+                    .filter(id -> !retainedIds.contains(id))
+                    .toList();
+            if (!removeIds.isEmpty()) {
+                actorExperienceMapper.deleteBatchIds(removeIds);
+            }
         }
     }
 
