@@ -74,6 +74,13 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
                 && user.getRealAuthStatus() == REAL_AUTH_APPROVED
                 && profile != null
                 && Boolean.TRUE.equals(profile.getIsCertified());
+        MembershipAccount membershipAccount = lambdaQuery()
+                .eq(MembershipAccount::getUserId, userId)
+                .eq(MembershipAccount::getStatus, 1)
+                .orderByDesc(MembershipAccount::getExpireTime)
+                .orderByDesc(MembershipAccount::getMembershipId)
+                .last("limit 1")
+                .one();
         int inviteCount = user.getValidInviteCount() == null ? 0 : user.getValidInviteCount();
         int level = calculateLevel(inviteCount, isCertified, profileCompletion);
 
@@ -83,7 +90,15 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
         dto.setNextLevelRequirement(nextLevelRequirement(level));
         dto.setIsCertified(isCertified);
         dto.setProfileCompletion(profileCompletion);
+        dto.setMembershipTier(resolveMembershipTier(membershipAccount));
         return dto;
+    }
+
+    private String resolveMembershipTier(MembershipAccount membershipAccount) {
+        if (membershipAccount == null || membershipAccount.getTier() == null || membershipAccount.getTier() <= 0) {
+            return "none";
+        }
+        return membershipAccount.getTier() >= 2 ? "vip" : "member";
     }
 
     @Override

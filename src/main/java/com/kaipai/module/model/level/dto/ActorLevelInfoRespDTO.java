@@ -14,4 +14,6 @@ public class ActorLevelInfoRespDTO {
     private Boolean isCertified;
 
     private Integer profileCompletion;
+
+    private String membershipTier;
 }

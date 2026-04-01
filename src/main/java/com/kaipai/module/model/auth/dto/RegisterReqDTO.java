@@ -25,4 +25,10 @@ public class RegisterReqDTO {
 
     @Schema(description = "昵称（可选，不填则自动生成）", example = "小明")
     private String nickName;
+
+    @Schema(description = "邀请码（可选）", example = "KM7P4A")
+    private String inviteCode;
+
+    @Schema(description = "注册设备指纹（可选）", example = "device-fingerprint-001")
+    private String deviceFingerprint;
 }

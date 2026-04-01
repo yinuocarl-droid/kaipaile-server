@@ -9,6 +9,7 @@ import com.kaipai.module.model.auth.dto.LoginRespDTO;
 import com.kaipai.module.model.auth.dto.RegisterReqDTO;
 import com.kaipai.module.server.auth.service.AuthService;
 import com.kaipai.module.model.user.entity.User;
+import com.kaipai.module.server.referral.service.ReferralRegistrationService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final StringRedisTemplate redisTemplate;
     private final JwtUtil jwtUtil;
+    private final ReferralRegistrationService referralRegistrationService;
 
     private static final String SMS_CODE_PREFIX = "sms:code:";
     private static final long SMS_CODE_EXPIRE_MINUTES = 5;
@@ -61,20 +63,16 @@ public class AuthServiceImpl implements AuthService {
         user.setUserType(dto.getUserType());
         user.setRegisterSource(1);
         user.setRealAuthStatus(0);
+        user.setValidInviteCount(0);
         user.setStatus(1);
         user.setCreateUserName("");
         user.setUpdateUserName("");
+        referralRegistrationService.bindInviteOnRegister(user, dto);
         userMapper.insert(user);
+        referralRegistrationService.bindInviteOnRegister(user, dto);
 
         redisTemplate.delete(SMS_CODE_PREFIX + dto.getPhone());
-
-        String token = jwtUtil.generateToken(user.getUserId(), user.getPhone(), user.getUserType());
-        return LoginRespDTO.builder()
-                .token(token)
-                .userId(user.getUserId())
-                .userType(user.getUserType())
-                .nickName(user.getUserName())
-                .build();
+        return buildLoginResp(user);
     }
 
     @Override
@@ -95,17 +93,10 @@ public class AuthServiceImpl implements AuthService {
         update.setLastLoginTime(LocalDateTime.now());
         update.setUpdateUserName("");
         userMapper.updateById(update);
+        user.setLastLoginTime(update.getLastLoginTime());
 
         redisTemplate.delete(SMS_CODE_PREFIX + dto.getPhone());
-
-        String token = jwtUtil.generateToken(user.getUserId(), user.getPhone(), user.getUserType());
-        return LoginRespDTO.builder()
-                .token(token)
-                .userId(user.getUserId())
-                .userType(user.getUserType())
-                .nickName(user.getUserName())
-                .avatarUrl(user.getAvatarUrl())
-                .build();
+        return buildLoginResp(user);
     }
 
     private void verifyCode(String phone, String inputCode) {
@@ -116,5 +107,20 @@ public class AuthServiceImpl implements AuthService {
         if (!cachedCode.equals(inputCode)) {
             throw new BizException(ResultCode.VERIFY_CODE_ERROR);
         }
+    }
+
+    private LoginRespDTO buildLoginResp(User user) {
+        String token = jwtUtil.generateToken(user.getUserId(), user.getPhone(), user.getUserType());
+        return LoginRespDTO.builder()
+                .token(token)
+                .userId(user.getUserId())
+                .userType(user.getUserType())
+                .nickName(user.getUserName())
+                .avatarUrl(user.getAvatarUrl())
+                .registeredAt(user.getCreateTime())
+                .realAuthStatus(user.getRealAuthStatus())
+                .invitedByUserId(user.getInvitedByUserId())
+                .validInviteCount(user.getValidInviteCount())
+                .build();
     }
 }
