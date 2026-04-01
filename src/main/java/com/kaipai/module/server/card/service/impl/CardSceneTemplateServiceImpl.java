@@ -3,11 +3,14 @@ package com.kaipai.module.server.card.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.auth.AdminAuthContext;
 import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.card.dto.ActorSceneTemplateRespDTO;
 import com.kaipai.module.model.card.dto.TemplateCreateDTO;
 import com.kaipai.module.model.card.dto.TemplateDetailDTO;
 import com.kaipai.module.model.card.dto.TemplateItemDTO;
@@ -35,6 +38,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,9 +48,30 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateMapper, CardSceneTemplate> implements CardSceneTemplateService {
 
+    private static final int STATUS_ENABLED = 1;
+
     private final TemplatePublishLogService publishLogService;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
+    private final ObjectMapper objectMapper;
+
+    @Override
+    public List<ActorSceneTemplateRespDTO> actorSceneTemplates() {
+        List<CardSceneTemplate> templates = list(new LambdaQueryWrapper<CardSceneTemplate>()
+                .eq(CardSceneTemplate::getStatus, STATUS_ENABLED)
+                .orderByAsc(CardSceneTemplate::getSortNo)
+                .orderByDesc(CardSceneTemplate::getLastUpdate));
+        if (templates.isEmpty()) {
+            return List.of(
+                    buildDefaultTemplate("general"),
+                    buildDefaultTemplate("urban"),
+                    buildDefaultTemplate("commercial"),
+                    buildDefaultTemplate("costume"),
+                    buildDefaultTemplate("artistic")
+            );
+        }
+        return templates.stream().map(this::toActorSceneTemplate).toList();
+    }
 
     @Override
     public PageResult<TemplateItemDTO> adminTemplateList(TemplateListQueryDTO dto) {
@@ -260,6 +285,171 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
                 .extraContext(artifactContext(template))
                 .operationResult(1)
                 .build());
+    }
+
+    private ActorSceneTemplateRespDTO toActorSceneTemplate(CardSceneTemplate template) {
+        ActorSceneTemplateRespDTO dto = buildDefaultTemplate(template.getSceneKey());
+        dto.setSceneKey(normalizeSceneKey(template.getSceneKey()));
+        if (StringUtils.hasText(template.getTemplateName())) {
+            dto.setName(template.getTemplateName());
+        }
+        if (StringUtils.hasText(template.getDescription())) {
+            dto.setDescription(template.getDescription());
+        }
+        if (StringUtils.hasText(template.getLayoutVariant())) {
+            dto.setLayoutVariant(template.getLayoutVariant());
+        }
+        dto.setTier(StringUtils.hasText(template.getTier())
+                ? template.getTier()
+                : Boolean.TRUE.equals(template.getMembershipRequired()) ? "paid" : "free");
+        dto.setRequiredLevel(template.getRequiredLevel() == null ? 1 : template.getRequiredLevel());
+        applyThemeOverride(dto.getThemeColors(), template.getBaseThemeJson());
+        applyArtifactOverride(dto, template.getArtifactPresetJson());
+        return dto;
+    }
+
+    private void applyThemeOverride(ActorSceneTemplateRespDTO.ThemeColors themeColors, String baseThemeJson) {
+        JsonNode root = readJson(baseThemeJson);
+        if (root == null) {
+            return;
+        }
+        JsonNode themeNode = root.has("themeColors") ? root.get("themeColors") : root;
+        themeColors.setPrimary(textValue(themeNode, "primary", themeColors.getPrimary()));
+        themeColors.setAccent(textValue(themeNode, "accent", themeColors.getAccent()));
+        themeColors.setBackground(textValue(themeNode, "background", themeColors.getBackground()));
+        themeColors.setText(textValue(themeNode, "text", themeColors.getText()));
+        themeColors.setHeroText(textValue(themeNode, "heroText", themeColors.getHeroText()));
+    }
+
+    private void applyArtifactOverride(ActorSceneTemplateRespDTO dto, String artifactPresetJson) {
+        JsonNode root = readJson(artifactPresetJson);
+        if (root == null) {
+            return;
+        }
+        dto.setCoverImage(textValue(root, "coverImage", dto.getCoverImage()));
+        dto.setHeroEyebrow(textValue(root, "heroEyebrow", dto.getHeroEyebrow()));
+        JsonNode focusNode = root.has("contentFocus") ? root.get("contentFocus") : root.get("focus");
+        if (focusNode != null && focusNode.isArray()) {
+            dto.setContentFocus(readStringArray(focusNode));
+        }
+    }
+
+    private JsonNode readJson(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    private List<String> readStringArray(JsonNode arrayNode) {
+        if (arrayNode == null || !arrayNode.isArray()) {
+            return Collections.emptyList();
+        }
+        return streamOf(arrayNode)
+                .map(JsonNode::asText)
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    private java.util.stream.Stream<JsonNode> streamOf(JsonNode arrayNode) {
+        List<JsonNode> items = new java.util.ArrayList<>();
+        arrayNode.forEach(items::add);
+        return items.stream();
+    }
+
+    private String textValue(JsonNode node, String fieldName, String defaultValue) {
+        if (node == null || !node.has(fieldName) || !StringUtils.hasText(node.get(fieldName).asText())) {
+            return defaultValue;
+        }
+        return node.get(fieldName).asText();
+    }
+
+    private String normalizeSceneKey(String sceneKey) {
+        return StringUtils.hasText(sceneKey) ? sceneKey.trim() : "general";
+    }
+
+    private ActorSceneTemplateRespDTO buildDefaultTemplate(String sceneKey) {
+        ActorSceneTemplateRespDTO dto = new ActorSceneTemplateRespDTO();
+        dto.setSceneKey(normalizeSceneKey(sceneKey));
+        dto.setCoverImage("");
+        dto.setThemeColors(new ActorSceneTemplateRespDTO.ThemeColors());
+        switch (dto.getSceneKey()) {
+            case "urban" -> {
+                dto.setName("都市");
+                dto.setDescription("突出生活质感、都市表达与台词感。");
+                dto.setHeroEyebrow("URBAN SCREEN TEST");
+                dto.setLayoutVariant("compact");
+                dto.setContentFocus(List.of("lifestyle", "urban", "dialogue"));
+                dto.setTier("free");
+                dto.setRequiredLevel(1);
+                dto.getThemeColors().setPrimary("#4d7cff");
+                dto.getThemeColors().setAccent("#a9d0ff");
+                dto.getThemeColors().setBackground("#edf4ff");
+                dto.getThemeColors().setText("#162033");
+                dto.getThemeColors().setHeroText("#ffffff");
+            }
+            case "commercial" -> {
+                dto.setName("商业");
+                dto.setDescription("偏向广告、短视频与商业镜头感。");
+                dto.setHeroEyebrow("COMMERCIAL LOOKBOOK");
+                dto.setLayoutVariant("compact");
+                dto.setContentFocus(List.of("portrait", "commercial", "camera"));
+                dto.setTier("free");
+                dto.setRequiredLevel(2);
+                dto.getThemeColors().setPrimary("#ff8e33");
+                dto.getThemeColors().setAccent("#ffd0a7");
+                dto.getThemeColors().setBackground("#fff6ec");
+                dto.getThemeColors().setText("#2a190c");
+                dto.getThemeColors().setHeroText("#ffffff");
+            }
+            case "costume" -> {
+                dto.setName("古装");
+                dto.setDescription("突出古装扮相、气质和身段表达。");
+                dto.setHeroEyebrow("COSTUME REEL");
+                dto.setLayoutVariant("spacious");
+                dto.setContentFocus(List.of("production", "costume", "body"));
+                dto.setTier("free");
+                dto.setRequiredLevel(2);
+                dto.getThemeColors().setPrimary("#8d5f3c");
+                dto.getThemeColors().setAccent("#ddc2a0");
+                dto.getThemeColors().setBackground("#f6efe8");
+                dto.getThemeColors().setText("#2c231d");
+                dto.getThemeColors().setHeroText("#ffffff");
+            }
+            case "artistic" -> {
+                dto.setName("文艺");
+                dto.setDescription("突出质感、表演深度和胶片氛围。");
+                dto.setHeroEyebrow("ART HOUSE PROFILE");
+                dto.setLayoutVariant("magazine");
+                dto.setContentFocus(List.of("production", "artistic", "depth"));
+                dto.setTier("free");
+                dto.setRequiredLevel(4);
+                dto.getThemeColors().setPrimary("#6e5a74");
+                dto.getThemeColors().setAccent("#c9b6cf");
+                dto.getThemeColors().setBackground("#f4eef6");
+                dto.getThemeColors().setText("#241d29");
+                dto.getThemeColors().setHeroText("#ffffff");
+            }
+            default -> {
+                dto.setName("通用");
+                dto.setDescription("适合首次分享的全量信息名片。");
+                dto.setHeroEyebrow("GENERAL CAST CARD");
+                dto.setLayoutVariant("compact");
+                dto.setContentFocus(List.of("all", "portrait", "work"));
+                dto.setTier("free");
+                dto.setRequiredLevel(1);
+                dto.getThemeColors().setPrimary("#ff7a45");
+                dto.getThemeColors().setAccent("#ffb178");
+                dto.getThemeColors().setBackground("#fff7f0");
+                dto.getThemeColors().setText("#181b22");
+                dto.getThemeColors().setHeroText("#ffffff");
+            }
+        }
+        return dto;
     }
 
     private CardSceneTemplate requireTemplate(Long templateId) {

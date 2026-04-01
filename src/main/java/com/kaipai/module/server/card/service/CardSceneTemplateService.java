@@ -2,6 +2,7 @@ package com.kaipai.module.server.card.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.card.dto.ActorSceneTemplateRespDTO;
 import com.kaipai.module.model.card.dto.TemplateCreateDTO;
 import com.kaipai.module.model.card.dto.TemplateDetailDTO;
 import com.kaipai.module.model.card.dto.TemplateItemDTO;
@@ -19,7 +20,11 @@ import com.kaipai.module.model.card.dto.ShareArtifactQueryDTO;
 import com.kaipai.module.model.card.dto.ShareArtifactUpdateDTO;
 import com.kaipai.module.model.card.entity.CardSceneTemplate;
 
+import java.util.List;
+
 public interface CardSceneTemplateService extends IService<CardSceneTemplate> {
+
+    List<ActorSceneTemplateRespDTO> actorSceneTemplates();
 
     PageResult<TemplateItemDTO> adminTemplateList(TemplateListQueryDTO dto);
 

@@ -2,6 +2,7 @@ package com.kaipai.module.server.membership.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
@@ -11,6 +12,8 @@ import com.kaipai.module.model.membership.dto.MembershipAccountQueryDTO;
 import com.kaipai.module.model.membership.entity.MembershipAccount;
 
 public interface MembershipAccountService extends IService<MembershipAccount> {
+
+    ActorLevelInfoRespDTO actorLevelInfo(Long userId);
 
     PageResult<AdminMembershipAccountItemDTO> adminAccountList(MembershipAccountQueryDTO query);
 

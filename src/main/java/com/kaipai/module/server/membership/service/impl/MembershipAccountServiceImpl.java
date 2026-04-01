@@ -9,6 +9,7 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountDetailDTO;
 import com.kaipai.module.model.membership.dto.AdminMembershipAccountItemDTO;
 import com.kaipai.module.model.membership.dto.MembershipAccountCloseDTO;
@@ -49,6 +50,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountMapper, MembershipAccount> implements MembershipAccountService {
 
+    private static final int REAL_AUTH_APPROVED = 2;
+
     private final MembershipChangeLogService membershipChangeLogService;
     private final MembershipChangeLogMapper membershipChangeLogMapper;
     private final UserMapper userMapper;
@@ -56,6 +59,32 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
     private final PaymentOrderMapper paymentOrderMapper;
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogger adminOperationLogger;
+
+    @Override
+    public ActorLevelInfoRespDTO actorLevelInfo(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException("用户不存在");
+        }
+        ActorProfile profile = actorProfileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
+                .eq(ActorProfile::getUserId, userId)
+                .last("limit 1"));
+        int profileCompletion = calculateProfileCompletion(profile);
+        boolean isCertified = user.getRealAuthStatus() != null
+                && user.getRealAuthStatus() == REAL_AUTH_APPROVED
+                && profile != null
+                && Boolean.TRUE.equals(profile.getIsCertified());
+        int inviteCount = user.getValidInviteCount() == null ? 0 : user.getValidInviteCount();
+        int level = calculateLevel(inviteCount, isCertified, profileCompletion);
+
+        ActorLevelInfoRespDTO dto = new ActorLevelInfoRespDTO();
+        dto.setLevel(level);
+        dto.setInviteCount(inviteCount);
+        dto.setNextLevelRequirement(nextLevelRequirement(level));
+        dto.setIsCertified(isCertified);
+        dto.setProfileCompletion(profileCompletion);
+        return dto;
+    }
 
     @Override
     public PageResult<AdminMembershipAccountItemDTO> adminAccountList(MembershipAccountQueryDTO query) {
@@ -345,5 +374,72 @@ public class MembershipAccountServiceImpl extends ServiceImpl<MembershipAccountM
         context.put("source_id", account.getSourceRefId());
         context.put("remark", remark);
         return context;
+    }
+
+    private int calculateProfileCompletion(ActorProfile profile) {
+        if (profile == null) {
+            return 0;
+        }
+
+        int score = 0;
+        if (hasText(profile.getAvatarUrl())) {
+            score += 10;
+        }
+        if (hasText(profile.getNickName()) && profile.getGender() != null && profile.getAge() != null
+                && profile.getHeight() != null && hasText(profile.getLocationCity())) {
+            score += 15;
+        }
+        if (hasText(profile.getPhotoUrls())) {
+            score += 15;
+        }
+        if (hasText(profile.getVideoUrl())) {
+            score += 15;
+        }
+        if (hasText(profile.getIntro()) && profile.getIntro().trim().length() >= 20) {
+            score += 10;
+        }
+        if (hasText(profile.getSkillTag())) {
+            score += 5;
+        }
+        if (hasText(profile.getExperienceDesc())) {
+            score += 15;
+        }
+        if (hasText(profile.getStyleTag())) {
+            score += 10;
+        }
+        return score;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private int calculateLevel(int inviteCount, boolean isCertified, int profileCompletion) {
+        if (!isCertified || profileCompletion < 70) {
+            return 0;
+        }
+        if (inviteCount >= 8) {
+            return 5;
+        }
+        if (inviteCount >= 5) {
+            return 4;
+        }
+        if (inviteCount >= 3) {
+            return 3;
+        }
+        if (inviteCount >= 1) {
+            return 2;
+        }
+        return 1;
+    }
+
+    private Integer nextLevelRequirement(int level) {
+        return switch (level) {
+            case 0, 1 -> 1;
+            case 2 -> 3;
+            case 3 -> 5;
+            case 4 -> 8;
+            default -> null;
+        };
     }
 }
