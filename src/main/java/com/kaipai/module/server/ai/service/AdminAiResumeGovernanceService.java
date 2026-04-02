@@ -1,6 +1,7 @@
 package com.kaipai.module.server.ai.service;
 
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
@@ -19,4 +20,8 @@ public interface AdminAiResumeGovernanceService {
     List<AdminAiResumeFailureItemDTO> failures();
 
     List<AdminAiResumeFailureItemDTO> sensitiveHits();
+
+    AdminAiResumeFailureItemDTO reviewFailure(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO suggestRetry(String failureId, AdminAiResumeFailureActionDTO action);
 }

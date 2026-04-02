@@ -8,6 +8,8 @@ public interface AiResumeFailureRecordService {
 
     void recordFailure(AiResumeFailureRecordDTO record);
 
+    AiResumeFailureRecordDTO findFailure(String failureId);
+
     List<AiResumeFailureRecordDTO> recentFailures(int limit);
 
     List<AiResumeFailureRecordDTO> recentSensitiveHits(int limit);

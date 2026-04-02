@@ -23,5 +23,15 @@ public class AiResumeFailureRecordDTO {
 
     private String hitKeyword;
 
+    private String handlingStatus;
+
+    private String handlingNote;
+
+    private Long handledByAdminId;
+
+    private String handledByAdminName;
+
+    private String handledAt;
+
     private String createdAt;
 }

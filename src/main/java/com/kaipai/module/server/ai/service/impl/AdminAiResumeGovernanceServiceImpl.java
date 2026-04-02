@@ -3,9 +3,14 @@ package com.kaipai.module.server.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kaipai.common.auth.AdminAuthContext;
+import com.kaipai.common.auth.AdminAuthenticatedUser;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
@@ -62,6 +67,8 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private final ActorProfileMapper actorProfileMapper;
     private final MembershipAccountService membershipAccountService;
     private final AiResumeFailureRecordService aiResumeFailureRecordService;
+    private final AdminAuthContext adminAuthContext;
+    private final AdminOperationLogger adminOperationLogger;
 
     @Override
     public AdminAiResumeOverviewDTO overview() {
@@ -113,6 +120,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     @Override
     public List<AdminAiResumeFailureItemDTO> sensitiveHits() {
         return buildFailureItems(aiResumeFailureRecordService.recentSensitiveHits(20));
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO reviewFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        return handleFailure(failureId, "reviewed", action);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO suggestRetry(String failureId, AdminAiResumeFailureActionDTO action) {
+        return handleFailure(failureId, "retry_advised", action);
     }
 
     private List<HistoryRecord> loadAllHistoryRecords() {
@@ -223,10 +240,43 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setErrorMessage(record.getErrorMessage());
             item.setFailureType(record.getFailureType());
             item.setHitKeyword(record.getHitKeyword());
+            item.setHandlingStatus(record.getHandlingStatus());
+            item.setHandlingNote(record.getHandlingNote());
+            item.setHandledByAdminId(record.getHandledByAdminId());
+            item.setHandledByAdminName(record.getHandledByAdminName());
+            item.setHandledAt(record.getHandledAt());
             item.setCreatedAt(record.getCreatedAt());
             items.add(item);
         }
         return items;
+    }
+
+    private AdminAiResumeFailureItemDTO handleFailure(String failureId, String handlingStatus, AdminAiResumeFailureActionDTO action) {
+        AiResumeFailureRecordDTO current = aiResumeFailureRecordService.findFailure(failureId);
+        if (current == null) {
+            throw new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 失败样本不存在");
+        }
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+
+        current.setHandlingStatus(handlingStatus);
+        current.setHandlingNote(action == null ? null : action.getReason());
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(LocalDateTime.now().format(TIME_FORMATTER));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("retry_advised".equals(handlingStatus) ? "ai_resume_suggest_retry" : "ai_resume_review")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureHandleContext(current, action == null ? null : action.getReason(), handlingStatus))
+                .operationResult(1)
+                .build());
+
+        return buildFailureItems(List.of(current)).get(0);
     }
 
     private Map<Long, UserContext> loadUserContexts(Set<Long> userIds) {
@@ -451,6 +501,37 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
 
     private <T> List<T> safeList(List<T> values) {
         return values == null ? Collections.emptyList() : values;
+    }
+
+    private AiResumeFailureRecordDTO copyFailure(AiResumeFailureRecordDTO record) {
+        AiResumeFailureRecordDTO copy = new AiResumeFailureRecordDTO();
+        copy.setFailureId(record.getFailureId());
+        copy.setUserId(record.getUserId());
+        copy.setRequestId(record.getRequestId());
+        copy.setConversationId(record.getConversationId());
+        copy.setInstruction(record.getInstruction());
+        copy.setErrorCode(record.getErrorCode());
+        copy.setErrorMessage(record.getErrorMessage());
+        copy.setFailureType(record.getFailureType());
+        copy.setHitKeyword(record.getHitKeyword());
+        copy.setHandlingStatus(record.getHandlingStatus());
+        copy.setHandlingNote(record.getHandlingNote());
+        copy.setHandledByAdminId(record.getHandledByAdminId());
+        copy.setHandledByAdminName(record.getHandledByAdminName());
+        copy.setHandledAt(record.getHandledAt());
+        copy.setCreatedAt(record.getCreatedAt());
+        return copy;
+    }
+
+    private Map<String, Object> buildFailureHandleContext(AiResumeFailureRecordDTO record, String reason, String handlingStatus) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("failure_id", record.getFailureId());
+        context.put("request_id", record.getRequestId());
+        context.put("handling_status", handlingStatus);
+        context.put("reason", reason);
+        context.put("error_code", record.getErrorCode());
+        context.put("failure_type", record.getFailureType());
+        return context;
     }
 
     private record HistoryRecord(Long userId, AiResumeHistoryItemDTO history) {

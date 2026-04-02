@@ -44,6 +44,17 @@ public class AiResumeFailureRecordServiceImpl implements AiResumeFailureRecordSe
     }
 
     @Override
+    public AiResumeFailureRecordDTO findFailure(String failureId) {
+        if (!StringUtils.hasText(failureId)) {
+            return null;
+        }
+        return loadAll().stream()
+                .filter(item -> failureId.trim().equals(item.getFailureId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Override
     public List<AiResumeFailureRecordDTO> recentFailures(int limit) {
         return limit(loadAll(), limit);
     }
