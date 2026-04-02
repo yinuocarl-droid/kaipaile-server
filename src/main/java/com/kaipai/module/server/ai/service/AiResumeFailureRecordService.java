@@ -10,6 +10,8 @@ public interface AiResumeFailureRecordService {
 
     AiResumeFailureRecordDTO findFailure(String failureId);
 
+    List<AiResumeFailureRecordDTO> listAllRecords();
+
     List<AiResumeFailureRecordDTO> recentFailures(int limit);
 
     List<AiResumeFailureRecordDTO> recentSensitiveHits(int limit);

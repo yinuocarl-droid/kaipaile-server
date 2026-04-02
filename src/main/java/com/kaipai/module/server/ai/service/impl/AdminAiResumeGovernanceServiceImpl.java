@@ -12,11 +12,13 @@ import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeOverviewDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeQuotaUserDTO;
 import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
+import com.kaipai.module.model.ai.dto.AiResumeFailureHandlingNoteDTO;
 import com.kaipai.module.model.ai.dto.AiResumeFailureRecordDTO;
 import com.kaipai.module.model.ai.dto.AiResumeHistoryItemDTO;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
@@ -113,13 +115,13 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     @Override
-    public List<AdminAiResumeFailureItemDTO> failures() {
-        return buildFailureItems(aiResumeFailureRecordService.recentFailures(20));
+    public List<AdminAiResumeFailureItemDTO> failures(AdminAiResumeFailureQueryDTO query) {
+        return buildFailureItems(loadFailureRecords(query, false));
     }
 
     @Override
-    public List<AdminAiResumeFailureItemDTO> sensitiveHits() {
-        return buildFailureItems(aiResumeFailureRecordService.recentSensitiveHits(20));
+    public List<AdminAiResumeFailureItemDTO> sensitiveHits(AdminAiResumeFailureQueryDTO query) {
+        return buildFailureItems(loadFailureRecords(query, true));
     }
 
     @Override
@@ -246,6 +248,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setHandledByAdminName(record.getHandledByAdminName());
             item.setHandledAt(record.getHandledAt());
             item.setCreatedAt(record.getCreatedAt());
+            item.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
             items.add(item);
         }
         return items;
@@ -264,6 +267,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setHandledByAdminId(admin.getAdminUserId());
         current.setHandledByAdminName(admin.getUserName());
         current.setHandledAt(LocalDateTime.now().format(TIME_FORMATTER));
+        current.setHandlingNotes(appendHandlingNote(current, handlingStatus, action == null ? null : action.getReason(), admin));
         aiResumeFailureRecordService.recordFailure(current);
 
         adminOperationLogger.log(AdminOperationLogCommand.builder()
@@ -352,6 +356,14 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 .toList();
     }
 
+    private List<AiResumeFailureRecordDTO> loadFailureRecords(AdminAiResumeFailureQueryDTO query, boolean sensitiveOnly) {
+        return aiResumeFailureRecordService.listAllRecords().stream()
+                .filter(item -> !sensitiveOnly || isSensitiveFailure(item))
+                .filter(item -> matchesFailureQuery(item, query))
+                .limit(resolveFailureLimit(query))
+                .toList();
+    }
+
     private boolean matchesQuery(HistoryRecord item, AdminAiResumeHistoryQueryDTO query) {
         if (query.getUserId() != null && !Objects.equals(query.getUserId(), item.userId())) {
             return false;
@@ -374,6 +386,37 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 || containsNormalized(item.history().getReply(), keyword)
                 || containsNormalized(item.history().getRequestId(), keyword)
                 || containsNormalized(item.userId() == null ? null : String.valueOf(item.userId()), keyword);
+    }
+
+    private boolean matchesFailureQuery(AiResumeFailureRecordDTO item, AdminAiResumeFailureQueryDTO query) {
+        if (query == null) {
+            return true;
+        }
+        if (query.getUserId() != null && !Objects.equals(query.getUserId(), item.getUserId())) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getHandlingStatus())
+                && !Objects.equals(normalize(query.getHandlingStatus()), normalize(item.getHandlingStatus()))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getFailureType())
+                && !Objects.equals(normalize(query.getFailureType()), normalize(item.getFailureType()))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getRequestId())
+                && !containsNormalized(item.getRequestId(), normalize(query.getRequestId()))) {
+            return false;
+        }
+        if (!StringUtils.hasText(query.getKeyword())) {
+            return true;
+        }
+        String keyword = normalize(query.getKeyword());
+        return containsNormalized(item.getFailureId(), keyword)
+                || containsNormalized(item.getRequestId(), keyword)
+                || containsNormalized(item.getInstruction(), keyword)
+                || containsNormalized(item.getErrorMessage(), keyword)
+                || containsNormalized(item.getHitKeyword(), keyword)
+                || containsNormalized(item.getHandlingNote(), keyword);
     }
 
     private boolean isCurrentMonthHistory(HistoryRecord record) {
@@ -503,6 +546,51 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         return values == null ? Collections.emptyList() : values;
     }
 
+    private int resolveFailureLimit(AdminAiResumeFailureQueryDTO query) {
+        if (query == null || query.getLimit() == null) {
+            return 20;
+        }
+        return Math.min(Math.max(query.getLimit(), 1), 100);
+    }
+
+    private boolean isSensitiveFailure(AiResumeFailureRecordDTO record) {
+        return record != null
+                && record.getErrorCode() != null
+                && record.getErrorCode() == AiResumeErrorCode.CONTENT_BLOCKED;
+    }
+
+    private List<AiResumeFailureHandlingNoteDTO> appendHandlingNote(AiResumeFailureRecordDTO record,
+                                                                    String handlingStatus,
+                                                                    String reason,
+                                                                    AdminAuthenticatedUser admin) {
+        List<AiResumeFailureHandlingNoteDTO> notes = copyHandlingNotes(record.getHandlingNotes());
+        AiResumeFailureHandlingNoteDTO note = new AiResumeFailureHandlingNoteDTO();
+        note.setHandlingStatus(handlingStatus);
+        note.setHandlingNote(reason);
+        note.setHandledByAdminId(admin.getAdminUserId());
+        note.setHandledByAdminName(admin.getUserName());
+        note.setHandledAt(record.getHandledAt());
+        notes.add(0, note);
+        return notes;
+    }
+
+    private List<AiResumeFailureHandlingNoteDTO> copyHandlingNotes(List<AiResumeFailureHandlingNoteDTO> values) {
+        List<AiResumeFailureHandlingNoteDTO> copies = new ArrayList<>();
+        for (AiResumeFailureHandlingNoteDTO value : safeList(values)) {
+            if (value == null) {
+                continue;
+            }
+            AiResumeFailureHandlingNoteDTO copy = new AiResumeFailureHandlingNoteDTO();
+            copy.setHandlingStatus(value.getHandlingStatus());
+            copy.setHandlingNote(value.getHandlingNote());
+            copy.setHandledByAdminId(value.getHandledByAdminId());
+            copy.setHandledByAdminName(value.getHandledByAdminName());
+            copy.setHandledAt(value.getHandledAt());
+            copies.add(copy);
+        }
+        return copies;
+    }
+
     private AiResumeFailureRecordDTO copyFailure(AiResumeFailureRecordDTO record) {
         AiResumeFailureRecordDTO copy = new AiResumeFailureRecordDTO();
         copy.setFailureId(record.getFailureId());
@@ -520,6 +608,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setHandledByAdminName(record.getHandledByAdminName());
         copy.setHandledAt(record.getHandledAt());
         copy.setCreatedAt(record.getCreatedAt());
+        copy.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
         return copy;
     }
 

@@ -55,6 +55,11 @@ public class AiResumeFailureRecordServiceImpl implements AiResumeFailureRecordSe
     }
 
     @Override
+    public List<AiResumeFailureRecordDTO> listAllRecords() {
+        return loadAll();
+    }
+
+    @Override
     public List<AiResumeFailureRecordDTO> recentFailures(int limit) {
         return limit(loadAll(), limit);
     }

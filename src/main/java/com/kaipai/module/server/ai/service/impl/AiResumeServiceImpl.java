@@ -254,6 +254,7 @@ public class AiResumeServiceImpl implements AiResumeService {
         record.setFailureType(resolveFailureType(errorCode));
         record.setHitKeyword(errorCode == AiResumeErrorCode.CONTENT_BLOCKED ? ruleBasedResumePatchAdapter.detectBlockedKeyword(dto == null ? null : dto.getInstruction()) : null);
         record.setHandlingStatus("pending");
+        record.setHandlingNotes(Collections.emptyList());
         record.setCreatedAt(now());
         return record;
     }

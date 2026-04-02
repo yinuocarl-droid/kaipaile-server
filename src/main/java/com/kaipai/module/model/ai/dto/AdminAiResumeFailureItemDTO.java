@@ -1,5 +1,6 @@
 package com.kaipai.module.model.ai.dto;
 
+import java.util.List;
 import lombok.Data;
 
 @Data
@@ -44,4 +45,6 @@ public class AdminAiResumeFailureItemDTO {
     private String handledAt;
 
     private String createdAt;
+
+    private List<AiResumeFailureHandlingNoteDTO> handlingNotes;
 }
