@@ -2,6 +2,7 @@ package com.kaipai.module.controller.admin.ai;
 
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeOverviewDTO;
@@ -43,5 +44,19 @@ public class AdminAiResumeController {
     @PreAuthorize("hasAuthority('page.system.operation-logs')")
     public R<AdminAiResumeHistoryItemDTO> historyDetail(@PathVariable String historyId) {
         return R.ok(adminAiResumeGovernanceService.historyDetail(historyId));
+    }
+
+    @Operation(summary = "AI 简历失败样本")
+    @GetMapping("/failures")
+    @PreAuthorize("hasAuthority('page.system.operation-logs')")
+    public R<java.util.List<AdminAiResumeFailureItemDTO>> failures() {
+        return R.ok(adminAiResumeGovernanceService.failures());
+    }
+
+    @Operation(summary = "AI 简历敏感命中样本")
+    @GetMapping("/sensitive-hits")
+    @PreAuthorize("hasAuthority('page.system.operation-logs')")
+    public R<java.util.List<AdminAiResumeFailureItemDTO>> sensitiveHits() {
+        return R.ok(adminAiResumeGovernanceService.sensitiveHits());
     }
 }

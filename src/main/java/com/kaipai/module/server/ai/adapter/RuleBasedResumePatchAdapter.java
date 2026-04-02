@@ -168,10 +168,13 @@ public class RuleBasedResumePatchAdapter {
         return value.replaceAll("\\s+", " ").trim();
     }
 
+    public String detectBlockedKeyword(String instruction) {
+        String lowered = normalizeText(instruction).toLowerCase(Locale.ROOT);
+        return BLOCKED_KEYWORDS.stream().filter(lowered::contains).findFirst().orElse(null);
+    }
+
     private void ensureNoBlockedContent(String instruction) {
-        String lowered = instruction.toLowerCase(Locale.ROOT);
-        boolean blocked = BLOCKED_KEYWORDS.stream().anyMatch(lowered::contains);
-        if (blocked) {
+        if (StringUtils.hasText(detectBlockedKeyword(instruction))) {
             throw new BizException(AiResumeErrorCode.CONTENT_BLOCKED, "命中敏感内容，未生成 patch");
         }
     }

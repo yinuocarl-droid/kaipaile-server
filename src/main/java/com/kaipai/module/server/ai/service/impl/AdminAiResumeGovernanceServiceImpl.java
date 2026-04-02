@@ -6,16 +6,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeOverviewDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeQuotaUserDTO;
 import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
+import com.kaipai.module.model.ai.dto.AiResumeFailureRecordDTO;
 import com.kaipai.module.model.ai.dto.AiResumeHistoryItemDTO;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.ai.service.AdminAiResumeGovernanceService;
+import com.kaipai.module.server.ai.service.AiResumeFailureRecordService;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -58,6 +61,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
     private final MembershipAccountService membershipAccountService;
+    private final AiResumeFailureRecordService aiResumeFailureRecordService;
 
     @Override
     public AdminAiResumeOverviewDTO overview() {
@@ -99,6 +103,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 .findFirst()
                 .orElseThrow(() -> new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 历史不存在"));
         return buildHistoryItems(List.of(record)).get(0);
+    }
+
+    @Override
+    public List<AdminAiResumeFailureItemDTO> failures() {
+        return buildFailureItems(aiResumeFailureRecordService.recentFailures(20));
+    }
+
+    @Override
+    public List<AdminAiResumeFailureItemDTO> sensitiveHits() {
+        return buildFailureItems(aiResumeFailureRecordService.recentSensitiveHits(20));
     }
 
     private List<HistoryRecord> loadAllHistoryRecords() {
@@ -176,6 +190,40 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setMembershipTier(levelInfo == null ? null : levelInfo.getMembershipTier());
             item.setTotalQuota(levelInfo == null || levelInfo.getLevelCapability() == null ? null : levelInfo.getLevelCapability().getAiQuotaPerMonth());
             item.setUsedCount(record.usedCount());
+            items.add(item);
+        }
+        return items;
+    }
+
+    private List<AdminAiResumeFailureItemDTO> buildFailureItems(List<AiResumeFailureRecordDTO> records) {
+        if (records.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, UserContext> userContextMap = loadUserContexts(records.stream()
+                .map(AiResumeFailureRecordDTO::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet()));
+        Map<Long, ActorLevelInfoRespDTO> levelInfoMap = loadLevelInfos(userContextMap.keySet());
+        List<AdminAiResumeFailureItemDTO> items = new ArrayList<>();
+        for (AiResumeFailureRecordDTO record : records) {
+            UserContext context = userContextMap.get(record.getUserId());
+            ActorLevelInfoRespDTO levelInfo = levelInfoMap.get(record.getUserId());
+            AdminAiResumeFailureItemDTO item = new AdminAiResumeFailureItemDTO();
+            item.setFailureId(record.getFailureId());
+            item.setUserId(record.getUserId());
+            item.setUserName(resolveUserName(context, record.getUserId()));
+            item.setPhone(resolvePhone(context));
+            item.setRealAuthStatus(context == null || context.user() == null ? null : context.user().getRealAuthStatus());
+            item.setLevel(levelInfo == null ? null : levelInfo.getLevel());
+            item.setMembershipTier(levelInfo == null ? null : levelInfo.getMembershipTier());
+            item.setRequestId(record.getRequestId());
+            item.setConversationId(record.getConversationId());
+            item.setInstruction(record.getInstruction());
+            item.setErrorCode(record.getErrorCode());
+            item.setErrorMessage(record.getErrorMessage());
+            item.setFailureType(record.getFailureType());
+            item.setHitKeyword(record.getHitKeyword());
+            item.setCreatedAt(record.getCreatedAt());
             items.add(item);
         }
         return items;

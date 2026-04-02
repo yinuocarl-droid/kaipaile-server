@@ -10,6 +10,7 @@ import com.kaipai.module.model.actor.dto.ActorProfileSaveDTO;
 import com.kaipai.module.model.actor.dto.ActorWorkExperienceDTO;
 import com.kaipai.module.model.ai.dto.ActorAiQuotaRespDTO;
 import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
+import com.kaipai.module.model.ai.dto.AiResumeFailureRecordDTO;
 import com.kaipai.module.model.ai.dto.AiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AiResumePolishReqDTO;
 import com.kaipai.module.model.ai.dto.AiResumePolishRespDTO;
@@ -17,6 +18,7 @@ import com.kaipai.module.model.ai.dto.AiResumeRollbackReqDTO;
 import com.kaipai.module.model.ai.dto.AiResumeRollbackRespDTO;
 import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.adapter.RuleBasedResumePatchAdapter;
+import com.kaipai.module.server.ai.service.AiResumeFailureRecordService;
 import com.kaipai.module.server.ai.service.AiQuotaService;
 import com.kaipai.module.server.ai.service.AiResumeService;
 import lombok.Data;
@@ -46,17 +48,20 @@ public class AiResumeServiceImpl implements AiResumeService {
     private final AiQuotaService aiQuotaService;
     private final ActorProfileService actorProfileService;
     private final RuleBasedResumePatchAdapter ruleBasedResumePatchAdapter;
+    private final AiResumeFailureRecordService aiResumeFailureRecordService;
 
     public AiResumeServiceImpl(StringRedisTemplate redisTemplate,
                                ObjectMapper objectMapper,
                                AiQuotaService aiQuotaService,
                                @Lazy ActorProfileService actorProfileService,
-                               RuleBasedResumePatchAdapter ruleBasedResumePatchAdapter) {
+                               RuleBasedResumePatchAdapter ruleBasedResumePatchAdapter,
+                               AiResumeFailureRecordService aiResumeFailureRecordService) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.aiQuotaService = aiQuotaService;
         this.actorProfileService = actorProfileService;
         this.ruleBasedResumePatchAdapter = ruleBasedResumePatchAdapter;
+        this.aiResumeFailureRecordService = aiResumeFailureRecordService;
     }
 
     @Override
@@ -71,25 +76,34 @@ public class AiResumeServiceImpl implements AiResumeService {
             throw new BizException(AiResumeErrorCode.QUOTA_EXHAUSTED, "本月 AI 润色次数已用完，邀请好友升级可获得更多次数");
         }
 
-        RuleBasedResumePatchAdapter.AdaptedResult adapted = ruleBasedResumePatchAdapter.adapt(dto);
-
-        AiResumePolishRespDTO response = new AiResumePolishRespDTO();
-        response.setRequestId("airp_req_" + UUID.randomUUID().toString().replace("-", ""));
-        response.setConversationId(StringUtils.hasText(dto.getConversationId()) ? dto.getConversationId().trim() : "airp_conv_" + UUID.randomUUID().toString().replace("-", ""));
-        response.setDraftId("airp_draft_" + UUID.randomUUID().toString().replace("-", ""));
-        response.setReply(adapted.reply());
-        response.setPatches(new ArrayList<>(safeList(adapted.patches())));
-        response.setWarnings(new ArrayList<>(safeList(adapted.warnings())));
-
-        DraftRecord draft = buildDraftRecord(userId, dto, response);
-        saveDraft(draft);
+        String requestId = "airp_req_" + UUID.randomUUID().toString().replace("-", "");
+        String conversationId = dto != null && StringUtils.hasText(dto.getConversationId())
+                ? dto.getConversationId().trim()
+                : "airp_conv_" + UUID.randomUUID().toString().replace("-", "");
         try {
-            response.setQuota(aiQuotaService.consumeResumePolishQuota(userId));
+            RuleBasedResumePatchAdapter.AdaptedResult adapted = ruleBasedResumePatchAdapter.adapt(dto);
+
+            AiResumePolishRespDTO response = new AiResumePolishRespDTO();
+            response.setRequestId(requestId);
+            response.setConversationId(conversationId);
+            response.setDraftId("airp_draft_" + UUID.randomUUID().toString().replace("-", ""));
+            response.setReply(adapted.reply());
+            response.setPatches(new ArrayList<>(safeList(adapted.patches())));
+            response.setWarnings(new ArrayList<>(safeList(adapted.warnings())));
+
+            DraftRecord draft = buildDraftRecord(userId, dto, response);
+            saveDraft(draft);
+            try {
+                response.setQuota(aiQuotaService.consumeResumePolishQuota(userId));
+            } catch (RuntimeException error) {
+                deleteDraft(userId, response.getDraftId());
+                throw error;
+            }
+            return response;
         } catch (RuntimeException error) {
-            deleteDraft(userId, response.getDraftId());
+            recordFailureSafely(userId, requestId, conversationId, dto, error);
             throw error;
         }
-        return response;
     }
 
     @Override
@@ -202,6 +216,71 @@ public class AiResumeServiceImpl implements AiResumeService {
         } catch (Exception error) {
             throw new BizException(AiResumeErrorCode.RESPONSE_UNPARSABLE, "AI 草稿写入失败");
         }
+    }
+
+    private void recordFailureSafely(Long userId,
+                                     String requestId,
+                                     String conversationId,
+                                     AiResumePolishReqDTO dto,
+                                     RuntimeException error) {
+        try {
+            AiResumeFailureRecordDTO record = buildFailureRecord(userId, requestId, conversationId, dto, error);
+            if (record == null) {
+                return;
+            }
+            aiResumeFailureRecordService.recordFailure(record);
+        } catch (RuntimeException ignored) {
+            // never override the primary AI failure with governance recording failures
+        }
+    }
+
+    private AiResumeFailureRecordDTO buildFailureRecord(Long userId,
+                                                        String requestId,
+                                                        String conversationId,
+                                                        AiResumePolishReqDTO dto,
+                                                        RuntimeException error) {
+        Integer errorCode = resolveErrorCode(error);
+        if (errorCode == null || errorCode == AiResumeErrorCode.NOT_CERTIFIED || errorCode == AiResumeErrorCode.QUOTA_EXHAUSTED) {
+            return null;
+        }
+        AiResumeFailureRecordDTO record = new AiResumeFailureRecordDTO();
+        record.setFailureId("airp_fail_" + UUID.randomUUID().toString().replace("-", ""));
+        record.setUserId(userId);
+        record.setRequestId(requestId);
+        record.setConversationId(conversationId);
+        record.setInstruction(dto == null ? null : dto.getInstruction());
+        record.setErrorCode(errorCode);
+        record.setErrorMessage(error == null ? null : error.getMessage());
+        record.setFailureType(resolveFailureType(errorCode));
+        record.setHitKeyword(errorCode == AiResumeErrorCode.CONTENT_BLOCKED ? ruleBasedResumePatchAdapter.detectBlockedKeyword(dto == null ? null : dto.getInstruction()) : null);
+        record.setCreatedAt(now());
+        return record;
+    }
+
+    private Integer resolveErrorCode(RuntimeException error) {
+        if (error instanceof BizException bizException) {
+            return bizException.getCode();
+        }
+        return AiResumeErrorCode.RESPONSE_UNPARSABLE;
+    }
+
+    private String resolveFailureType(Integer errorCode) {
+        if (errorCode == null) {
+            return "failed";
+        }
+        if (errorCode == AiResumeErrorCode.CONTENT_BLOCKED) {
+            return "content_blocked";
+        }
+        if (errorCode == AiResumeErrorCode.MODEL_TIMEOUT) {
+            return "model_timeout";
+        }
+        if (errorCode == AiResumeErrorCode.RESPONSE_UNPARSABLE) {
+            return "response_unparsable";
+        }
+        if (errorCode == AiResumeErrorCode.CONTEXT_INVALID) {
+            return "context_invalid";
+        }
+        return "failed";
     }
 
     private ActorProfileSaveDTO toSaveDTO(ActorProfileDTO profile) {
