@@ -2,6 +2,7 @@ package com.kaipai.module.server.ai.service.impl;
 
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.ai.dto.ActorAiQuotaRespDTO;
+import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.ai.service.AiQuotaService;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
@@ -11,8 +12,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.temporal.TemporalAdjusters;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -41,7 +40,7 @@ public class AiQuotaServiceImpl implements AiQuotaService {
         User user = requireUser(userId);
         int totalQuota = resolveTotalQuota(user);
         if (totalQuota <= 0) {
-            throw new BizException("当前等级暂无 AI 润色额度");
+            throw new BizException(AiResumeErrorCode.QUOTA_EXHAUSTED, "当前等级暂无 AI 润色额度");
         }
         String key = redisKey(userId);
         Long next = redisTemplate.opsForValue().increment(key);
@@ -53,14 +52,14 @@ public class AiQuotaServiceImpl implements AiQuotaService {
         }
         if (next > totalQuota) {
             redisTemplate.opsForValue().decrement(key);
-            throw new BizException("本月 AI 润色次数已用完，邀请好友升级可获得更多次数");
+            throw new BizException(AiResumeErrorCode.QUOTA_EXHAUSTED, "本月 AI 润色次数已用完，邀请好友升级可获得更多次数");
         }
         return buildQuota(userId, QUOTA_TYPE_RESUME_POLISH, totalQuota, next.intValue());
     }
 
     private String normalizeQuotaType(String quotaType) {
         if (!QUOTA_TYPE_RESUME_POLISH.equals(quotaType)) {
-            throw new BizException("暂不支持该 AI 配额类型");
+            throw new BizException(AiResumeErrorCode.CONTEXT_INVALID, "暂不支持该 AI 配额类型");
         }
         return quotaType;
     }
@@ -68,7 +67,7 @@ public class AiQuotaServiceImpl implements AiQuotaService {
     private User requireUser(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
-            throw new BizException("用户不存在");
+            throw new BizException(AiResumeErrorCode.AUTH_REQUIRED, "未登录或登录态失效");
         }
         return user;
     }

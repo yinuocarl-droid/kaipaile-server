@@ -18,6 +18,7 @@ import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorExperienceMapper;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
+import com.kaipai.module.server.ai.service.AiResumeApplyRecorder;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     private final UserMapper userMapper;
     private final MembershipAccountService membershipAccountService;
     private final ObjectMapper objectMapper;
+    private final AiResumeApplyRecorder aiResumeApplyRecorder;
 
     @Override
     public ActorProfileDTO mine(Long currentUserId) {
@@ -58,6 +60,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveProfile(Long currentUserId, ActorProfileSaveDTO dto) {
+        ActorProfileDTO beforeProfile = buildProfile(currentUserId, true, true);
         User user = requireUser(currentUserId);
         ActorProfile profile = getOne(new LambdaQueryWrapper<ActorProfile>()
                 .eq(ActorProfile::getUserId, currentUserId)
@@ -95,6 +98,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         }
 
         syncExperiences(profile, dto.getWorkExperiences());
+        aiResumeApplyRecorder.recordAppliedDraft(currentUserId, beforeProfile, dto);
     }
 
     @Override
@@ -238,6 +242,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
             } else {
                 actorExperienceMapper.updateById(experience);
             }
+            item.setId(experience.getExperienceId());
         }
 
         if (!existing.isEmpty()) {
