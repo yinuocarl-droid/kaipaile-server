@@ -10,6 +10,8 @@ import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
+import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixItemDTO;
+import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleCopyDTO;
 import com.kaipai.module.model.system.dto.AdminRoleQueryDTO;
 import com.kaipai.module.model.system.dto.AdminRoleRespDTO;
@@ -20,10 +22,13 @@ import com.kaipai.module.model.system.entity.AdminUserRole;
 import com.kaipai.module.server.system.mapper.AdminRoleMapper;
 import com.kaipai.module.server.system.service.AdminRoleService;
 import com.kaipai.module.server.system.service.AdminUserRoleService;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -35,6 +40,10 @@ import org.springframework.util.StringUtils;
 public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole> implements AdminRoleService {
 
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+    private static final String AI_GOVERNANCE_PAGE_PERMISSION = "page.system.ai-resume-governance";
+    private static final String OPERATION_LOGS_PAGE_PERMISSION = "page.system.operation-logs";
+    private static final String AI_REVIEW_ACTION_PERMISSION = "action.system.ai-resume.review";
+    private static final String AI_RESOLVE_ACTION_PERMISSION = "action.system.ai-resume.resolve";
 
     private final ObjectMapper objectMapper;
     private final AdminOperationLogger adminOperationLogger;
@@ -67,6 +76,53 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
             throw new BizException("后台角色不存在");
         }
         return toResp(role);
+    }
+
+    @Override
+    public AdminRoleAiGovernanceMatrixRespDTO aiGovernanceMatrix() {
+        List<AdminRole> roles = list(new LambdaQueryWrapper<AdminRole>()
+                .orderByDesc(AdminRole::getStatus)
+                .orderByAsc(AdminRole::getRoleCode)
+                .orderByAsc(AdminRole::getAdminRoleId));
+        Map<Long, Long> boundUserCountMap = adminUserRoleService.list().stream()
+                .collect(Collectors.groupingBy(AdminUserRole::getAdminRoleId,
+                        Collectors.mapping(AdminUserRole::getAdminUserId,
+                                Collectors.collectingAndThen(Collectors.toSet(), userIds -> (long) userIds.size()))));
+
+        List<AdminRoleAiGovernanceMatrixItemDTO> items = roles.stream()
+                .map(role -> toAiGovernanceMatrixItem(role, boundUserCountMap.getOrDefault(role.getAdminRoleId(), 0L)))
+                .sorted(Comparator.comparingInt(this::aiGovernanceStageRank)
+                        .thenComparing(AdminRoleAiGovernanceMatrixItemDTO::getBoundUserCount, Comparator.reverseOrder())
+                        .thenComparing(AdminRoleAiGovernanceMatrixItemDTO::getRoleCode, Comparator.nullsLast(String::compareTo)))
+                .toList();
+
+        long enabledRoleCount = items.stream().filter(this::isEnabledRole).count();
+        long aiReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getAiReady()))
+                .count();
+        long fallbackRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+                .count();
+        long pendingRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item)
+                        && !Boolean.TRUE.equals(item.getAiReady())
+                        && !Boolean.TRUE.equals(item.getReliesOnFallback()))
+                .count();
+        long fallbackBoundUserCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+                .mapToLong(item -> item.getBoundUserCount() == null ? 0L : item.getBoundUserCount())
+                .sum();
+
+        AdminRoleAiGovernanceMatrixRespDTO dto = new AdminRoleAiGovernanceMatrixRespDTO();
+        dto.setTotalRoleCount(items.size());
+        dto.setEnabledRoleCount((int) enabledRoleCount);
+        dto.setAiReadyRoleCount((int) aiReadyRoleCount);
+        dto.setFallbackRoleCount((int) fallbackRoleCount);
+        dto.setPendingRoleCount((int) pendingRoleCount);
+        dto.setFallbackBoundUserCount(fallbackBoundUserCount);
+        dto.setCanRetireFallback(fallbackRoleCount == 0 && fallbackBoundUserCount == 0);
+        dto.setList(items);
+        return dto;
     }
 
     @Override
@@ -227,6 +283,84 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         } catch (JsonProcessingException ex) {
             throw new BizException("角色权限数据序列化失败");
         }
+    }
+
+    private AdminRoleAiGovernanceMatrixItemDTO toAiGovernanceMatrixItem(AdminRole role, long boundUserCount) {
+        List<String> pagePermissions = readPermissions(role.getPagePermissionsJson());
+        List<String> actionPermissions = readPermissions(role.getActionPermissionsJson());
+        boolean hasAiGovernancePage = pagePermissions.contains(AI_GOVERNANCE_PAGE_PERMISSION);
+        boolean hasOperationLogsPage = pagePermissions.contains(OPERATION_LOGS_PAGE_PERMISSION);
+        boolean hasAiReviewAction = actionPermissions.contains(AI_REVIEW_ACTION_PERMISSION);
+        boolean hasAiResolveAction = actionPermissions.contains(AI_RESOLVE_ACTION_PERMISSION);
+        boolean aiReady = hasAiGovernancePage && hasAiReviewAction && hasAiResolveAction;
+        boolean reliesOnFallback = hasOperationLogsPage && !aiReady;
+        boolean hasAnyAiPermission = hasAiGovernancePage || hasAiReviewAction || hasAiResolveAction;
+
+        AdminRoleAiGovernanceMatrixItemDTO dto = new AdminRoleAiGovernanceMatrixItemDTO();
+        dto.setAdminRoleId(role.getAdminRoleId());
+        dto.setRoleCode(role.getRoleCode());
+        dto.setRoleName(role.getRoleName());
+        dto.setStatus(role.getStatus());
+        dto.setBoundUserCount(boundUserCount);
+        dto.setHasAiGovernancePage(hasAiGovernancePage);
+        dto.setHasOperationLogsPage(hasOperationLogsPage);
+        dto.setHasAiReviewAction(hasAiReviewAction);
+        dto.setHasAiResolveAction(hasAiResolveAction);
+        dto.setAiReady(aiReady);
+        dto.setReliesOnFallback(reliesOnFallback);
+        dto.setRolloutStage(resolveAiGovernanceStage(aiReady, reliesOnFallback, hasOperationLogsPage, hasAnyAiPermission));
+        dto.setMissingPermissions(buildMissingPermissions(hasAiGovernancePage, hasAiReviewAction, hasAiResolveAction));
+        return dto;
+    }
+
+    private List<String> buildMissingPermissions(boolean hasAiGovernancePage, boolean hasAiReviewAction,
+                                                 boolean hasAiResolveAction) {
+        List<String> missingPermissions = new ArrayList<>();
+        if (!hasAiGovernancePage) {
+            missingPermissions.add(AI_GOVERNANCE_PAGE_PERMISSION);
+        }
+        if (!hasAiReviewAction) {
+            missingPermissions.add(AI_REVIEW_ACTION_PERMISSION);
+        }
+        if (!hasAiResolveAction) {
+            missingPermissions.add(AI_RESOLVE_ACTION_PERMISSION);
+        }
+        return missingPermissions;
+    }
+
+    private String resolveAiGovernanceStage(boolean aiReady, boolean reliesOnFallback, boolean hasOperationLogsPage,
+                                            boolean hasAnyAiPermission) {
+        if (aiReady) {
+            return "ai_ready";
+        }
+        if (reliesOnFallback && hasAnyAiPermission) {
+            return "compat_transition";
+        }
+        if (reliesOnFallback) {
+            return "fallback_only";
+        }
+        if (hasOperationLogsPage) {
+            return "fallback_only";
+        }
+        if (hasAnyAiPermission) {
+            return "partial_ai";
+        }
+        return "not_granted";
+    }
+
+    private int aiGovernanceStageRank(AdminRoleAiGovernanceMatrixItemDTO item) {
+        return switch (item.getRolloutStage()) {
+            case "compat_transition" -> 0;
+            case "fallback_only" -> 1;
+            case "partial_ai" -> 2;
+            case "not_granted" -> 3;
+            case "ai_ready" -> 4;
+            default -> 5;
+        };
+    }
+
+    private boolean isEnabledRole(AdminRoleAiGovernanceMatrixItemDTO item) {
+        return Integer.valueOf(1).equals(item.getStatus());
     }
 
     private AdminRole copyRole(AdminRole role) {

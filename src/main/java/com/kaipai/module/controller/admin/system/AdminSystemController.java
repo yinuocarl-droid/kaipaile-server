@@ -5,6 +5,7 @@ import com.kaipai.common.result.R;
 import com.kaipai.module.model.system.dto.AdminOperationLogDetailRespDTO;
 import com.kaipai.module.model.system.dto.AdminOperationLogListItemDTO;
 import com.kaipai.module.model.system.dto.AdminOperationLogQueryDTO;
+import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleCopyDTO;
 import com.kaipai.module.model.system.dto.AdminRoleQueryDTO;
 import com.kaipai.module.model.system.dto.AdminRoleRespDTO;
@@ -120,6 +121,13 @@ public class AdminSystemController {
     @PreAuthorize("hasAuthority('page.system.roles')")
     public R<AdminRoleRespDTO> roleDetail(@PathVariable("id") Long id) {
         return R.ok(adminRoleService.adminRoleDetail(id));
+    }
+
+    @Operation(summary = "AI 治理角色授权矩阵")
+    @GetMapping("/roles/ai-governance-matrix")
+    @PreAuthorize("hasAuthority('page.system.roles')")
+    public R<AdminRoleAiGovernanceMatrixRespDTO> aiGovernanceMatrix() {
+        return R.ok(adminRoleService.aiGovernanceMatrix());
     }
 
     @Operation(summary = "创建后台角色")
