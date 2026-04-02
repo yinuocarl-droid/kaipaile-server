@@ -22,8 +22,6 @@ public class AdminAiResumeFailureQueryDTO {
 
     private String collaborationStatus;
 
-    private String collaborationStatus;
-
     @Min(1)
     private Integer limit = 20;
 }
