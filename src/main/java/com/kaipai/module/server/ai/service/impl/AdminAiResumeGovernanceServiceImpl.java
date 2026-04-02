@@ -62,6 +62,14 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private static final int OVERVIEW_TOP_QUOTA_LIMIT = 5;
     private static final int OVERVIEW_RECENT_HISTORY_LIMIT = 5;
     private static final String HISTORY_KEY_PREFIX = "ai:resume_polish:history:";
+    private static final Map<String, List<String>> FAILURE_ALLOWED_TRANSITIONS = Map.of(
+            "pending", List.of("reviewed", "retry_advised", "escalated", "ignored", "closed"),
+            "reviewed", List.of("retry_advised", "escalated", "ignored", "closed"),
+            "retry_advised", List.of("reviewed", "escalated", "ignored", "closed"),
+            "escalated", List.of("reviewed", "ignored", "closed"),
+            "ignored", Collections.emptyList(),
+            "closed", Collections.emptyList()
+    );
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -137,6 +145,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     @Override
     public AdminAiResumeFailureItemDTO closeFailure(String failureId, AdminAiResumeFailureActionDTO action) {
         return handleFailure(failureId, "closed", action);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO ignoreFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        return handleFailure(failureId, "ignored", action);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO escalateFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        return handleFailure(failureId, "escalated", action);
     }
 
     private List<HistoryRecord> loadAllHistoryRecords() {
@@ -266,6 +284,8 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         }
         AiResumeFailureRecordDTO before = copyFailure(current);
         AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        ensureFailureTransitionAllowed(currentStatus, handlingStatus);
 
         current.setHandlingStatus(handlingStatus);
         current.setHandlingNote(action == null ? null : action.getReason());
@@ -281,7 +301,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 .targetType("ai_resume_failure")
                 .beforeSnapshot(before)
                 .afterSnapshot(current)
-                .extraContext(buildFailureHandleContext(current, action == null ? null : action.getReason(), handlingStatus))
+                .extraContext(buildFailureHandleContext(current, action == null ? null : action.getReason(), currentStatus, handlingStatus))
                 .operationResult(1)
                 .build());
 
@@ -600,10 +620,30 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if ("retry_advised".equals(handlingStatus)) {
             return "ai_resume_suggest_retry";
         }
+        if ("ignored".equals(handlingStatus)) {
+            return "ai_resume_ignore";
+        }
+        if ("escalated".equals(handlingStatus)) {
+            return "ai_resume_escalate";
+        }
         if ("closed".equals(handlingStatus)) {
             return "ai_resume_close";
         }
         return "ai_resume_review";
+    }
+
+    private void ensureFailureTransitionAllowed(String currentStatus, String targetStatus) {
+        if (Objects.equals(currentStatus, targetStatus)) {
+            throw new BizException("失败样本当前状态已是目标状态");
+        }
+        List<String> allowedTargets = FAILURE_ALLOWED_TRANSITIONS.getOrDefault(currentStatus, FAILURE_ALLOWED_TRANSITIONS.get("pending"));
+        if (!allowedTargets.contains(targetStatus)) {
+            throw new BizException("当前失败样本状态不允许执行该处置动作");
+        }
+    }
+
+    private String normalizeFailureHandlingStatus(String status) {
+        return StringUtils.hasText(status) ? status.trim() : "pending";
     }
 
     private AiResumeFailureRecordDTO copyFailure(AiResumeFailureRecordDTO record) {
@@ -627,10 +667,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         return copy;
     }
 
-    private Map<String, Object> buildFailureHandleContext(AiResumeFailureRecordDTO record, String reason, String handlingStatus) {
+    private Map<String, Object> buildFailureHandleContext(AiResumeFailureRecordDTO record, String reason,
+                                                          String previousHandlingStatus, String handlingStatus) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("failure_id", record.getFailureId());
         context.put("request_id", record.getRequestId());
+        context.put("handling_status_before", previousHandlingStatus);
         context.put("handling_status", handlingStatus);
         context.put("reason", reason);
         context.put("error_code", record.getErrorCode());

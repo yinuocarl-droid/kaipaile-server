@@ -96,4 +96,26 @@ public class AdminAiResumeController {
                 action == null ? new AdminAiResumeFailureActionDTO() : action
         ));
     }
+
+    @Operation(summary = "AI 简历失败样本忽略")
+    @PostMapping("/failures/{failureId}/ignore")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> ignoreFailure(@PathVariable String failureId,
+                                                        @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.ignoreFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
+    @Operation(summary = "AI 简历失败样本升级处理")
+    @PostMapping("/failures/{failureId}/escalate")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> escalateFailure(@PathVariable String failureId,
+                                                          @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.escalateFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
 }
