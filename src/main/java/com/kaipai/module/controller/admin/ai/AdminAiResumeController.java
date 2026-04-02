@@ -127,6 +127,17 @@ public class AdminAiResumeController {
         ));
     }
 
+    @Operation(summary = "AI 简历失败样本确认接手")
+    @PostMapping("/failures/{failureId}/acknowledge-assignment")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> acknowledgeAssignment(@PathVariable String failureId,
+                                                                @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.acknowledgeAssignment(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
     @Operation(summary = "AI 简历失败样本升级处理")
     @PostMapping("/failures/{failureId}/escalate")
     @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")

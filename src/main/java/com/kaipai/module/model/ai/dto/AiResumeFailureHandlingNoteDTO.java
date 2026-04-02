@@ -19,9 +19,17 @@ public class AiResumeFailureHandlingNoteDTO {
 
     private String assignedAdminName;
 
+    private String assignedAt;
+
     private String escalationRoleCode;
 
     private String escalationRoleName;
+
+    private Long assignmentAcknowledgedByAdminId;
+
+    private String assignmentAcknowledgedByAdminName;
+
+    private String assignmentAcknowledgedAt;
 
     private String handledAt;
 }

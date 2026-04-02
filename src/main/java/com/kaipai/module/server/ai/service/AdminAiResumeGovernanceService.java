@@ -36,4 +36,6 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO escalateFailure(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO assignFailure(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO acknowledgeAssignment(String failureId, AdminAiResumeFailureActionDTO action);
 }

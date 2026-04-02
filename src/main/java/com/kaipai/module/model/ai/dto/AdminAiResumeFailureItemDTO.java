@@ -46,9 +46,21 @@ public class AdminAiResumeFailureItemDTO {
 
     private String assignedAdminName;
 
+    private String assignedAt;
+
     private String escalationRoleCode;
 
     private String escalationRoleName;
+
+    private Long assignmentAcknowledgedByAdminId;
+
+    private String assignmentAcknowledgedByAdminName;
+
+    private String assignmentAcknowledgedAt;
+
+    private String claimDeadlineAt;
+
+    private String collaborationStatus;
 
     private String handledAt;
 
