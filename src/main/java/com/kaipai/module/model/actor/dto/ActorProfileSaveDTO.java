@@ -1,5 +1,6 @@
 package com.kaipai.module.model.actor.dto;
 
+import com.kaipai.module.model.ai.dto.AiResumeApplyMetaDTO;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -45,4 +46,6 @@ public class ActorProfileSaveDTO {
     private List<String> languages = new ArrayList<>();
 
     private String contactPhone;
+
+    private AiResumeApplyMetaDTO aiResumeApplyMeta;
 }
