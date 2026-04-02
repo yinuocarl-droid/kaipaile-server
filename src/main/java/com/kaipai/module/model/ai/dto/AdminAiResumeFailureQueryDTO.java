@@ -16,6 +16,10 @@ public class AdminAiResumeFailureQueryDTO {
 
     private String requestId;
 
+    private Long assignedAdminId;
+
+    private String escalationRoleCode;
+
     @Min(1)
     private Integer limit = 20;
 }

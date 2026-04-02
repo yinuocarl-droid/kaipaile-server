@@ -32,6 +32,14 @@ public class AiResumeFailureRecordDTO {
 
     private String handledByAdminName;
 
+    private Long assignedAdminId;
+
+    private String assignedAdminName;
+
+    private String escalationRoleCode;
+
+    private String escalationRoleName;
+
     private String handledAt;
 
     private String createdAt;

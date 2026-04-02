@@ -3,6 +3,7 @@ package com.kaipai.module.controller.admin.ai;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureCollaborationCatalogDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
@@ -64,6 +65,13 @@ public class AdminAiResumeController {
         return R.ok(adminAiResumeGovernanceService.sensitiveHits(query));
     }
 
+    @Operation(summary = "AI 简历失败样本协同目录")
+    @GetMapping("/collaboration-catalog")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureCollaborationCatalogDTO> collaborationCatalog() {
+        return R.ok(adminAiResumeGovernanceService.collaborationCatalog());
+    }
+
     @Operation(summary = "AI 简历失败样本人工作复核")
     @PostMapping("/failures/{failureId}/review")
     @PreAuthorize("hasAuthority('action.system.ai-resume.review') or hasAuthority('page.system.operation-logs')")
@@ -103,6 +111,17 @@ public class AdminAiResumeController {
     public R<AdminAiResumeFailureItemDTO> ignoreFailure(@PathVariable String failureId,
                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.ignoreFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
+    @Operation(summary = "AI 简历失败样本分派处理人")
+    @PostMapping("/failures/{failureId}/assign")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> assignFailure(@PathVariable String failureId,
+                                                        @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.assignFailure(
                 failureId,
                 action == null ? new AdminAiResumeFailureActionDTO() : action
         ));

@@ -11,6 +11,9 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureAssigneeOptionDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureCollaborationCatalogDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeFailureEscalationRoleOptionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
@@ -22,11 +25,17 @@ import com.kaipai.module.model.ai.dto.AiResumeFailureHandlingNoteDTO;
 import com.kaipai.module.model.ai.dto.AiResumeFailureRecordDTO;
 import com.kaipai.module.model.ai.dto.AiResumeHistoryItemDTO;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
+import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixItemDTO;
+import com.kaipai.module.model.system.entity.AdminUser;
+import com.kaipai.module.model.system.entity.AdminUserRole;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.ai.service.AdminAiResumeGovernanceService;
 import com.kaipai.module.server.ai.service.AiResumeFailureRecordService;
 import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.system.service.AdminRoleService;
+import com.kaipai.module.server.system.service.AdminUserRoleService;
+import com.kaipai.module.server.system.service.AdminUserService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.connection.RedisConnection;
@@ -45,6 +54,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -79,6 +89,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private final AiResumeFailureRecordService aiResumeFailureRecordService;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
+    private final AdminUserService adminUserService;
+    private final AdminUserRoleService adminUserRoleService;
+    private final AdminRoleService adminRoleService;
 
     @Override
     public AdminAiResumeOverviewDTO overview() {
@@ -133,6 +146,15 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     @Override
+    public AdminAiResumeFailureCollaborationCatalogDTO collaborationCatalog() {
+        List<AdminAiResumeFailureEscalationRoleOptionDTO> roleOptions = loadEligibleEscalationRoleOptions();
+        AdminAiResumeFailureCollaborationCatalogDTO dto = new AdminAiResumeFailureCollaborationCatalogDTO();
+        dto.setEscalationRoleOptions(roleOptions);
+        dto.setAssigneeOptions(loadEligibleAssigneeOptions(roleOptions));
+        return dto;
+    }
+
+    @Override
     public AdminAiResumeFailureItemDTO reviewFailure(String failureId, AdminAiResumeFailureActionDTO action) {
         return handleFailure(failureId, "reviewed", action);
     }
@@ -155,6 +177,54 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     @Override
     public AdminAiResumeFailureItemDTO escalateFailure(String failureId, AdminAiResumeFailureActionDTO action) {
         return handleFailure(failureId, "escalated", action);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO assignFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        if (action == null || action.getAssignedAdminId() == null) {
+            throw new BizException("请选择分派处理人");
+        }
+        AiResumeFailureRecordDTO current = aiResumeFailureRecordService.findFailure(failureId);
+        if (current == null) {
+            throw new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 失败样本不存在");
+        }
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        ensureFailureOpenForCollaboration(currentStatus);
+
+        AdminAiResumeFailureAssigneeOptionDTO assignee = requireEligibleAssignee(action.getAssignedAdminId());
+        if (Objects.equals(current.getAssignedAdminId(), assignee.getAdminUserId())) {
+            throw new BizException("失败样本当前责任人已是目标处理人");
+        }
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+
+        current.setHandlingStatus(currentStatus);
+        current.setHandlingNote(action.getReason());
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(LocalDateTime.now().format(TIME_FORMATTER));
+        current.setAssignedAdminId(assignee.getAdminUserId());
+        current.setAssignedAdminName(assignee.getUserName());
+        AdminAiResumeFailureEscalationRoleOptionDTO escalationRole = null;
+        if (StringUtils.hasText(action.getEscalationRoleCode())) {
+            escalationRole = requireEligibleEscalationRole(action.getEscalationRoleCode());
+            current.setEscalationRoleCode(escalationRole.getRoleCode());
+            current.setEscalationRoleName(escalationRole.getRoleName());
+        }
+        current.setHandlingNotes(appendHandlingNote(current, "assign", currentStatus, action.getReason(), admin, assignee, escalationRole));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_assign")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current, action.getReason(), currentStatus, currentStatus, "assign"))
+                .operationResult(1)
+                .build());
+
+        return buildFailureItems(List.of(current)).get(0);
     }
 
     private List<HistoryRecord> loadAllHistoryRecords() {
@@ -269,6 +339,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setHandlingNote(record.getHandlingNote());
             item.setHandledByAdminId(record.getHandledByAdminId());
             item.setHandledByAdminName(record.getHandledByAdminName());
+            item.setAssignedAdminId(record.getAssignedAdminId());
+            item.setAssignedAdminName(record.getAssignedAdminName());
+            item.setEscalationRoleCode(record.getEscalationRoleCode());
+            item.setEscalationRoleName(record.getEscalationRoleName());
             item.setHandledAt(record.getHandledAt());
             item.setCreatedAt(record.getCreatedAt());
             item.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
@@ -286,22 +360,33 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
         String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
         ensureFailureTransitionAllowed(currentStatus, handlingStatus);
+        String actionType = resolveFailureActionType(handlingStatus);
+        AdminAiResumeFailureEscalationRoleOptionDTO escalationRole = null;
+        if ("escalated".equals(handlingStatus)) {
+            escalationRole = requireEligibleEscalationRole(action == null ? null : action.getEscalationRoleCode());
+        }
 
         current.setHandlingStatus(handlingStatus);
         current.setHandlingNote(action == null ? null : action.getReason());
         current.setHandledByAdminId(admin.getAdminUserId());
         current.setHandledByAdminName(admin.getUserName());
         current.setHandledAt(LocalDateTime.now().format(TIME_FORMATTER));
-        current.setHandlingNotes(appendHandlingNote(current, handlingStatus, action == null ? null : action.getReason(), admin));
+        if (escalationRole != null) {
+            current.setEscalationRoleCode(escalationRole.getRoleCode());
+            current.setEscalationRoleName(escalationRole.getRoleName());
+        }
+        current.setHandlingNotes(appendHandlingNote(current, actionType, handlingStatus,
+                action == null ? null : action.getReason(), admin, null, escalationRole));
         aiResumeFailureRecordService.recordFailure(current);
 
         adminOperationLogger.log(AdminOperationLogCommand.builder()
                 .moduleCode("system")
-                .operationCode(resolveFailureOperationCode(handlingStatus))
+                .operationCode(resolveFailureOperationCode(actionType))
                 .targetType("ai_resume_failure")
                 .beforeSnapshot(before)
                 .afterSnapshot(current)
-                .extraContext(buildFailureHandleContext(current, action == null ? null : action.getReason(), currentStatus, handlingStatus))
+                .extraContext(buildFailureActionContext(current, action == null ? null : action.getReason(),
+                        currentStatus, handlingStatus, actionType))
                 .operationResult(1)
                 .build());
 
@@ -432,6 +517,14 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 && !containsNormalized(item.getRequestId(), normalize(query.getRequestId()))) {
             return false;
         }
+        if (query.getAssignedAdminId() != null
+                && !Objects.equals(query.getAssignedAdminId(), item.getAssignedAdminId())) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getEscalationRoleCode())
+                && !Objects.equals(normalize(query.getEscalationRoleCode()), normalize(item.getEscalationRoleCode()))) {
+            return false;
+        }
         if (!StringUtils.hasText(query.getKeyword())) {
             return true;
         }
@@ -441,7 +534,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 || containsNormalized(item.getInstruction(), keyword)
                 || containsNormalized(item.getErrorMessage(), keyword)
                 || containsNormalized(item.getHitKeyword(), keyword)
-                || containsNormalized(item.getHandlingNote(), keyword);
+                || containsNormalized(item.getHandlingNote(), keyword)
+                || containsNormalized(item.getAssignedAdminName(), keyword)
+                || containsNormalized(item.getEscalationRoleCode(), keyword)
+                || containsNormalized(item.getEscalationRoleName(), keyword);
     }
 
     private boolean isCurrentMonthHistory(HistoryRecord record) {
@@ -584,16 +680,156 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 && record.getErrorCode() == AiResumeErrorCode.CONTENT_BLOCKED;
     }
 
+    private List<AdminAiResumeFailureEscalationRoleOptionDTO> loadEligibleEscalationRoleOptions() {
+        return safeList(adminRoleService.aiGovernanceMatrix().getList()).stream()
+                .filter(Objects::nonNull)
+                .filter(item -> Integer.valueOf(1).equals(item.getStatus()))
+                .filter(this::canCollaborateOnFailureRole)
+                .sorted(Comparator.comparing((AdminRoleAiGovernanceMatrixItemDTO item) -> !Boolean.TRUE.equals(item.getAiReady()))
+                        .thenComparing(item -> defaultString(item.getRoleName()))
+                        .thenComparing(item -> defaultString(item.getRoleCode())))
+                .map(item -> {
+                    AdminAiResumeFailureEscalationRoleOptionDTO dto = new AdminAiResumeFailureEscalationRoleOptionDTO();
+                    dto.setAdminRoleId(item.getAdminRoleId());
+                    dto.setRoleCode(item.getRoleCode());
+                    dto.setRoleName(item.getRoleName());
+                    dto.setRolloutStage(item.getRolloutStage());
+                    return dto;
+                })
+                .toList();
+    }
+
+    private List<AdminAiResumeFailureAssigneeOptionDTO> loadEligibleAssigneeOptions(
+            List<AdminAiResumeFailureEscalationRoleOptionDTO> roleOptions) {
+        Map<Long, AdminAiResumeFailureEscalationRoleOptionDTO> roleOptionMap = safeList(roleOptions).stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getAdminRoleId() != null)
+                .collect(Collectors.toMap(
+                        AdminAiResumeFailureEscalationRoleOptionDTO::getAdminRoleId,
+                        item -> item,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        if (roleOptionMap.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<AdminUserRole> bindings = adminUserRoleService.lambdaQuery()
+                .in(AdminUserRole::getAdminRoleId, roleOptionMap.keySet())
+                .list();
+        if (bindings.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, List<AdminAiResumeFailureEscalationRoleOptionDTO>> roleOptionsByUserId = new LinkedHashMap<>();
+        for (AdminUserRole binding : bindings) {
+            if (binding == null || binding.getAdminUserId() == null) {
+                continue;
+            }
+            AdminAiResumeFailureEscalationRoleOptionDTO roleOption = roleOptionMap.get(binding.getAdminRoleId());
+            if (roleOption == null) {
+                continue;
+            }
+            roleOptionsByUserId.computeIfAbsent(binding.getAdminUserId(), key -> new ArrayList<>()).add(roleOption);
+        }
+        if (roleOptionsByUserId.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, AdminUser> userMap = adminUserService.lambdaQuery()
+                .eq(AdminUser::getStatus, 1)
+                .in(AdminUser::getAdminUserId, roleOptionsByUserId.keySet())
+                .list()
+                .stream()
+                .collect(Collectors.toMap(AdminUser::getAdminUserId, item -> item, (left, right) -> left, LinkedHashMap::new));
+        return roleOptionsByUserId.entrySet().stream()
+                .map(entry -> {
+                    AdminUser user = userMap.get(entry.getKey());
+                    if (user == null) {
+                        return null;
+                    }
+                    LinkedHashSet<String> roleCodes = new LinkedHashSet<>();
+                    LinkedHashSet<String> roleNames = new LinkedHashSet<>();
+                    for (AdminAiResumeFailureEscalationRoleOptionDTO roleOption : entry.getValue()) {
+                        if (roleOption == null) {
+                            continue;
+                        }
+                        if (StringUtils.hasText(roleOption.getRoleCode())) {
+                            roleCodes.add(roleOption.getRoleCode());
+                        }
+                        if (StringUtils.hasText(roleOption.getRoleName())) {
+                            roleNames.add(roleOption.getRoleName());
+                        }
+                    }
+                    AdminAiResumeFailureAssigneeOptionDTO dto = new AdminAiResumeFailureAssigneeOptionDTO();
+                    dto.setAdminUserId(user.getAdminUserId());
+                    dto.setUserName(resolveAdminUserName(user));
+                    dto.setAccount(user.getAccount());
+                    dto.setRoleCodes(new ArrayList<>(roleCodes));
+                    dto.setRoleNames(new ArrayList<>(roleNames));
+                    return dto;
+                })
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing((AdminAiResumeFailureAssigneeOptionDTO item) -> defaultString(item.getUserName()))
+                        .thenComparing(item -> defaultString(item.getAccount())))
+                .toList();
+    }
+
+    private boolean canCollaborateOnFailureRole(AdminRoleAiGovernanceMatrixItemDTO item) {
+        return item != null
+                && (Boolean.TRUE.equals(item.getHasAiReviewAction()) || Boolean.TRUE.equals(item.getHasAiResolveAction()));
+    }
+
+    private AdminAiResumeFailureAssigneeOptionDTO requireEligibleAssignee(Long assignedAdminId) {
+        return loadEligibleAssigneeOptions(loadEligibleEscalationRoleOptions()).stream()
+                .filter(item -> Objects.equals(item.getAdminUserId(), assignedAdminId))
+                .findFirst()
+                .orElseThrow(() -> new BizException("目标处理人不存在或不具备 AI 治理处置资格"));
+    }
+
+    private AdminAiResumeFailureEscalationRoleOptionDTO requireEligibleEscalationRole(String roleCode) {
+        if (!StringUtils.hasText(roleCode)) {
+            throw new BizException("请选择升级目标角色");
+        }
+        String normalizedRoleCode = normalize(roleCode);
+        return loadEligibleEscalationRoleOptions().stream()
+                .filter(item -> Objects.equals(normalize(item.getRoleCode()), normalizedRoleCode))
+                .findFirst()
+                .orElseThrow(() -> new BizException("升级目标角色不存在或不具备 AI 治理处置资格"));
+    }
+
+    private String resolveAdminUserName(AdminUser user) {
+        if (user == null) {
+            return null;
+        }
+        if (StringUtils.hasText(user.getUserName())) {
+            return user.getUserName().trim();
+        }
+        if (StringUtils.hasText(user.getAccount())) {
+            return user.getAccount().trim();
+        }
+        return user.getAdminUserId() == null ? null : "后台账号 " + user.getAdminUserId();
+    }
+
     private List<AiResumeFailureHandlingNoteDTO> appendHandlingNote(AiResumeFailureRecordDTO record,
+                                                                    String actionType,
                                                                     String handlingStatus,
                                                                     String reason,
-                                                                    AdminAuthenticatedUser admin) {
+                                                                    AdminAuthenticatedUser admin,
+                                                                    AdminAiResumeFailureAssigneeOptionDTO assignee,
+                                                                    AdminAiResumeFailureEscalationRoleOptionDTO escalationRole) {
         List<AiResumeFailureHandlingNoteDTO> notes = copyHandlingNotes(record.getHandlingNotes());
         AiResumeFailureHandlingNoteDTO note = new AiResumeFailureHandlingNoteDTO();
+        note.setActionType(actionType);
         note.setHandlingStatus(handlingStatus);
         note.setHandlingNote(reason);
         note.setHandledByAdminId(admin.getAdminUserId());
         note.setHandledByAdminName(admin.getUserName());
+        if (assignee != null) {
+            note.setAssignedAdminId(assignee.getAdminUserId());
+            note.setAssignedAdminName(assignee.getUserName());
+        }
+        if (escalationRole != null) {
+            note.setEscalationRoleCode(escalationRole.getRoleCode());
+            note.setEscalationRoleName(escalationRole.getRoleName());
+        }
         note.setHandledAt(record.getHandledAt());
         notes.add(0, note);
         return notes;
@@ -606,27 +842,51 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 continue;
             }
             AiResumeFailureHandlingNoteDTO copy = new AiResumeFailureHandlingNoteDTO();
+            copy.setActionType(value.getActionType());
             copy.setHandlingStatus(value.getHandlingStatus());
             copy.setHandlingNote(value.getHandlingNote());
             copy.setHandledByAdminId(value.getHandledByAdminId());
             copy.setHandledByAdminName(value.getHandledByAdminName());
+            copy.setAssignedAdminId(value.getAssignedAdminId());
+            copy.setAssignedAdminName(value.getAssignedAdminName());
+            copy.setEscalationRoleCode(value.getEscalationRoleCode());
+            copy.setEscalationRoleName(value.getEscalationRoleName());
             copy.setHandledAt(value.getHandledAt());
             copies.add(copy);
         }
         return copies;
     }
 
-    private String resolveFailureOperationCode(String handlingStatus) {
+    private String resolveFailureActionType(String handlingStatus) {
         if ("retry_advised".equals(handlingStatus)) {
-            return "ai_resume_suggest_retry";
+            return "suggest_retry";
         }
         if ("ignored".equals(handlingStatus)) {
-            return "ai_resume_ignore";
+            return "ignore";
         }
         if ("escalated".equals(handlingStatus)) {
-            return "ai_resume_escalate";
+            return "escalate";
         }
         if ("closed".equals(handlingStatus)) {
+            return "close";
+        }
+        return "review";
+    }
+
+    private String resolveFailureOperationCode(String actionType) {
+        if ("assign".equals(actionType)) {
+            return "ai_resume_assign";
+        }
+        if ("suggest_retry".equals(actionType)) {
+            return "ai_resume_suggest_retry";
+        }
+        if ("ignore".equals(actionType)) {
+            return "ai_resume_ignore";
+        }
+        if ("escalate".equals(actionType)) {
+            return "ai_resume_escalate";
+        }
+        if ("close".equals(actionType)) {
             return "ai_resume_close";
         }
         return "ai_resume_review";
@@ -639,6 +899,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         List<String> allowedTargets = FAILURE_ALLOWED_TRANSITIONS.getOrDefault(currentStatus, FAILURE_ALLOWED_TRANSITIONS.get("pending"));
         if (!allowedTargets.contains(targetStatus)) {
             throw new BizException("当前失败样本状态不允许执行该处置动作");
+        }
+    }
+
+    private void ensureFailureOpenForCollaboration(String currentStatus) {
+        if ("ignored".equals(currentStatus) || "closed".equals(currentStatus)) {
+            throw new BizException("终态失败样本不允许再执行责任分派");
         }
     }
 
@@ -661,20 +927,30 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setHandlingNote(record.getHandlingNote());
         copy.setHandledByAdminId(record.getHandledByAdminId());
         copy.setHandledByAdminName(record.getHandledByAdminName());
+        copy.setAssignedAdminId(record.getAssignedAdminId());
+        copy.setAssignedAdminName(record.getAssignedAdminName());
+        copy.setEscalationRoleCode(record.getEscalationRoleCode());
+        copy.setEscalationRoleName(record.getEscalationRoleName());
         copy.setHandledAt(record.getHandledAt());
         copy.setCreatedAt(record.getCreatedAt());
         copy.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
         return copy;
     }
 
-    private Map<String, Object> buildFailureHandleContext(AiResumeFailureRecordDTO record, String reason,
-                                                          String previousHandlingStatus, String handlingStatus) {
+    private Map<String, Object> buildFailureActionContext(AiResumeFailureRecordDTO record, String reason,
+                                                          String previousHandlingStatus, String handlingStatus,
+                                                          String actionType) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("failure_id", record.getFailureId());
         context.put("request_id", record.getRequestId());
+        context.put("action_type", actionType);
         context.put("handling_status_before", previousHandlingStatus);
         context.put("handling_status", handlingStatus);
         context.put("reason", reason);
+        context.put("assigned_admin_id", record.getAssignedAdminId());
+        context.put("assigned_admin_name", record.getAssignedAdminName());
+        context.put("escalation_role_code", record.getEscalationRoleCode());
+        context.put("escalation_role_name", record.getEscalationRoleName());
         context.put("error_code", record.getErrorCode());
         context.put("failure_type", record.getFailureType());
         return context;

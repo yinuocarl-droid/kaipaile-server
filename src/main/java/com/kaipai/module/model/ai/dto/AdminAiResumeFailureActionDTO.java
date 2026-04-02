@@ -6,4 +6,8 @@ import lombok.Data;
 public class AdminAiResumeFailureActionDTO {
 
     private String reason;
+
+    private Long assignedAdminId;
+
+    private String escalationRoleCode;
 }
