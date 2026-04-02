@@ -58,6 +58,14 @@ public class AdminAiResumeFailureItemDTO {
 
     private String assignmentAcknowledgedAt;
 
+    private Integer reminderCount;
+
+    private Long lastRemindedByAdminId;
+
+    private String lastRemindedByAdminName;
+
+    private String lastRemindedAt;
+
     private String claimDeadlineAt;
 
     private String collaborationStatus;

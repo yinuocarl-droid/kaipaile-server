@@ -38,4 +38,6 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO assignFailure(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO acknowledgeAssignment(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO remindFailure(String failureId, AdminAiResumeFailureActionDTO action);
 }

@@ -48,6 +48,14 @@ public class AiResumeFailureRecordDTO {
 
     private String assignmentAcknowledgedAt;
 
+    private Integer reminderCount;
+
+    private Long lastRemindedByAdminId;
+
+    private String lastRemindedByAdminName;
+
+    private String lastRemindedAt;
+
     private String handledAt;
 
     private String createdAt;

@@ -138,6 +138,17 @@ public class AdminAiResumeController {
         ));
     }
 
+    @Operation(summary = "AI 简历失败样本人工催办")
+    @PostMapping("/failures/{failureId}/remind")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> remindFailure(@PathVariable String failureId,
+                                                        @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.remindFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
     @Operation(summary = "AI 简历失败样本升级处理")
     @PostMapping("/failures/{failureId}/escalate")
     @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")

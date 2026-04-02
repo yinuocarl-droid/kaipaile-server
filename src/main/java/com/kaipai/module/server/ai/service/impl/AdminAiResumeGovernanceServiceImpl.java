@@ -211,6 +211,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setAssignmentAcknowledgedByAdminId(null);
         current.setAssignmentAcknowledgedByAdminName(null);
         current.setAssignmentAcknowledgedAt(null);
+        current.setReminderCount(0);
+        current.setLastRemindedByAdminId(null);
+        current.setLastRemindedByAdminName(null);
+        current.setLastRemindedAt(null);
         AdminAiResumeFailureEscalationRoleOptionDTO escalationRole = null;
         if (StringUtils.hasText(action.getEscalationRoleCode())) {
             escalationRole = requireEligibleEscalationRole(action.getEscalationRoleCode());
@@ -278,6 +282,54 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                         currentStatus,
                         currentStatus,
                         "acknowledge"))
+                .operationResult(1)
+                .build());
+
+        return buildFailureItems(List.of(current)).get(0);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO remindFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        AiResumeFailureRecordDTO current = aiResumeFailureRecordService.findFailure(failureId);
+        if (current == null) {
+            throw new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 失败样本不存在");
+        }
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        ensureFailureOpenForCollaboration(currentStatus);
+        if (current.getAssignedAdminId() == null) {
+            throw new BizException("失败样本尚未分派处理人");
+        }
+        if (StringUtils.hasText(current.getAssignmentAcknowledgedAt())) {
+            throw new BizException("当前失败样本已确认接手，无需继续催办");
+        }
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+        String now = LocalDateTime.now().format(TIME_FORMATTER);
+
+        current.setHandlingStatus(currentStatus);
+        current.setHandlingNote(action == null ? null : action.getReason());
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(now);
+        current.setReminderCount((current.getReminderCount() == null ? 0 : current.getReminderCount()) + 1);
+        current.setLastRemindedByAdminId(admin.getAdminUserId());
+        current.setLastRemindedByAdminName(admin.getUserName());
+        current.setLastRemindedAt(now);
+        current.setHandlingNotes(appendHandlingNote(current, "remind", currentStatus,
+                action == null ? null : action.getReason(), admin, null, null));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_remind")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current,
+                        action == null ? null : action.getReason(),
+                        currentStatus,
+                        currentStatus,
+                        "remind"))
                 .operationResult(1)
                 .build());
 
@@ -404,6 +456,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setAssignmentAcknowledgedByAdminId(record.getAssignmentAcknowledgedByAdminId());
             item.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
             item.setAssignmentAcknowledgedAt(record.getAssignmentAcknowledgedAt());
+            item.setReminderCount(record.getReminderCount());
+            item.setLastRemindedByAdminId(record.getLastRemindedByAdminId());
+            item.setLastRemindedByAdminName(record.getLastRemindedByAdminName());
+            item.setLastRemindedAt(record.getLastRemindedAt());
             item.setClaimDeadlineAt(resolveFailureClaimDeadlineAt(record));
             item.setCollaborationStatus(resolveFailureCollaborationStatus(record));
             item.setHandledAt(record.getHandledAt());
@@ -901,6 +957,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         note.setAssignmentAcknowledgedByAdminId(record.getAssignmentAcknowledgedByAdminId());
         note.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
         note.setAssignmentAcknowledgedAt(record.getAssignmentAcknowledgedAt());
+        note.setReminderCount(record.getReminderCount());
+        note.setLastRemindedByAdminId(record.getLastRemindedByAdminId());
+        note.setLastRemindedByAdminName(record.getLastRemindedByAdminName());
+        note.setLastRemindedAt(record.getLastRemindedAt());
         note.setHandledAt(record.getHandledAt());
         notes.add(0, note);
         return notes;
@@ -926,6 +986,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             copy.setAssignmentAcknowledgedByAdminId(value.getAssignmentAcknowledgedByAdminId());
             copy.setAssignmentAcknowledgedByAdminName(value.getAssignmentAcknowledgedByAdminName());
             copy.setAssignmentAcknowledgedAt(value.getAssignmentAcknowledgedAt());
+            copy.setReminderCount(value.getReminderCount());
+            copy.setLastRemindedByAdminId(value.getLastRemindedByAdminId());
+            copy.setLastRemindedByAdminName(value.getLastRemindedByAdminName());
+            copy.setLastRemindedAt(value.getLastRemindedAt());
             copy.setHandledAt(value.getHandledAt());
             copies.add(copy);
         }
@@ -954,6 +1018,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         }
         if ("acknowledge".equals(actionType)) {
             return "ai_resume_acknowledge";
+        }
+        if ("remind".equals(actionType)) {
+            return "ai_resume_remind";
         }
         if ("suggest_retry".equals(actionType)) {
             return "ai_resume_suggest_retry";
@@ -1042,6 +1109,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setAssignmentAcknowledgedByAdminId(record.getAssignmentAcknowledgedByAdminId());
         copy.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
         copy.setAssignmentAcknowledgedAt(record.getAssignmentAcknowledgedAt());
+        copy.setReminderCount(record.getReminderCount());
+        copy.setLastRemindedByAdminId(record.getLastRemindedByAdminId());
+        copy.setLastRemindedByAdminName(record.getLastRemindedByAdminName());
+        copy.setLastRemindedAt(record.getLastRemindedAt());
         copy.setHandledAt(record.getHandledAt());
         copy.setCreatedAt(record.getCreatedAt());
         copy.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
@@ -1066,6 +1137,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         context.put("assignment_acknowledged_by_admin_id", record.getAssignmentAcknowledgedByAdminId());
         context.put("assignment_acknowledged_by_admin_name", record.getAssignmentAcknowledgedByAdminName());
         context.put("assignment_acknowledged_at", record.getAssignmentAcknowledgedAt());
+        context.put("reminder_count", record.getReminderCount());
+        context.put("last_reminded_by_admin_id", record.getLastRemindedByAdminId());
+        context.put("last_reminded_by_admin_name", record.getLastRemindedByAdminName());
+        context.put("last_reminded_at", record.getLastRemindedAt());
         context.put("claim_deadline_at", resolveFailureClaimDeadlineAt(record));
         context.put("collaboration_status", resolveFailureCollaborationStatus(record));
         context.put("error_code", record.getErrorCode());
