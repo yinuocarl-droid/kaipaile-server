@@ -1,5 +1,7 @@
 package com.kaipai.module.server.referral.service.impl;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -18,12 +20,15 @@ import com.kaipai.module.model.referral.dto.AdminReferralRiskDetailDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskItemDTO;
 import com.kaipai.module.model.referral.dto.AdminReferralRiskQueryDTO;
 import com.kaipai.module.model.referral.entity.InviteCode;
+import com.kaipai.module.model.referral.entity.ReferralPolicy;
 import com.kaipai.module.model.referral.entity.ReferralRecord;
 import com.kaipai.module.model.referral.entity.UserEntitlementGrant;
 import com.kaipai.module.model.system.entity.AdminOperationLog;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
+import com.kaipai.module.server.actor.support.ActorProfileCompletionCalculator;
 import com.kaipai.module.server.referral.mapper.InviteCodeMapper;
+import com.kaipai.module.server.referral.mapper.ReferralPolicyMapper;
 import com.kaipai.module.server.referral.mapper.ReferralRecordMapper;
 import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
 import com.kaipai.module.server.referral.service.ReferralRecordService;
@@ -50,15 +55,19 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper, ReferralRecord> implements ReferralRecordService {
 
+    private static final int REAL_AUTH_APPROVED = 2;
     private static final int STATUS_PENDING = 0;
     private static final int STATUS_VALID = 1;
     private static final int STATUS_INVALID = 2;
     private static final int STATUS_UNDER_REVIEW = 3;
     private static final int RISK_FLAG_NORMAL = 0;
+    private static final int DEFAULT_PROFILE_COMPLETION_THRESHOLD = 70;
+    private static final int GRANT_STATUS_ACTIVE = 1;
 
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
     private final InviteCodeMapper inviteCodeMapper;
+    private final ReferralPolicyMapper referralPolicyMapper;
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
     private final AdminOperationLogger adminOperationLogger;
@@ -101,6 +110,39 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         return records.stream()
                 .map(record -> toActorRecord(record, inviteeUserMap.get(record.getInviteeUserId()), inviteeProfileMap.get(record.getInviteeUserId())))
                 .toList();
+    }
+
+    @Override
+    @Transactional
+    public void reconcileInviteeReferral(Long inviteeUserId) {
+        if (inviteeUserId == null) {
+            return;
+        }
+        ReferralRecord record = lambdaQuery()
+                .eq(ReferralRecord::getInviteeUserId, inviteeUserId)
+                .orderByDesc(ReferralRecord::getRegisteredAt)
+                .orderByDesc(ReferralRecord::getReferralId)
+                .last("limit 1")
+                .one();
+        if (record == null || Objects.equals(record.getStatus(), STATUS_INVALID) || isFlaggedRecord(record)) {
+            return;
+        }
+
+        ReferralPolicy activePolicy = selectActivePolicy();
+        if (!Objects.equals(record.getStatus(), STATUS_VALID) && isQualificationSatisfied(inviteeUserId, activePolicy)) {
+            record.setStatus(STATUS_VALID);
+            record.setRiskFlag(RISK_FLAG_NORMAL);
+            record.setRiskReason(null);
+            if (record.getValidatedAt() == null) {
+                record.setValidatedAt(LocalDateTime.now());
+            }
+            updateById(record);
+            refreshInviterValidInviteCount(record.getInviterUserId());
+        }
+
+        if (Objects.equals(record.getStatus(), STATUS_VALID)) {
+            ensureAutoGrant(record, activePolicy);
+        }
     }
 
     @Override
@@ -228,11 +270,13 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         Map<String, Object> beforeSnapshot = snapshot(record);
         record.setStatus(STATUS_VALID);
         record.setRiskFlag(RISK_FLAG_NORMAL);
+        record.setRiskReason(null);
         if (record.getValidatedAt() == null) {
             record.setValidatedAt(LocalDateTime.now());
         }
         updateById(record);
         refreshInviterValidInviteCount(record.getInviterUserId());
+        ensureAutoGrant(record, selectActivePolicy());
         logRiskAction("approve", record, beforeSnapshot, request);
     }
 
@@ -257,6 +301,9 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         record.setRiskFlag(RISK_FLAG_NORMAL);
         updateById(record);
         refreshInviterValidInviteCount(record.getInviterUserId());
+        if (Objects.equals(record.getStatus(), STATUS_VALID)) {
+            ensureAutoGrant(record, selectActivePolicy());
+        }
         logRiskAction("resolve", record, beforeSnapshot, request);
     }
 
@@ -562,10 +609,31 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         dto.setId(record.getReferralId());
         dto.setInviteeNickname(maskInviteeNickname(resolveDisplayName(inviteeUser, inviteeProfile)));
         dto.setRegisteredAt(record.getRegisteredAt());
+        dto.setStatus(resolveActorStatus(record));
+        dto.setStatusLabel(resolveActorStatusLabel(record));
+        dto.setRiskReason(record.getRiskReason());
         dto.setIsValid(Objects.equals(record.getStatus(), STATUS_VALID));
         dto.setFlagged(isFlaggedRecord(record));
         dto.setValidatedAt(record.getValidatedAt());
         return dto;
+    }
+
+    private String resolveActorStatus(ReferralRecord record) {
+        return switch (record.getStatus() == null ? STATUS_PENDING : record.getStatus()) {
+            case STATUS_VALID -> "valid";
+            case STATUS_INVALID -> "invalid";
+            case STATUS_UNDER_REVIEW -> "review";
+            default -> "pending";
+        };
+    }
+
+    private String resolveActorStatusLabel(ReferralRecord record) {
+        return switch (resolveActorStatus(record)) {
+            case "valid" -> "已生效";
+            case "invalid" -> "已作废";
+            case "review" -> "人工审核";
+            default -> "待生效";
+        };
     }
 
     private String maskInviteeNickname(String value) {
@@ -588,6 +656,186 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
                 || Objects.equals(record.getStatus(), STATUS_UNDER_REVIEW);
     }
 
+    private boolean isQualificationSatisfied(Long inviteeUserId, ReferralPolicy activePolicy) {
+        User invitee = userMapper.selectById(inviteeUserId);
+        if (invitee == null) {
+            return false;
+        }
+        if (requiresRealAuth(activePolicy) && !Objects.equals(invitee.getRealAuthStatus(), REAL_AUTH_APPROVED)) {
+            return false;
+        }
+        if (!requiresProfileCompletion(activePolicy)) {
+            return true;
+        }
+        ActorProfile profile = selectActorProfile(inviteeUserId);
+        int completion = ActorProfileCompletionCalculator.calculate(profile);
+        return completion >= resolveProfileCompletionThreshold(activePolicy);
+    }
+
+    private void ensureAutoGrant(ReferralRecord record, ReferralPolicy activePolicy) {
+        if (record == null || !Objects.equals(record.getStatus(), STATUS_VALID) || !isAutoGrantEnabled(activePolicy)) {
+            return;
+        }
+        UserEntitlementGrant existingGrant = userEntitlementGrantMapper.selectOne(new LambdaQueryWrapper<UserEntitlementGrant>()
+                .eq(UserEntitlementGrant::getUserId, record.getInviteeUserId())
+                .eq(UserEntitlementGrant::getSourceType, "referral")
+                .eq(UserEntitlementGrant::getSourceRefId, record.getReferralId())
+                .orderByDesc(UserEntitlementGrant::getCreateTime)
+                .orderByDesc(UserEntitlementGrant::getGrantId)
+                .last("limit 1"));
+        if (existingGrant != null) {
+            return;
+        }
+
+        AutoGrantRule rule = parseAutoGrantRule(activePolicy);
+        LocalDateTime effectiveTime = record.getValidatedAt() == null ? LocalDateTime.now() : record.getValidatedAt();
+        UserEntitlementGrant grant = new UserEntitlementGrant();
+        grant.setUserId(record.getInviteeUserId());
+        grant.setGrantType(rule.grantType());
+        grant.setGrantCode(resolveAutoGrantCode(record, rule));
+        grant.setStatus(GRANT_STATUS_ACTIVE);
+        grant.setEffectiveTime(effectiveTime);
+        grant.setExpireTime(rule.durationDays() == null || rule.durationDays() <= 0 ? null : effectiveTime.plusDays(rule.durationDays()));
+        grant.setSourceType("referral");
+        grant.setSourceRefId(record.getReferralId());
+        grant.setRemark(buildAutoGrantRemark(record, activePolicy, rule));
+        userEntitlementGrantMapper.insert(grant);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("referral")
+                .operationCode("auto_grant")
+                .targetType("user_entitlement_grant")
+                .targetId(grant.getGrantId())
+                .afterSnapshot(snapshotGrant(grant))
+                .extraContext(buildAutoGrantContext(record, grant, activePolicy))
+                .operationResult(1)
+                .build());
+    }
+
+    private ReferralPolicy selectActivePolicy() {
+        return referralPolicyMapper.selectOne(new LambdaQueryWrapper<ReferralPolicy>()
+                .eq(ReferralPolicy::getEnabled, 1)
+                .orderByDesc(ReferralPolicy::getLastUpdate)
+                .orderByDesc(ReferralPolicy::getPolicyId)
+                .last("limit 1"));
+    }
+
+    private boolean requiresRealAuth(ReferralPolicy activePolicy) {
+        return activePolicy == null || !Objects.equals(activePolicy.getRequireRealAuth(), 0);
+    }
+
+    private boolean requiresProfileCompletion(ReferralPolicy activePolicy) {
+        return activePolicy != null && Objects.equals(activePolicy.getRequireProfileCompletion(), 1);
+    }
+
+    private int resolveProfileCompletionThreshold(ReferralPolicy activePolicy) {
+        if (activePolicy == null || activePolicy.getProfileCompletionThreshold() == null
+                || activePolicy.getProfileCompletionThreshold() <= 0) {
+            return DEFAULT_PROFILE_COMPLETION_THRESHOLD;
+        }
+        return activePolicy.getProfileCompletionThreshold();
+    }
+
+    private boolean isAutoGrantEnabled(ReferralPolicy activePolicy) {
+        return activePolicy != null && Objects.equals(activePolicy.getAutoGrantEnabled(), 1);
+    }
+
+    private AutoGrantRule parseAutoGrantRule(ReferralPolicy activePolicy) {
+        String grantType = "invite_eligibility";
+        String grantCodePrefix = "INVITE_ELIGIBILITY";
+        Integer durationDays = null;
+        String extraRemark = null;
+        if (activePolicy == null || !StringUtils.hasText(activePolicy.getGrantRuleJson())) {
+            return new AutoGrantRule(grantType, grantCodePrefix, durationDays, extraRemark);
+        }
+        try {
+            JSONObject root = JSONUtil.parseObj(activePolicy.getGrantRuleJson());
+            if (StringUtils.hasText(root.getStr("grantType"))) {
+                grantType = root.getStr("grantType").trim();
+            }
+            if (StringUtils.hasText(root.getStr("grantCodePrefix"))) {
+                grantCodePrefix = root.getStr("grantCodePrefix").trim();
+            } else if (StringUtils.hasText(root.getStr("grantCode"))) {
+                grantCodePrefix = root.getStr("grantCode").trim();
+            }
+            Object durationValue = root.get("durationDays");
+            if (durationValue != null) {
+                durationDays = Integer.valueOf(String.valueOf(durationValue));
+            }
+            if (StringUtils.hasText(root.getStr("remark"))) {
+                extraRemark = root.getStr("remark").trim();
+            }
+        } catch (Exception ignored) {
+            return new AutoGrantRule(grantType, grantCodePrefix, durationDays, extraRemark);
+        }
+        return new AutoGrantRule(grantType, grantCodePrefix, durationDays, extraRemark);
+    }
+
+    private String resolveAutoGrantCode(ReferralRecord record, AutoGrantRule rule) {
+        String prefix = sanitizeGrantCode(rule.grantCodePrefix());
+        String candidate = prefix + "_" + record.getReferralId();
+        if (countGrantCode(record.getInviteeUserId(), candidate) == 0) {
+            return candidate;
+        }
+        candidate = candidate + "_U" + record.getInviteeUserId();
+        if (countGrantCode(record.getInviteeUserId(), candidate) == 0) {
+            return candidate;
+        }
+        return candidate + "_" + System.currentTimeMillis();
+    }
+
+    private int countGrantCode(Long userId, String grantCode) {
+        Long count = userEntitlementGrantMapper.selectCount(new LambdaQueryWrapper<UserEntitlementGrant>()
+                .eq(UserEntitlementGrant::getUserId, userId)
+                .eq(UserEntitlementGrant::getGrantCode, grantCode));
+        return count == null ? 0 : count.intValue();
+    }
+
+    private String sanitizeGrantCode(String value) {
+        String source = StringUtils.hasText(value) ? value.trim().toUpperCase() : "INVITE_ELIGIBILITY";
+        String sanitized = source.replaceAll("[^A-Z0-9_-]", "_");
+        return sanitized.isEmpty() ? "INVITE_ELIGIBILITY" : sanitized;
+    }
+
+    private String buildAutoGrantRemark(ReferralRecord record, ReferralPolicy activePolicy, AutoGrantRule rule) {
+        StringBuilder builder = new StringBuilder("auto referral grant");
+        if (activePolicy != null && activePolicy.getPolicyId() != null) {
+            builder.append("; policyId=").append(activePolicy.getPolicyId());
+        }
+        builder.append("; referralId=").append(record.getReferralId());
+        if (StringUtils.hasText(rule.extraRemark())) {
+            builder.append("; ").append(rule.extraRemark());
+        }
+        return builder.toString();
+    }
+
+    private Map<String, Object> snapshotGrant(UserEntitlementGrant grant) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("grantId", grant.getGrantId());
+        snapshot.put("userId", grant.getUserId());
+        snapshot.put("grantType", grant.getGrantType());
+        snapshot.put("grantCode", grant.getGrantCode());
+        snapshot.put("status", grant.getStatus());
+        snapshot.put("effectiveTime", grant.getEffectiveTime());
+        snapshot.put("expireTime", grant.getExpireTime());
+        snapshot.put("sourceType", grant.getSourceType());
+        snapshot.put("sourceRefId", grant.getSourceRefId());
+        snapshot.put("remark", grant.getRemark());
+        return snapshot;
+    }
+
+    private Map<String, Object> buildAutoGrantContext(ReferralRecord record,
+                                                      UserEntitlementGrant grant,
+                                                      ReferralPolicy activePolicy) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("referral_record_id", record.getReferralId());
+        context.put("inviter_user_id", record.getInviterUserId());
+        context.put("invitee_user_id", record.getInviteeUserId());
+        context.put("policy_id", activePolicy == null ? null : activePolicy.getPolicyId());
+        context.put("grant_code", grant.getGrantCode());
+        return context;
+    }
+
     private void refreshInviterValidInviteCount(Long inviterUserId) {
         if (inviterUserId == null) {
             return;
@@ -595,6 +843,7 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
         User update = new User();
         update.setUserId(inviterUserId);
         update.setValidInviteCount(countValidInviteCount(inviterUserId));
+        update.setUpdateUserName("");
         userMapper.updateById(update);
     }
 
@@ -609,5 +858,8 @@ public class ReferralRecordServiceImpl extends ServiceImpl<ReferralRecordMapper,
             return actorProfile.getNickName();
         }
         return user == null ? null : user.getUserName();
+    }
+
+    private record AutoGrantRule(String grantType, String grantCodePrefix, Integer durationDays, String extraRemark) {
     }
 }

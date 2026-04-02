@@ -17,9 +17,11 @@ import com.kaipai.module.model.verify.dto.IdentityVerificationSubmitReqDTO;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
+import com.kaipai.module.server.actor.support.ActorProfileCompletionCalculator;
+import com.kaipai.module.server.referral.service.ReferralRecordService;
+import com.kaipai.module.server.user.mapper.UserMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationMapper;
 import com.kaipai.module.server.verify.service.IdentityVerificationService;
-import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +45,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     private final ActorProfileMapper actorProfileMapper;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
+    private final ReferralRecordService referralRecordService;
 
     private static final int STATUS_PENDING = 1;
     private static final int STATUS_APPROVED = 2;
@@ -99,7 +102,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         ActorProfile profile = actorProfileMapper.selectOne(new QueryWrapper<ActorProfile>().lambda()
                 .eq(ActorProfile::getUserId, userId)
                 .last("LIMIT 1"));
-        int profileCompletion = calculateProfileCompletion(profile);
+        int profileCompletion = ActorProfileCompletionCalculator.calculate(profile);
         if (profileCompletion < 70) {
             throw new BizException("请先将档案完成度提升到 70%");
         }
@@ -119,6 +122,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         User updateUser = new User();
         updateUser.setUserId(userId);
         updateUser.setRealAuthStatus(STATUS_PENDING);
+        updateUser.setUpdateUserId(userId);
+        updateUser.setUpdateUserName(resolveUserUpdateName(user));
         userMapper.updateById(updateUser);
 
         if (profile != null) {
@@ -247,6 +252,9 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             }
             actorProfileMapper.updateById(profile);
         }
+        if (newStatus == STATUS_APPROVED) {
+            referralRecordService.reconcileInviteeReferral(record.getUserId());
+        }
         adminOperationLogger.log(AdminOperationLogCommand.builder()
                 .moduleCode("verify")
                 .operationCode(newStatus == STATUS_APPROVED ? "approve" : "reject")
@@ -309,50 +317,19 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         return normalized;
     }
 
-    private int calculateProfileCompletion(ActorProfile profile) {
-        if (profile == null) {
-            return 0;
-        }
-
-        int score = 0;
-        if (hasText(profile.getAvatarUrl())) {
-            score += 10;
-        }
-        if (hasText(profile.getNickName()) && profile.getGender() != null && profile.getAge() != null
-                && profile.getHeight() != null && hasText(profile.getLocationCity())) {
-            score += 15;
-        }
-        if (hasText(profile.getPhotoUrls())) {
-            score += 15;
-        }
-        if (hasText(profile.getVideoUrl())) {
-            score += 15;
-        }
-        if (hasText(profile.getIntro()) && profile.getIntro().trim().length() >= 20) {
-            score += 10;
-        }
-        if (hasText(profile.getSkillTag())) {
-            score += 5;
-        }
-        if (hasText(profile.getExperienceDesc())) {
-            score += 15;
-        }
-        if (hasText(profile.getStyleTag())) {
-            score += 10;
-        }
-        return score;
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
-
     private String maskIdCard(String idCardNo) {
         String normalized = idCardNo == null ? "" : idCardNo.trim().toUpperCase();
         if (normalized.length() < 8) {
             return normalized;
         }
         return normalized.substring(0, 3) + "***********" + normalized.substring(normalized.length() - 4);
+    }
+
+    private String resolveUserUpdateName(User user) {
+        if (user == null || user.getUserName() == null) {
+            return "";
+        }
+        return user.getUserName().trim();
     }
 
     private String hashIdCard(String idCardNo) {
