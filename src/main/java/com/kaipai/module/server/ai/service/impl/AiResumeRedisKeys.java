@@ -15,4 +15,19 @@ final class AiResumeRedisKeys {
     static String historyKey(Long userId) {
         return HISTORY_PREFIX + userId;
     }
+
+    static String historyPattern() {
+        return HISTORY_PREFIX + "*";
+    }
+
+    static Long extractUserIdFromHistoryKey(String key) {
+        if (key == null || !key.startsWith(HISTORY_PREFIX)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(key.substring(HISTORY_PREFIX.length()));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
 }

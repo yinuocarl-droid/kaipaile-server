@@ -20,8 +20,6 @@ public class AiQuotaServiceImpl implements AiQuotaService {
 
     private static final String QUOTA_TYPE_RESUME_POLISH = "resume_polish";
     private static final String PERIOD_TYPE_MONTHLY = "monthly";
-    private static final String REDIS_KEY_PREFIX = "ai:quota:resume_polish:";
-
     private final StringRedisTemplate redisTemplate;
     private final UserMapper userMapper;
     private final MembershipAccountService membershipAccountService;
@@ -105,6 +103,6 @@ public class AiQuotaServiceImpl implements AiQuotaService {
 
     private String redisKey(Long userId) {
         LocalDate periodStart = LocalDate.now().withDayOfMonth(1);
-        return REDIS_KEY_PREFIX + periodStart + ":" + userId;
+        return AiQuotaRedisKeys.quotaKey(periodStart, userId);
     }
 }
