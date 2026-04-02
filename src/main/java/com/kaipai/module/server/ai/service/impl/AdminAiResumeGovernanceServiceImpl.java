@@ -986,6 +986,35 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         }
     }
 
+    private String resolveFailureClaimDeadlineAt(AiResumeFailureRecordDTO record) {
+        if (record == null || !StringUtils.hasText(record.getAssignedAt())) {
+            return null;
+        }
+        LocalDateTime assignedAt = parseTime(record.getAssignedAt());
+        if (assignedAt == null) {
+            return null;
+        }
+        return assignedAt.plusHours(FAILURE_ASSIGN_ACK_SLA_HOURS).format(TIME_FORMATTER);
+    }
+
+    private String resolveFailureCollaborationStatus(AiResumeFailureRecordDTO record) {
+        if (record == null || record.getAssignedAdminId() == null) {
+            return "unassigned";
+        }
+        String handlingStatus = normalizeFailureHandlingStatus(record.getHandlingStatus());
+        if ("ignored".equals(handlingStatus) || "closed".equals(handlingStatus)) {
+            return "resolved";
+        }
+        if (StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
+            return "acknowledged";
+        }
+        LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
+        if (deadline != null && LocalDateTime.now().isAfter(deadline)) {
+            return "ack_overdue";
+        }
+        return "pending_ack";
+    }
+
     private String normalizeFailureHandlingStatus(String status) {
         return StringUtils.hasText(status) ? status.trim() : "pending";
     }
@@ -1007,6 +1036,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setHandledByAdminName(record.getHandledByAdminName());
         copy.setAssignedAdminId(record.getAssignedAdminId());
         copy.setAssignedAdminName(record.getAssignedAdminName());
+        copy.setAssignedAt(record.getAssignedAt());
         copy.setEscalationRoleCode(record.getEscalationRoleCode());
         copy.setEscalationRoleName(record.getEscalationRoleName());
         copy.setAssignmentAcknowledgedByAdminId(record.getAssignmentAcknowledgedByAdminId());
@@ -1030,11 +1060,14 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         context.put("reason", reason);
         context.put("assigned_admin_id", record.getAssignedAdminId());
         context.put("assigned_admin_name", record.getAssignedAdminName());
+        context.put("assigned_at", record.getAssignedAt());
         context.put("escalation_role_code", record.getEscalationRoleCode());
         context.put("escalation_role_name", record.getEscalationRoleName());
         context.put("assignment_acknowledged_by_admin_id", record.getAssignmentAcknowledgedByAdminId());
         context.put("assignment_acknowledged_by_admin_name", record.getAssignmentAcknowledgedByAdminName());
         context.put("assignment_acknowledged_at", record.getAssignmentAcknowledgedAt());
+        context.put("claim_deadline_at", resolveFailureClaimDeadlineAt(record));
+        context.put("collaboration_status", resolveFailureCollaborationStatus(record));
         context.put("error_code", record.getErrorCode());
         context.put("failure_type", record.getFailureType());
         return context;
