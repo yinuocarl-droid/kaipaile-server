@@ -25,4 +25,6 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO reviewFailure(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO suggestRetry(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO closeFailure(String failureId, AdminAiResumeFailureActionDTO action);
 }

@@ -85,4 +85,15 @@ public class AdminAiResumeController {
                 action == null ? new AdminAiResumeFailureActionDTO() : action
         ));
     }
+
+    @Operation(summary = "AI 简历失败样本关闭归档")
+    @PostMapping("/failures/{failureId}/close")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    public R<AdminAiResumeFailureItemDTO> closeFailure(@PathVariable String failureId,
+                                                       @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.closeFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
 }

@@ -134,6 +134,11 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         return handleFailure(failureId, "retry_advised", action);
     }
 
+    @Override
+    public AdminAiResumeFailureItemDTO closeFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        return handleFailure(failureId, "closed", action);
+    }
+
     private List<HistoryRecord> loadAllHistoryRecords() {
         List<HistoryRecord> records = new ArrayList<>();
         for (String key : scanKeys(AiResumeRedisKeys.historyPattern())) {
@@ -272,7 +277,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
 
         adminOperationLogger.log(AdminOperationLogCommand.builder()
                 .moduleCode("system")
-                .operationCode("retry_advised".equals(handlingStatus) ? "ai_resume_suggest_retry" : "ai_resume_review")
+                .operationCode(resolveFailureOperationCode(handlingStatus))
                 .targetType("ai_resume_failure")
                 .beforeSnapshot(before)
                 .afterSnapshot(current)
@@ -589,6 +594,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             copies.add(copy);
         }
         return copies;
+    }
+
+    private String resolveFailureOperationCode(String handlingStatus) {
+        if ("retry_advised".equals(handlingStatus)) {
+            return "ai_resume_suggest_retry";
+        }
+        if ("closed".equals(handlingStatus)) {
+            return "ai_resume_close";
+        }
+        return "ai_resume_review";
     }
 
     private AiResumeFailureRecordDTO copyFailure(AiResumeFailureRecordDTO record) {
