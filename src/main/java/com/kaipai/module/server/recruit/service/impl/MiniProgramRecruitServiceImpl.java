@@ -96,7 +96,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         requireCrewUser(currentUserId);
         CompanyProfile profile = ensureCompanyProfile(currentUserId);
         CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
-        ProjectRespDTO project = requireProject(extras, projectId);
+        ProjectRespDTO project = requireMutableProject(extras, projectId);
 
         if (dto != null) {
             if (StringUtils.hasText(dto.getTitle())) {
@@ -416,10 +416,23 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     }
 
     private ProjectRespDTO findProject(CompanyProfileExtrasDTO extras, Long projectId) {
+        ProjectRespDTO project = findMutableProject(extras, projectId);
+        return project == null ? null : copyProject(project);
+    }
+
+    private ProjectRespDTO requireMutableProject(CompanyProfileExtrasDTO extras, Long projectId) {
+        ProjectRespDTO project = findMutableProject(extras, projectId);
+        if (project == null) {
+            throw new BizException("项目不存在");
+        }
+        return project;
+    }
+
+    private ProjectRespDTO findMutableProject(CompanyProfileExtrasDTO extras, Long projectId) {
         if (projectId == null) {
             return null;
         }
-        return safeProjects(extras.getProjects()).stream()
+        return safeProjectRefs(extras).stream()
                 .filter(item -> Objects.equals(item.getId(), projectId))
                 .findFirst()
                 .orElse(null);
@@ -614,6 +627,15 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
 
     private List<ProjectRespDTO> safeProjects(List<ProjectRespDTO> projects) {
         return projects == null ? Collections.emptyList() : projects.stream().map(this::copyProject).collect(Collectors.toList());
+    }
+
+    private List<ProjectRespDTO> safeProjectRefs(CompanyProfileExtrasDTO extras) {
+        if (extras == null || extras.getProjects() == null) {
+            return Collections.emptyList();
+        }
+        return extras.getProjects().stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     private void requireCrewUser(Long userId) {

@@ -55,6 +55,8 @@ public class CompanyProfileServiceImpl extends ServiceImpl<CompanyProfileMapper,
         profile.setLocationCity(trimToNull(dto.getLocation()));
         profile.setAddress(trimToNull(dto.getOfficeAddress()));
         profile.setCompanyType(toCompanyTypeCode(dto.getCompanyType()));
+        profile.setBusinessScope(trimToNull(dto.getFocusDirection()));
+        profile.setCooperationTag(trimToNull(dto.getCooperationNeed()));
 
         extras.setCompanyType(trimToNull(dto.getCompanyType()));
         extras.setTeamScale(trimToNull(dto.getTeamScale()));
@@ -70,6 +72,8 @@ public class CompanyProfileServiceImpl extends ServiceImpl<CompanyProfileMapper,
         update.setUserId(currentUserId);
         update.setUserName(firstNonBlank(dto.getCompanyName(), user.getUserName(), null));
         update.setAvatarUrl(firstNonBlank(dto.getAvatar(), user.getAvatarUrl(), null));
+        update.setUpdateUserId(currentUserId);
+        update.setUpdateUserName(firstNonBlank(dto.getCompanyName(), user.getUserName(), "system"));
         userMapper.updateById(update);
     }
 
@@ -108,12 +112,12 @@ public class CompanyProfileServiceImpl extends ServiceImpl<CompanyProfileMapper,
         dto.setContactName(defaultText(profile.getContactName()));
         dto.setContactPhone(firstNonBlank(profile.getContactPhone(), user == null ? null : user.getPhone(), ""));
         dto.setRemark(defaultText(profile.getIntro()));
-        dto.setLocation(firstNonBlank(profile.getLocationCity(), null, ""));
+        dto.setLocation(firstNonBlank(profile.getLocationCity(), profile.getLocationProvince(), profile.getAddress(), ""));
         dto.setCompanyType(firstNonBlank(extras.getCompanyType(), COMPANY_TYPE_LABELS.get(profile.getCompanyType()), ""));
         dto.setTeamScale(defaultText(extras.getTeamScale()));
-        dto.setFocusDirection(defaultText(extras.getFocusDirection()));
+        dto.setFocusDirection(firstNonBlank(extras.getFocusDirection(), profile.getBusinessScope(), ""));
         dto.setRepresentativeWorks(defaultText(extras.getRepresentativeWorks()));
-        dto.setCooperationNeed(defaultText(extras.getCooperationNeed()));
+        dto.setCooperationNeed(firstNonBlank(extras.getCooperationNeed(), profile.getCooperationTag(), ""));
         dto.setOfficeAddress(firstNonBlank(extras.getOfficeAddress(), profile.getAddress(), ""));
         return dto;
     }
@@ -178,13 +182,15 @@ public class CompanyProfileServiceImpl extends ServiceImpl<CompanyProfileMapper,
         return value == null ? "" : value;
     }
 
-    private String firstNonBlank(String first, String second, String fallback) {
-        if (StringUtils.hasText(first)) {
-            return first.trim();
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
         }
-        if (StringUtils.hasText(second)) {
-            return second.trim();
+        if (values == null || values.length == 0) {
+            return null;
         }
-        return fallback;
+        return values[values.length - 1];
     }
 }
