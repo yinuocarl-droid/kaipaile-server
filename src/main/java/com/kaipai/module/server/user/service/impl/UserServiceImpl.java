@@ -18,6 +18,7 @@ import com.kaipai.module.model.user.dto.UserAdminDetailDTO;
 import com.kaipai.module.model.user.dto.UserAdminEntitlementSummaryDTO;
 import com.kaipai.module.model.user.dto.UserAdminListItemDTO;
 import com.kaipai.module.model.user.dto.UserAdminQueryDTO;
+import com.kaipai.module.model.user.dto.UserSessionRespDTO;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
@@ -55,6 +56,13 @@ import java.util.stream.Collectors;
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
     private static final List<Integer> PAID_ORDER_STATUSES = List.of(1, 3, 4);
+    private static final int USER_TYPE_ACTOR = 1;
+    private static final int USER_TYPE_CREW = 2;
+    private static final int MEMBERSHIP_STATUS_ACTIVE = 1;
+    private static final int INVITE_CODE_STATUS_ACTIVE = 1;
+    private static final int REFERRAL_STATUS_VALID = 1;
+    private static final int REFERRAL_STATUS_UNDER_REVIEW = 3;
+    private static final int REFERRAL_RISK_FLAG_NORMAL = 0;
 
     private final ActorProfileMapper actorProfileMapper;
     private final IdentityVerificationMapper identityVerificationMapper;
@@ -66,6 +74,38 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final PaymentOrderMapper paymentOrderMapper;
     private final RefundOrderMapper refundOrderMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
+
+    @Override
+    public UserSessionRespDTO currentUser(Long userId) {
+        User user = getById(userId);
+        if (user == null) {
+            throw new BizException("用户不存在");
+        }
+        return buildCurrentUser(user);
+    }
+
+    @Override
+    public UserSessionRespDTO updateCurrentUserRole(Long userId, Integer userType) {
+        if (!Objects.equals(userType, USER_TYPE_ACTOR) && !Objects.equals(userType, USER_TYPE_CREW)) {
+            throw new BizException("身份类型不支持");
+        }
+
+        User user = getById(userId);
+        if (user == null) {
+            throw new BizException("用户不存在");
+        }
+
+        if (!Objects.equals(user.getUserType(), userType)) {
+            User update = new User();
+            update.setUserId(userId);
+            update.setUserType(userType);
+            update.setUpdateUserName("");
+            updateById(update);
+            user.setUserType(userType);
+        }
+
+        return buildCurrentUser(user);
+    }
 
     @Override
     public PageResult<UserAdminListItemDTO> adminUserList(UserAdminQueryDTO query) {
@@ -568,5 +608,61 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             return "platform_admin";
         }
         return "unknown";
+    }
+
+    private UserSessionRespDTO buildCurrentUser(User user) {
+        MembershipAccount membershipAccount = membershipAccountMapper.selectOne(new LambdaQueryWrapper<MembershipAccount>()
+                .eq(MembershipAccount::getUserId, user.getUserId())
+                .eq(MembershipAccount::getStatus, MEMBERSHIP_STATUS_ACTIVE)
+                .orderByDesc(MembershipAccount::getExpireTime)
+                .orderByDesc(MembershipAccount::getMembershipId)
+                .last("limit 1"));
+        InviteCode inviteCode = inviteCodeMapper.selectOne(new LambdaQueryWrapper<InviteCode>()
+                .eq(InviteCode::getUserId, user.getUserId())
+                .eq(InviteCode::getStatus, INVITE_CODE_STATUS_ACTIVE)
+                .orderByDesc(InviteCode::getCreateTime)
+                .orderByDesc(InviteCode::getInviteCodeId)
+                .last("limit 1"));
+        List<ReferralRecord> inviterRecords = Objects.equals(user.getUserType(), USER_TYPE_ACTOR)
+                ? referralRecordMapper.selectList(new LambdaQueryWrapper<ReferralRecord>()
+                .eq(ReferralRecord::getInviterUserId, user.getUserId()))
+                : Collections.emptyList();
+
+        int validInviteCount = (int) inviterRecords.stream()
+                .filter(record -> Objects.equals(record.getStatus(), REFERRAL_STATUS_VALID))
+                .count();
+        int flaggedInviteCount = (int) inviterRecords.stream()
+                .filter(this::isFlaggedReferralRecord)
+                .count();
+
+        UserSessionRespDTO dto = new UserSessionRespDTO();
+        dto.setUserId(user.getUserId());
+        dto.setPhone(user.getPhone());
+        dto.setUserType(user.getUserType());
+        dto.setStatus(user.getStatus());
+        dto.setNickName(user.getUserName());
+        dto.setAvatarUrl(user.getAvatarUrl());
+        dto.setRegisteredAt(user.getCreateTime());
+        dto.setRealAuthStatus(user.getRealAuthStatus());
+        dto.setInviteCode(inviteCode == null ? null : inviteCode.getCode());
+        dto.setInvitedByUserId(user.getInvitedByUserId());
+        dto.setValidInviteCount(validInviteCount);
+        dto.setTotalInviteCount(inviterRecords.size());
+        dto.setFlaggedInviteCount(flaggedInviteCount);
+        dto.setPendingInviteCount(Math.max(0, inviterRecords.size() - validInviteCount - flaggedInviteCount));
+        dto.setMembershipTier(resolveMembershipTier(membershipAccount));
+        return dto;
+    }
+
+    private boolean isFlaggedReferralRecord(ReferralRecord record) {
+        return !Objects.equals(record.getRiskFlag(), REFERRAL_RISK_FLAG_NORMAL)
+                || Objects.equals(record.getStatus(), REFERRAL_STATUS_UNDER_REVIEW);
+    }
+
+    private String resolveMembershipTier(MembershipAccount membershipAccount) {
+        if (membershipAccount == null || membershipAccount.getTier() == null || membershipAccount.getTier() <= 0) {
+            return "none";
+        }
+        return membershipAccount.getTier() >= 2 ? "vip" : "member";
     }
 }
