@@ -5,6 +5,7 @@ import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleCopyDTO;
 import com.kaipai.module.model.system.dto.AdminRoleQueryDTO;
+import com.kaipai.module.model.system.dto.AdminRoleRecruitGovernanceMatrixRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleSaveDTO;
 import com.kaipai.module.model.system.dto.AdminRoleStatusChangeDTO;
@@ -17,6 +18,8 @@ public interface AdminRoleService extends IService<AdminRole> {
     AdminRoleRespDTO adminRoleDetail(Long adminRoleId);
 
     AdminRoleAiGovernanceMatrixRespDTO aiGovernanceMatrix();
+
+    AdminRoleRecruitGovernanceMatrixRespDTO recruitGovernanceMatrix();
 
     AdminRoleRespDTO createRole(AdminRoleSaveDTO dto);
 
