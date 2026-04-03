@@ -56,6 +56,18 @@ public class AiResumeFailureRecordDTO {
 
     private String lastRemindedAt;
 
+    private Long manualTakeoverByAdminId;
+
+    private String manualTakeoverByAdminName;
+
+    private String manualTakeoverAt;
+
+    private Long autoRemindSkippedByAdminId;
+
+    private String autoRemindSkippedByAdminName;
+
+    private String autoRemindSkippedAt;
+
     private String handledAt;
 
     private String createdAt;

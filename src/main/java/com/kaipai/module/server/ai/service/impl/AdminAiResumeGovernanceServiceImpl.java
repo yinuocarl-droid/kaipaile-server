@@ -216,6 +216,8 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setLastRemindedByAdminId(null);
         current.setLastRemindedByAdminName(null);
         current.setLastRemindedAt(null);
+        clearFailureManualTakeover(current);
+        clearFailureAutoRemindSkip(current);
         AdminAiResumeFailureEscalationRoleOptionDTO escalationRole = null;
         if (StringUtils.hasText(action.getEscalationRoleCode())) {
             escalationRole = requireEligibleEscalationRole(action.getEscalationRoleCode());
@@ -316,6 +318,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setLastRemindedByAdminId(admin.getAdminUserId());
         current.setLastRemindedByAdminName(admin.getUserName());
         current.setLastRemindedAt(now);
+        clearFailureAutoRemindSkip(current);
         current.setHandlingNotes(appendHandlingNote(current, "remind", currentStatus,
                 action == null ? null : action.getReason(), admin, null, null));
         aiResumeFailureRecordService.recordFailure(current);
@@ -331,6 +334,109 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                         currentStatus,
                         currentStatus,
                         "remind"))
+                .operationResult(1)
+                .build());
+
+        return buildFailureItems(List.of(current)).get(0);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO manualTakeoverFailure(String failureId, AdminAiResumeFailureActionDTO action) {
+        AiResumeFailureRecordDTO current = aiResumeFailureRecordService.findFailure(failureId);
+        if (current == null) {
+            throw new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 失败样本不存在");
+        }
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        ensureFailureOpenForCollaboration(currentStatus);
+
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+        if (Objects.equals(current.getAssignedAdminId(), admin.getAdminUserId())
+                && StringUtils.hasText(current.getAssignmentAcknowledgedAt())) {
+            throw new BizException("当前失败样本已由你接管并确认，无需重复操作");
+        }
+
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        String now = LocalDateTime.now().format(TIME_FORMATTER);
+        current.setHandlingStatus(currentStatus);
+        current.setHandlingNote(action == null ? null : action.getReason());
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(now);
+        current.setAssignedAdminId(admin.getAdminUserId());
+        current.setAssignedAdminName(admin.getUserName());
+        current.setAssignedAt(now);
+        current.setAssignmentAcknowledgedByAdminId(admin.getAdminUserId());
+        current.setAssignmentAcknowledgedByAdminName(admin.getUserName());
+        current.setAssignmentAcknowledgedAt(now);
+        current.setManualTakeoverByAdminId(admin.getAdminUserId());
+        current.setManualTakeoverByAdminName(admin.getUserName());
+        current.setManualTakeoverAt(now);
+        clearFailureAutoRemindSkip(current);
+        current.setHandlingNotes(appendHandlingNote(current, "manual_takeover", currentStatus,
+                action == null ? null : action.getReason(), admin, null, null));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_manual_takeover")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current,
+                        action == null ? null : action.getReason(),
+                        currentStatus,
+                        currentStatus,
+                        "manual_takeover"))
+                .operationResult(1)
+                .build());
+
+        return buildFailureItems(List.of(current)).get(0);
+    }
+
+    @Override
+    public AdminAiResumeFailureItemDTO skipAutoRemind(String failureId, AdminAiResumeFailureActionDTO action) {
+        AiResumeFailureRecordDTO current = aiResumeFailureRecordService.findFailure(failureId);
+        if (current == null) {
+            throw new BizException(AiResumeErrorCode.HISTORY_NOT_FOUND, "AI 失败样本不存在");
+        }
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        ensureFailureOpenForCollaboration(currentStatus);
+        if (current.getAssignedAdminId() == null) {
+            throw new BizException("失败样本尚未分派处理人");
+        }
+        if (StringUtils.hasText(current.getAssignmentAcknowledgedAt())) {
+            throw new BizException("当前失败样本已确认接手，无需跳过自动催办");
+        }
+        if (StringUtils.hasText(current.getAutoRemindSkippedAt())) {
+            throw new BizException("当前失败样本已标记为跳过自动催办");
+        }
+
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+        String now = LocalDateTime.now().format(TIME_FORMATTER);
+        current.setHandlingStatus(currentStatus);
+        current.setHandlingNote(action == null ? null : action.getReason());
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(now);
+        current.setAutoRemindSkippedByAdminId(admin.getAdminUserId());
+        current.setAutoRemindSkippedByAdminName(admin.getUserName());
+        current.setAutoRemindSkippedAt(now);
+        current.setHandlingNotes(appendHandlingNote(current, "skip_auto_remind", currentStatus,
+                action == null ? null : action.getReason(), admin, null, null));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_skip_auto_remind")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current,
+                        action == null ? null : action.getReason(),
+                        currentStatus,
+                        currentStatus,
+                        "skip_auto_remind"))
                 .operationResult(1)
                 .build());
 
@@ -469,6 +575,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setNotificationReceiptAt(resolveFailureNotificationReceiptAt(record));
             item.setAutoRemindStage(resolveFailureAutoRemindStage(record));
             item.setSlaStatus(resolveFailureSlaStatus(record));
+            item.setManualTakeoverByAdminId(record.getManualTakeoverByAdminId());
+            item.setManualTakeoverByAdminName(record.getManualTakeoverByAdminName());
+            item.setManualTakeoverAt(record.getManualTakeoverAt());
+            item.setAutoRemindSkippedByAdminId(record.getAutoRemindSkippedByAdminId());
+            item.setAutoRemindSkippedByAdminName(record.getAutoRemindSkippedByAdminName());
+            item.setAutoRemindSkippedAt(record.getAutoRemindSkippedAt());
             item.setHandledAt(record.getHandledAt());
             item.setCreatedAt(record.getCreatedAt());
             item.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
@@ -971,11 +1083,17 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if (assignee != null) {
             note.setAssignedAdminId(assignee.getAdminUserId());
             note.setAssignedAdminName(assignee.getUserName());
+        } else {
+            note.setAssignedAdminId(record.getAssignedAdminId());
+            note.setAssignedAdminName(record.getAssignedAdminName());
         }
         note.setAssignedAt(record.getAssignedAt());
         if (escalationRole != null) {
             note.setEscalationRoleCode(escalationRole.getRoleCode());
             note.setEscalationRoleName(escalationRole.getRoleName());
+        } else {
+            note.setEscalationRoleCode(record.getEscalationRoleCode());
+            note.setEscalationRoleName(record.getEscalationRoleName());
         }
         note.setAssignmentAcknowledgedByAdminId(record.getAssignmentAcknowledgedByAdminId());
         note.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
@@ -984,6 +1102,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         note.setLastRemindedByAdminId(record.getLastRemindedByAdminId());
         note.setLastRemindedByAdminName(record.getLastRemindedByAdminName());
         note.setLastRemindedAt(record.getLastRemindedAt());
+        note.setManualTakeoverByAdminId(record.getManualTakeoverByAdminId());
+        note.setManualTakeoverByAdminName(record.getManualTakeoverByAdminName());
+        note.setManualTakeoverAt(record.getManualTakeoverAt());
+        note.setAutoRemindSkippedByAdminId(record.getAutoRemindSkippedByAdminId());
+        note.setAutoRemindSkippedByAdminName(record.getAutoRemindSkippedByAdminName());
+        note.setAutoRemindSkippedAt(record.getAutoRemindSkippedAt());
         note.setHandledAt(record.getHandledAt());
         notes.add(0, note);
         return notes;
@@ -1013,6 +1137,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             copy.setLastRemindedByAdminId(value.getLastRemindedByAdminId());
             copy.setLastRemindedByAdminName(value.getLastRemindedByAdminName());
             copy.setLastRemindedAt(value.getLastRemindedAt());
+            copy.setManualTakeoverByAdminId(value.getManualTakeoverByAdminId());
+            copy.setManualTakeoverByAdminName(value.getManualTakeoverByAdminName());
+            copy.setManualTakeoverAt(value.getManualTakeoverAt());
+            copy.setAutoRemindSkippedByAdminId(value.getAutoRemindSkippedByAdminId());
+            copy.setAutoRemindSkippedByAdminName(value.getAutoRemindSkippedByAdminName());
+            copy.setAutoRemindSkippedAt(value.getAutoRemindSkippedAt());
             copy.setHandledAt(value.getHandledAt());
             copies.add(copy);
         }
@@ -1045,6 +1175,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if ("remind".equals(actionType)) {
             return "ai_resume_remind";
         }
+        if ("manual_takeover".equals(actionType)) {
+            return "ai_resume_manual_takeover";
+        }
+        if ("skip_auto_remind".equals(actionType)) {
+            return "ai_resume_skip_auto_remind";
+        }
         if ("suggest_retry".equals(actionType)) {
             return "ai_resume_suggest_retry";
         }
@@ -1074,6 +1210,24 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if (isFailureTerminal(currentStatus)) {
             throw new BizException("终态失败样本不允许再执行责任分派");
         }
+    }
+
+    private void clearFailureAutoRemindSkip(AiResumeFailureRecordDTO record) {
+        if (record == null) {
+            return;
+        }
+        record.setAutoRemindSkippedByAdminId(null);
+        record.setAutoRemindSkippedByAdminName(null);
+        record.setAutoRemindSkippedAt(null);
+    }
+
+    private void clearFailureManualTakeover(AiResumeFailureRecordDTO record) {
+        if (record == null) {
+            return;
+        }
+        record.setManualTakeoverByAdminId(null);
+        record.setManualTakeoverByAdminName(null);
+        record.setManualTakeoverAt(null);
     }
 
     private String resolveFailureClaimDeadlineAt(AiResumeFailureRecordDTO record) {
@@ -1156,11 +1310,20 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
 
     private String resolveFailureAutoRemindStage(AiResumeFailureRecordDTO record) {
         String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
-        if (!StringUtils.hasText(resolveFailureNotificationSentAt(record))) {
-            return isFailureTerminal(handlingStatus) ? "completed" : "idle";
-        }
-        if (isFailureTerminal(handlingStatus) || StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
+        if (isFailureTerminal(handlingStatus)) {
             return "completed";
+        }
+        if (record != null && StringUtils.hasText(record.getManualTakeoverAt())) {
+            return "manual_takeover";
+        }
+        if (record != null && StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
+            return "completed";
+        }
+        if (record != null && StringUtils.hasText(record.getAutoRemindSkippedAt())) {
+            return "skipped";
+        }
+        if (!StringUtils.hasText(resolveFailureNotificationSentAt(record))) {
+            return "idle";
         }
         Integer reminderCount = record.getReminderCount();
         int resolvedReminderCount = reminderCount == null ? 0 : reminderCount;
@@ -1238,6 +1401,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setLastRemindedByAdminId(record.getLastRemindedByAdminId());
         copy.setLastRemindedByAdminName(record.getLastRemindedByAdminName());
         copy.setLastRemindedAt(record.getLastRemindedAt());
+        copy.setManualTakeoverByAdminId(record.getManualTakeoverByAdminId());
+        copy.setManualTakeoverByAdminName(record.getManualTakeoverByAdminName());
+        copy.setManualTakeoverAt(record.getManualTakeoverAt());
+        copy.setAutoRemindSkippedByAdminId(record.getAutoRemindSkippedByAdminId());
+        copy.setAutoRemindSkippedByAdminName(record.getAutoRemindSkippedByAdminName());
+        copy.setAutoRemindSkippedAt(record.getAutoRemindSkippedAt());
         copy.setHandledAt(record.getHandledAt());
         copy.setCreatedAt(record.getCreatedAt());
         copy.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
@@ -1274,6 +1443,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         context.put("notification_receipt_at", resolveFailureNotificationReceiptAt(record));
         context.put("auto_remind_stage", resolveFailureAutoRemindStage(record));
         context.put("sla_status", resolveFailureSlaStatus(record));
+        context.put("manual_takeover_by_admin_id", record.getManualTakeoverByAdminId());
+        context.put("manual_takeover_by_admin_name", record.getManualTakeoverByAdminName());
+        context.put("manual_takeover_at", record.getManualTakeoverAt());
+        context.put("auto_remind_skipped_by_admin_id", record.getAutoRemindSkippedByAdminId());
+        context.put("auto_remind_skipped_by_admin_name", record.getAutoRemindSkippedByAdminName());
+        context.put("auto_remind_skipped_at", record.getAutoRemindSkippedAt());
         context.put("error_code", record.getErrorCode());
         context.put("failure_type", record.getFailureType());
         return context;

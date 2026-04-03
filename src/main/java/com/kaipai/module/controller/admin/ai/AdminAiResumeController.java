@@ -32,49 +32,49 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历治理概览")
     @GetMapping("/overview")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<AdminAiResumeOverviewDTO> overview() {
         return R.ok(adminAiResumeGovernanceService.overview());
     }
 
     @Operation(summary = "AI 简历治理历史列表")
     @GetMapping("/histories")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<PageResult<AdminAiResumeHistoryItemDTO>> histories(@Valid AdminAiResumeHistoryQueryDTO query) {
         return R.ok(adminAiResumeGovernanceService.history(query));
     }
 
     @Operation(summary = "AI 简历治理历史详情")
     @GetMapping("/histories/{historyId}")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<AdminAiResumeHistoryItemDTO> historyDetail(@PathVariable String historyId) {
         return R.ok(adminAiResumeGovernanceService.historyDetail(historyId));
     }
 
     @Operation(summary = "AI 简历失败样本")
     @GetMapping("/failures")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<java.util.List<AdminAiResumeFailureItemDTO>> failures(@Valid AdminAiResumeFailureQueryDTO query) {
         return R.ok(adminAiResumeGovernanceService.failures(query));
     }
 
     @Operation(summary = "AI 简历敏感命中样本")
     @GetMapping("/sensitive-hits")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<java.util.List<AdminAiResumeFailureItemDTO>> sensitiveHits(@Valid AdminAiResumeFailureQueryDTO query) {
         return R.ok(adminAiResumeGovernanceService.sensitiveHits(query));
     }
 
     @Operation(summary = "AI 简历失败样本协同目录")
     @GetMapping("/collaboration-catalog")
-    @PreAuthorize("hasAuthority('page.system.ai-resume-governance') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<AdminAiResumeFailureCollaborationCatalogDTO> collaborationCatalog() {
         return R.ok(adminAiResumeGovernanceService.collaborationCatalog());
     }
 
     @Operation(summary = "AI 简历失败样本人工作复核")
     @PostMapping("/failures/{failureId}/review")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.review') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.review')")
     public R<AdminAiResumeFailureItemDTO> reviewFailure(@PathVariable String failureId,
                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.reviewFailure(
@@ -85,7 +85,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本标记建议重试")
     @PostMapping("/failures/{failureId}/suggest-retry")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> suggestRetry(@PathVariable String failureId,
                                                        @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.suggestRetry(
@@ -96,7 +96,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本关闭归档")
     @PostMapping("/failures/{failureId}/close")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> closeFailure(@PathVariable String failureId,
                                                        @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.closeFailure(
@@ -107,7 +107,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本忽略")
     @PostMapping("/failures/{failureId}/ignore")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> ignoreFailure(@PathVariable String failureId,
                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.ignoreFailure(
@@ -118,7 +118,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本分派处理人")
     @PostMapping("/failures/{failureId}/assign")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> assignFailure(@PathVariable String failureId,
                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.assignFailure(
@@ -129,7 +129,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本确认接手")
     @PostMapping("/failures/{failureId}/acknowledge-assignment")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> acknowledgeAssignment(@PathVariable String failureId,
                                                                 @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.acknowledgeAssignment(
@@ -140,7 +140,7 @@ public class AdminAiResumeController {
 
     @Operation(summary = "AI 简历失败样本人工催办")
     @PostMapping("/failures/{failureId}/remind")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> remindFailure(@PathVariable String failureId,
                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.remindFailure(
@@ -149,9 +149,31 @@ public class AdminAiResumeController {
         ));
     }
 
+    @Operation(summary = "AI 简历失败样本手工接管")
+    @PostMapping("/failures/{failureId}/manual-takeover")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeFailureItemDTO> manualTakeoverFailure(@PathVariable String failureId,
+                                                                @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.manualTakeoverFailure(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
+    @Operation(summary = "AI 简历失败样本跳过自动催办")
+    @PostMapping("/failures/{failureId}/skip-auto-remind")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeFailureItemDTO> skipAutoRemind(@PathVariable String failureId,
+                                                         @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.skipAutoRemind(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
     @Operation(summary = "AI 简历失败样本升级处理")
     @PostMapping("/failures/{failureId}/escalate")
-    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve') or hasAuthority('page.system.operation-logs')")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
     public R<AdminAiResumeFailureItemDTO> escalateFailure(@PathVariable String failureId,
                                                           @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
         return R.ok(adminAiResumeGovernanceService.escalateFailure(

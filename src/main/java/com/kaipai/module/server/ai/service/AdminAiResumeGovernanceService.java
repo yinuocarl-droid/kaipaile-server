@@ -40,4 +40,8 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO acknowledgeAssignment(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO remindFailure(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO manualTakeoverFailure(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO skipAutoRemind(String failureId, AdminAiResumeFailureActionDTO action);
 }
