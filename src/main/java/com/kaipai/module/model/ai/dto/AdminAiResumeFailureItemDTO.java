@@ -70,6 +70,18 @@ public class AdminAiResumeFailureItemDTO {
 
     private String collaborationStatus;
 
+    private String notificationStatus;
+
+    private String notificationSentAt;
+
+    private String notificationReceiptStatus;
+
+    private String notificationReceiptAt;
+
+    private String autoRemindStage;
+
+    private String slaStatus;
+
     private String handledAt;
 
     private String createdAt;

@@ -22,6 +22,14 @@ public class AdminAiResumeFailureQueryDTO {
 
     private String collaborationStatus;
 
+    private String notificationStatus;
+
+    private String notificationReceiptStatus;
+
+    private String autoRemindStage;
+
+    private String slaStatus;
+
     @Min(1)
     private Integer limit = 20;
 }

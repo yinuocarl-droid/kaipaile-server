@@ -72,6 +72,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private static final int OVERVIEW_TOP_QUOTA_LIMIT = 5;
     private static final int OVERVIEW_RECENT_HISTORY_LIMIT = 5;
     private static final int FAILURE_ASSIGN_ACK_SLA_HOURS = 4;
+    private static final int FAILURE_AUTO_REMIND_MAX_COUNT = 2;
     private static final String HISTORY_KEY_PREFIX = "ai:resume_polish:history:";
     private static final Map<String, List<String>> FAILURE_ALLOWED_TRANSITIONS = Map.of(
             "pending", List.of("reviewed", "retry_advised", "escalated", "ignored", "closed"),
@@ -462,6 +463,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setLastRemindedAt(record.getLastRemindedAt());
             item.setClaimDeadlineAt(resolveFailureClaimDeadlineAt(record));
             item.setCollaborationStatus(resolveFailureCollaborationStatus(record));
+            item.setNotificationStatus(resolveFailureNotificationStatus(record));
+            item.setNotificationSentAt(resolveFailureNotificationSentAt(record));
+            item.setNotificationReceiptStatus(resolveFailureNotificationReceiptStatus(record));
+            item.setNotificationReceiptAt(resolveFailureNotificationReceiptAt(record));
+            item.setAutoRemindStage(resolveFailureAutoRemindStage(record));
+            item.setSlaStatus(resolveFailureSlaStatus(record));
             item.setHandledAt(record.getHandledAt());
             item.setCreatedAt(record.getCreatedAt());
             item.setHandlingNotes(copyHandlingNotes(record.getHandlingNotes()));
@@ -646,6 +653,22 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         }
         if (StringUtils.hasText(query.getCollaborationStatus())
                 && !Objects.equals(normalize(query.getCollaborationStatus()), normalize(resolveFailureCollaborationStatus(item)))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getNotificationStatus())
+                && !Objects.equals(normalize(query.getNotificationStatus()), normalize(resolveFailureNotificationStatus(item)))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getNotificationReceiptStatus())
+                && !Objects.equals(normalize(query.getNotificationReceiptStatus()), normalize(resolveFailureNotificationReceiptStatus(item)))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getAutoRemindStage())
+                && !Objects.equals(normalize(query.getAutoRemindStage()), normalize(resolveFailureAutoRemindStage(item)))) {
+            return false;
+        }
+        if (StringUtils.hasText(query.getSlaStatus())
+                && !Objects.equals(normalize(query.getSlaStatus()), normalize(resolveFailureSlaStatus(item)))) {
             return false;
         }
         if (!StringUtils.hasText(query.getKeyword())) {
@@ -1048,7 +1071,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private void ensureFailureOpenForCollaboration(String currentStatus) {
-        if ("ignored".equals(currentStatus) || "closed".equals(currentStatus)) {
+        if (isFailureTerminal(currentStatus)) {
             throw new BizException("终态失败样本不允许再执行责任分派");
         }
     }
@@ -1069,7 +1092,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             return "unassigned";
         }
         String handlingStatus = normalizeFailureHandlingStatus(record.getHandlingStatus());
-        if ("ignored".equals(handlingStatus) || "closed".equals(handlingStatus)) {
+        if (isFailureTerminal(handlingStatus)) {
             return "resolved";
         }
         if (StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
@@ -1082,8 +1105,110 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         return "pending_ack";
     }
 
+    private String resolveFailureNotificationStatus(AiResumeFailureRecordDTO record) {
+        String notificationSentAt = resolveFailureNotificationSentAt(record);
+        if (!StringUtils.hasText(notificationSentAt)) {
+            return isFailureTerminal(record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus()))
+                    ? "not_required"
+                    : "pending_send";
+        }
+        Integer reminderCount = record == null ? null : record.getReminderCount();
+        if (StringUtils.hasText(record == null ? null : record.getLastRemindedAt())
+                && (reminderCount == null ? 0 : reminderCount) > 0) {
+            return "resent";
+        }
+        return "sent";
+    }
+
+    private String resolveFailureNotificationSentAt(AiResumeFailureRecordDTO record) {
+        if (record == null) {
+            return null;
+        }
+        if (StringUtils.hasText(record.getLastRemindedAt())) {
+            return record.getLastRemindedAt();
+        }
+        if (StringUtils.hasText(record.getAssignedAt())) {
+            return record.getAssignedAt();
+        }
+        return null;
+    }
+
+    private String resolveFailureNotificationReceiptStatus(AiResumeFailureRecordDTO record) {
+        String notificationSentAt = resolveFailureNotificationSentAt(record);
+        if (!StringUtils.hasText(notificationSentAt)) {
+            return isFailureTerminal(record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus()))
+                    ? "not_required"
+                    : "not_sent";
+        }
+        if (StringUtils.hasText(resolveFailureNotificationReceiptAt(record))) {
+            return "received";
+        }
+        LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
+        if (deadline != null && LocalDateTime.now().isAfter(deadline)) {
+            return "receipt_overdue";
+        }
+        return "pending_receipt";
+    }
+
+    private String resolveFailureNotificationReceiptAt(AiResumeFailureRecordDTO record) {
+        return record == null ? null : record.getAssignmentAcknowledgedAt();
+    }
+
+    private String resolveFailureAutoRemindStage(AiResumeFailureRecordDTO record) {
+        String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
+        if (!StringUtils.hasText(resolveFailureNotificationSentAt(record))) {
+            return isFailureTerminal(handlingStatus) ? "completed" : "idle";
+        }
+        if (isFailureTerminal(handlingStatus) || StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
+            return "completed";
+        }
+        Integer reminderCount = record.getReminderCount();
+        int resolvedReminderCount = reminderCount == null ? 0 : reminderCount;
+        LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
+        boolean overdue = deadline != null && LocalDateTime.now().isAfter(deadline);
+        if (overdue && resolvedReminderCount >= FAILURE_AUTO_REMIND_MAX_COUNT) {
+            return "escalation_due";
+        }
+        if (overdue) {
+            return resolvedReminderCount > 0 ? "escalation_due" : "ready";
+        }
+        if (resolvedReminderCount > 0) {
+            return "manual_intervened";
+        }
+        return "watching";
+    }
+
+    private String resolveFailureSlaStatus(AiResumeFailureRecordDTO record) {
+        if (!StringUtils.hasText(resolveFailureNotificationSentAt(record))) {
+            return "not_started";
+        }
+        LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
+        if (deadline == null) {
+            return "not_started";
+        }
+        String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
+        LocalDateTime evaluatedAt = parseTime(resolveFailureNotificationReceiptAt(record));
+        if (evaluatedAt == null && isFailureTerminal(handlingStatus)) {
+            evaluatedAt = parseTime(record.getHandledAt());
+        }
+        if (evaluatedAt == null) {
+            evaluatedAt = LocalDateTime.now();
+        }
+        if (evaluatedAt.isAfter(deadline)) {
+            return "breached";
+        }
+        if (StringUtils.hasText(resolveFailureNotificationReceiptAt(record)) || isFailureTerminal(handlingStatus)) {
+            return "within_sla";
+        }
+        return "active";
+    }
+
     private String normalizeFailureHandlingStatus(String status) {
         return StringUtils.hasText(status) ? status.trim() : "pending";
+    }
+
+    private boolean isFailureTerminal(String status) {
+        return "ignored".equals(status) || "closed".equals(status);
     }
 
     private AiResumeFailureRecordDTO copyFailure(AiResumeFailureRecordDTO record) {
@@ -1143,6 +1268,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         context.put("last_reminded_at", record.getLastRemindedAt());
         context.put("claim_deadline_at", resolveFailureClaimDeadlineAt(record));
         context.put("collaboration_status", resolveFailureCollaborationStatus(record));
+        context.put("notification_status", resolveFailureNotificationStatus(record));
+        context.put("notification_sent_at", resolveFailureNotificationSentAt(record));
+        context.put("notification_receipt_status", resolveFailureNotificationReceiptStatus(record));
+        context.put("notification_receipt_at", resolveFailureNotificationReceiptAt(record));
+        context.put("auto_remind_stage", resolveFailureAutoRemindStage(record));
+        context.put("sla_status", resolveFailureSlaStatus(record));
         context.put("error_code", record.getErrorCode());
         context.put("failure_type", record.getFailureType());
         return context;
