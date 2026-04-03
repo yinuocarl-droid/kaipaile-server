@@ -8,15 +8,21 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AdminOperationLogger {
+
+    static final int MAX_REQUEST_ID_LENGTH = 128;
+    private static final int REQUEST_ID_HASH_LENGTH = 32;
+    private static final int REQUEST_ID_PREFIX_LENGTH = MAX_REQUEST_ID_LENGTH - REQUEST_ID_HASH_LENGTH - 1;
 
     private final AdminOperationLogService adminOperationLogService;
     private final AdminAuthContext adminAuthContext;
@@ -57,7 +63,18 @@ public class AdminOperationLogger {
             return UUID.randomUUID().toString();
         }
         String requestId = request.getHeader("X-Request-Id");
-        return requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId;
+        return normalizeRequestId(requestId);
+    }
+
+    static String normalizeRequestId(String requestId) {
+        String candidate = requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId.trim();
+        if (candidate.length() <= MAX_REQUEST_ID_LENGTH) {
+            return candidate;
+        }
+        String hash = DigestUtils.md5DigestAsHex(candidate.getBytes(StandardCharsets.UTF_8));
+        String normalized = candidate.substring(0, REQUEST_ID_PREFIX_LENGTH) + "-" + hash;
+        log.warn("admin operation log request id exceeded {} chars, normalized to {}", candidate.length(), normalized);
+        return normalized;
     }
 
     private String resolveClientIp(HttpServletRequest request) {

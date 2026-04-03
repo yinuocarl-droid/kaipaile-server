@@ -14,6 +14,12 @@ public class ActorReferralRecordRespDTO {
 
     private LocalDateTime registeredAt;
 
+    private String status;
+
+    private String statusLabel;
+
+    private String riskReason;
+
     @JsonProperty("isValid")
     private Boolean isValid;
 

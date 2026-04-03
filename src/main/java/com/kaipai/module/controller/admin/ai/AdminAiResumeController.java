@@ -6,6 +6,8 @@ import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureCollaborationCatalogDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepRequestDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepResultDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeOverviewDTO;
@@ -70,6 +72,26 @@ public class AdminAiResumeController {
     @PreAuthorize("hasAuthority('page.system.ai-resume-governance')")
     public R<AdminAiResumeFailureCollaborationCatalogDTO> collaborationCatalog() {
         return R.ok(adminAiResumeGovernanceService.collaborationCatalog());
+    }
+
+    @Operation(summary = "AI 简历失败样本治理规则预览")
+    @PostMapping("/governance-sweep/preview")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeGovernanceSweepResultDTO> previewGovernanceSweep(
+            @RequestBody(required = false) AdminAiResumeGovernanceSweepRequestDTO request) {
+        return R.ok(adminAiResumeGovernanceService.previewGovernanceSweep(
+                request == null ? new AdminAiResumeGovernanceSweepRequestDTO() : request
+        ));
+    }
+
+    @Operation(summary = "AI 简历失败样本执行治理规则")
+    @PostMapping("/governance-sweep/execute")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeGovernanceSweepResultDTO> executeGovernanceSweep(
+            @RequestBody(required = false) AdminAiResumeGovernanceSweepRequestDTO request) {
+        return R.ok(adminAiResumeGovernanceService.executeGovernanceSweep(
+                request == null ? new AdminAiResumeGovernanceSweepRequestDTO() : request
+        ));
     }
 
     @Operation(summary = "AI 简历失败样本人工作复核")

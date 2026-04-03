@@ -4,6 +4,8 @@ import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureCollaborationCatalogDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepRequestDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepResultDTO;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
@@ -48,4 +50,8 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO recordNotification(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO recordNotificationReceipt(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeGovernanceSweepResultDTO previewGovernanceSweep(AdminAiResumeGovernanceSweepRequestDTO request);
+
+    AdminAiResumeGovernanceSweepResultDTO executeGovernanceSweep(AdminAiResumeGovernanceSweepRequestDTO request);
 }

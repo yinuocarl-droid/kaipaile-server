@@ -16,6 +16,9 @@ import com.kaipai.module.model.ai.dto.AdminAiResumeFailureCollaborationCatalogDT
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureEscalationRoleOptionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeFailureQueryDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepItemDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepRequestDTO;
+import com.kaipai.module.model.ai.dto.AdminAiResumeGovernanceSweepResultDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryItemDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeHistoryQueryDTO;
 import com.kaipai.module.model.ai.dto.AdminAiResumeOverviewDTO;
@@ -72,6 +75,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private static final int OVERVIEW_TOP_QUOTA_LIMIT = 5;
     private static final int OVERVIEW_RECENT_HISTORY_LIMIT = 5;
     private static final int FAILURE_ASSIGN_ACK_SLA_HOURS = 4;
+    private static final int FAILURE_AUTO_REMIND_COOLDOWN_HOURS = 1;
     private static final int FAILURE_AUTO_REMIND_MAX_COUNT = 2;
     private static final String HISTORY_KEY_PREFIX = "ai:resume_polish:history:";
     private static final Map<String, List<String>> FAILURE_ALLOWED_TRANSITIONS = Map.of(
@@ -544,6 +548,306 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 .build());
 
         return buildFailureItems(List.of(current)).get(0);
+    }
+
+    @Override
+    public AdminAiResumeGovernanceSweepResultDTO previewGovernanceSweep(AdminAiResumeGovernanceSweepRequestDTO request) {
+        return sweepGovernance(request, true);
+    }
+
+    @Override
+    public AdminAiResumeGovernanceSweepResultDTO executeGovernanceSweep(AdminAiResumeGovernanceSweepRequestDTO request) {
+        return sweepGovernance(request, false);
+    }
+
+    private AdminAiResumeGovernanceSweepResultDTO sweepGovernance(AdminAiResumeGovernanceSweepRequestDTO request, boolean dryRun) {
+        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+        LocalDateTime evaluationTime = resolveGovernanceEvaluationTime(request);
+        List<AiResumeFailureRecordDTO> records = loadGovernanceSweepRecords(request);
+        List<AdminAiResumeGovernanceSweepItemDTO> items = new ArrayList<>();
+
+        int dueCount = 0;
+        int autoRemindCount = 0;
+        int timeoutEscalationCount = 0;
+        int executedCount = 0;
+        int skippedCount = 0;
+        for (AiResumeFailureRecordDTO record : records) {
+            GovernanceSweepDecision decision = evaluateGovernanceSweepDecision(record, evaluationTime);
+            if (decision.isDue()) {
+                dueCount++;
+                if ("auto_remind".equals(decision.actionType())) {
+                    autoRemindCount++;
+                } else if ("timeout_escalation".equals(decision.actionType())) {
+                    timeoutEscalationCount++;
+                }
+            }
+
+            AdminAiResumeGovernanceSweepItemDTO item;
+            if (dryRun || !decision.isDue()) {
+                if (!decision.isDue()) {
+                    skippedCount++;
+                }
+                item = buildGovernanceSweepItem(record, evaluationTime, decision, null, null);
+            } else if ("auto_remind".equals(decision.actionType())) {
+                AiResumeFailureRecordDTO updated = executeAutoRemind(record, admin, request, decision);
+                executedCount++;
+                item = buildGovernanceSweepItem(updated, evaluationTime, decision, updated, "executed");
+            } else if ("timeout_escalation".equals(decision.actionType())) {
+                AiResumeFailureRecordDTO updated = executeTimeoutEscalation(record, admin, request, decision);
+                executedCount++;
+                item = buildGovernanceSweepItem(updated, evaluationTime, decision, updated, "executed");
+            } else {
+                skippedCount++;
+                item = buildGovernanceSweepItem(record, evaluationTime, decision, null, "skipped");
+            }
+            items.add(item);
+        }
+
+        AdminAiResumeGovernanceSweepResultDTO dto = new AdminAiResumeGovernanceSweepResultDTO();
+        dto.setDryRun(dryRun);
+        dto.setEvaluatedAt(evaluationTime.format(TIME_FORMATTER));
+        dto.setTotalCount(records.size());
+        dto.setDueCount(dueCount);
+        dto.setAutoRemindCount(autoRemindCount);
+        dto.setTimeoutEscalationCount(timeoutEscalationCount);
+        dto.setExecutedCount(executedCount);
+        dto.setSkippedCount(skippedCount);
+        dto.setItems(items);
+        return dto;
+    }
+
+    private List<AiResumeFailureRecordDTO> loadGovernanceSweepRecords(AdminAiResumeGovernanceSweepRequestDTO request) {
+        List<AiResumeFailureRecordDTO> records = aiResumeFailureRecordService.listAllRecords();
+        if (request != null && !safeList(request.getFailureIds()).isEmpty()) {
+            Set<String> requestedIds = safeList(request.getFailureIds()).stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            records = records.stream()
+                    .filter(item -> requestedIds.contains(item.getFailureId()))
+                    .toList();
+        }
+        return records.stream()
+                .limit(resolveGovernanceSweepLimit(request))
+                .toList();
+    }
+
+    private int resolveGovernanceSweepLimit(AdminAiResumeGovernanceSweepRequestDTO request) {
+        Integer limit = request == null ? null : request.getLimit();
+        if (limit == null || limit <= 0) {
+            return 20;
+        }
+        return Math.min(limit, 200);
+    }
+
+    private LocalDateTime resolveGovernanceEvaluationTime(AdminAiResumeGovernanceSweepRequestDTO request) {
+        if (request == null || !StringUtils.hasText(request.getEvaluateAt())) {
+            return LocalDateTime.now();
+        }
+        LocalDateTime evaluationTime = parseTime(request.getEvaluateAt());
+        if (evaluationTime == null) {
+            throw new BizException("evaluateAt 仅支持 yyyy-MM-dd'T'HH:mm:ss 格式");
+        }
+        return evaluationTime;
+    }
+
+    private GovernanceSweepDecision evaluateGovernanceSweepDecision(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
+        String beforeCollaborationStatus = resolveFailureCollaborationStatus(record, evaluationTime);
+        String beforeNotificationStatus = resolveFailureNotificationStatus(record, evaluationTime);
+        String beforeNotificationReceiptStatus = resolveFailureNotificationReceiptStatus(record, evaluationTime);
+        String beforeAutoRemindStage = resolveFailureAutoRemindStage(record, evaluationTime);
+        String beforeSlaStatus = resolveFailureSlaStatus(record, evaluationTime);
+        int beforeReminderCount = record == null || record.getReminderCount() == null ? 0 : record.getReminderCount();
+        String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
+
+        if (record == null) {
+            return new GovernanceSweepDecision("none", "skipped", "failure_missing",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (isFailureTerminal(handlingStatus)) {
+            return new GovernanceSweepDecision("none", "skipped", "terminal_failure",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (record.getAssignedAdminId() == null) {
+            return new GovernanceSweepDecision("none", "skipped", "unassigned_failure",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
+            return new GovernanceSweepDecision("none", "skipped", "already_acknowledged",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (StringUtils.hasText(record.getManualTakeoverAt())) {
+            return new GovernanceSweepDecision("none", "skipped", "manual_takeover_already_recorded",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (StringUtils.hasText(record.getAutoRemindSkippedAt())) {
+            return new GovernanceSweepDecision("none", "skipped", "auto_remind_skipped",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if ("pending_send".equals(beforeNotificationStatus) || "send_failed".equals(beforeNotificationStatus)) {
+            return new GovernanceSweepDecision("none", "skipped", "notification_not_ready",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+
+        LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
+        if (deadline == null) {
+            return new GovernanceSweepDecision("none", "skipped", "claim_deadline_missing",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+        if (!evaluationTime.isAfter(deadline)) {
+            return new GovernanceSweepDecision("none", "not_due", "within_ack_sla",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+
+        LocalDateTime cooldownBase = resolveFailureLastGovernanceTouchTime(record);
+        if (cooldownBase != null && evaluationTime.isBefore(cooldownBase.plusHours(FAILURE_AUTO_REMIND_COOLDOWN_HOURS))) {
+            return new GovernanceSweepDecision("none", "not_due", "auto_remind_cooldown",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+
+        if (beforeReminderCount >= FAILURE_AUTO_REMIND_MAX_COUNT) {
+            if (!StringUtils.hasText(record.getEscalationRoleCode())) {
+                return new GovernanceSweepDecision("timeout_escalation", "blocked", "escalation_role_missing",
+                        beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                        beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+            }
+            return new GovernanceSweepDecision("timeout_escalation", "ready", "ack_timeout_after_max_auto_remind",
+                    beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                    beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+        }
+
+        return new GovernanceSweepDecision("auto_remind", "ready", "ack_timeout_due_for_auto_remind",
+                beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
+                beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
+    }
+
+    private LocalDateTime resolveFailureLastGovernanceTouchTime(AiResumeFailureRecordDTO record) {
+        LocalDateTime lastRemindedAt = parseTime(record == null ? null : record.getLastRemindedAt());
+        if (lastRemindedAt != null) {
+            return lastRemindedAt;
+        }
+        return parseTime(resolveFailureNotificationSentAt(record));
+    }
+
+    private AiResumeFailureRecordDTO executeAutoRemind(AiResumeFailureRecordDTO current,
+                                                       AdminAuthenticatedUser admin,
+                                                       AdminAiResumeGovernanceSweepRequestDTO request,
+                                                       GovernanceSweepDecision decision) {
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        String now = LocalDateTime.now().format(TIME_FORMATTER);
+        String reason = resolveGovernanceSweepReason(request, "auto_remind", decision.detail());
+
+        current.setHandlingStatus(currentStatus);
+        current.setHandlingNote(reason);
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(now);
+        current.setReminderCount((current.getReminderCount() == null ? 0 : current.getReminderCount()) + 1);
+        current.setLastRemindedByAdminId(admin.getAdminUserId());
+        current.setLastRemindedByAdminName(admin.getUserName());
+        current.setLastRemindedAt(now);
+        clearFailureNotificationEvidence(current);
+        clearFailureAutoRemindSkip(current);
+        current.setHandlingNotes(appendHandlingNote(current, "auto_remind", currentStatus, reason, admin, null, null));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_auto_remind")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current, reason, currentStatus, currentStatus, "auto_remind"))
+                .operationResult(1)
+                .build());
+        return current;
+    }
+
+    private AiResumeFailureRecordDTO executeTimeoutEscalation(AiResumeFailureRecordDTO current,
+                                                              AdminAuthenticatedUser admin,
+                                                              AdminAiResumeGovernanceSweepRequestDTO request,
+                                                              GovernanceSweepDecision decision) {
+        AiResumeFailureRecordDTO before = copyFailure(current);
+        String currentStatus = normalizeFailureHandlingStatus(current.getHandlingStatus());
+        String now = LocalDateTime.now().format(TIME_FORMATTER);
+        String reason = resolveGovernanceSweepReason(request, "timeout_escalation", decision.detail());
+
+        current.setHandlingStatus("escalated");
+        current.setHandlingNote(reason);
+        current.setHandledByAdminId(admin.getAdminUserId());
+        current.setHandledByAdminName(admin.getUserName());
+        current.setHandledAt(now);
+        current.setHandlingNotes(appendHandlingNote(current, "timeout_escalation", "escalated", reason, admin, null, null));
+        aiResumeFailureRecordService.recordFailure(current);
+
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("ai_resume_timeout_escalation")
+                .targetType("ai_resume_failure")
+                .beforeSnapshot(before)
+                .afterSnapshot(current)
+                .extraContext(buildFailureActionContext(current, reason, currentStatus, "escalated", "timeout_escalation"))
+                .operationResult(1)
+                .build());
+        return current;
+    }
+
+    private String resolveGovernanceSweepReason(AdminAiResumeGovernanceSweepRequestDTO request, String actionType, String detail) {
+        if (request != null && StringUtils.hasText(request.getReason())) {
+            return request.getReason().trim();
+        }
+        if ("auto_remind".equals(actionType)) {
+            return "治理 sweep 自动催办：" + detail;
+        }
+        if ("timeout_escalation".equals(actionType)) {
+            return "治理 sweep 超时升级：" + detail;
+        }
+        return "治理 sweep：" + detail;
+    }
+
+    private AdminAiResumeGovernanceSweepItemDTO buildGovernanceSweepItem(AiResumeFailureRecordDTO sourceRecord,
+                                                                         LocalDateTime evaluationTime,
+                                                                         GovernanceSweepDecision decision,
+                                                                         AiResumeFailureRecordDTO resultRecord,
+                                                                         String actionStatusOverride) {
+        AiResumeFailureRecordDTO effectiveRecord = resultRecord == null ? sourceRecord : resultRecord;
+        AdminAiResumeGovernanceSweepItemDTO item = new AdminAiResumeGovernanceSweepItemDTO();
+        item.setFailureId(sourceRecord == null ? null : sourceRecord.getFailureId());
+        item.setRequestId(sourceRecord == null ? null : sourceRecord.getRequestId());
+        item.setAssignedAdminId(sourceRecord == null ? null : sourceRecord.getAssignedAdminId());
+        item.setAssignedAdminName(sourceRecord == null ? null : sourceRecord.getAssignedAdminName());
+        item.setEscalationRoleCode(sourceRecord == null ? null : sourceRecord.getEscalationRoleCode());
+        item.setEscalationRoleName(sourceRecord == null ? null : sourceRecord.getEscalationRoleName());
+        item.setActionType(decision.actionType());
+        item.setActionStatus(StringUtils.hasText(actionStatusOverride) ? actionStatusOverride : decision.actionStatus());
+        item.setDetail(decision.detail());
+        item.setEvaluatedAt(evaluationTime.format(TIME_FORMATTER));
+        item.setBeforeCollaborationStatus(decision.beforeCollaborationStatus());
+        item.setBeforeNotificationStatus(decision.beforeNotificationStatus());
+        item.setBeforeNotificationReceiptStatus(decision.beforeNotificationReceiptStatus());
+        item.setBeforeAutoRemindStage(decision.beforeAutoRemindStage());
+        item.setBeforeSlaStatus(decision.beforeSlaStatus());
+        item.setBeforeReminderCount(decision.beforeReminderCount());
+        item.setAfterHandlingStatus(effectiveRecord == null ? null : effectiveRecord.getHandlingStatus());
+        item.setAfterCollaborationStatus(resolveFailureCollaborationStatus(effectiveRecord));
+        item.setAfterNotificationStatus(resolveFailureNotificationStatus(effectiveRecord));
+        item.setAfterNotificationReceiptStatus(resolveFailureNotificationReceiptStatus(effectiveRecord));
+        item.setAfterAutoRemindStage(resolveFailureAutoRemindStage(effectiveRecord));
+        item.setAfterSlaStatus(resolveFailureSlaStatus(effectiveRecord));
+        item.setAfterReminderCount(effectiveRecord == null ? null : effectiveRecord.getReminderCount());
+        item.setFailure(effectiveRecord == null ? null : buildFailureItems(List.of(effectiveRecord)).get(0));
+        return item;
     }
 
     private List<HistoryRecord> loadAllHistoryRecords() {
@@ -1292,6 +1596,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if ("remind".equals(actionType)) {
             return "ai_resume_remind";
         }
+        if ("auto_remind".equals(actionType)) {
+            return "ai_resume_auto_remind";
+        }
         if ("manual_takeover".equals(actionType)) {
             return "ai_resume_manual_takeover";
         }
@@ -1312,6 +1619,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         }
         if ("escalate".equals(actionType)) {
             return "ai_resume_escalate";
+        }
+        if ("timeout_escalation".equals(actionType)) {
+            return "ai_resume_timeout_escalation";
         }
         if ("close".equals(actionType)) {
             return "ai_resume_close";
@@ -1399,6 +1709,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private String resolveFailureCollaborationStatus(AiResumeFailureRecordDTO record) {
+        return resolveFailureCollaborationStatus(record, LocalDateTime.now());
+    }
+
+    private String resolveFailureCollaborationStatus(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
         if (record == null || record.getAssignedAdminId() == null) {
             return "unassigned";
         }
@@ -1410,13 +1724,17 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             return "acknowledged";
         }
         LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
-        if (deadline != null && LocalDateTime.now().isAfter(deadline)) {
+        if (deadline != null && evaluationTime.isAfter(deadline)) {
             return "ack_overdue";
         }
         return "pending_ack";
     }
 
     private String resolveFailureNotificationStatus(AiResumeFailureRecordDTO record) {
+        return resolveFailureNotificationStatus(record, LocalDateTime.now());
+    }
+
+    private String resolveFailureNotificationStatus(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
         if (record != null && StringUtils.hasText(record.getNotificationStatus())) {
             return record.getNotificationStatus();
         }
@@ -1453,6 +1771,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private String resolveFailureNotificationReceiptStatus(AiResumeFailureRecordDTO record) {
+        return resolveFailureNotificationReceiptStatus(record, LocalDateTime.now());
+    }
+
+    private String resolveFailureNotificationReceiptStatus(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
         if (StringUtils.hasText(record == null ? null : record.getAssignmentAcknowledgedAt())) {
             return "received";
         }
@@ -1466,7 +1788,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                     : "not_sent";
         }
         LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
-        if (deadline != null && LocalDateTime.now().isAfter(deadline)) {
+        if (deadline != null && evaluationTime.isAfter(deadline)) {
             return "receipt_overdue";
         }
         return "pending_receipt";
@@ -1487,6 +1809,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private String resolveFailureAutoRemindStage(AiResumeFailureRecordDTO record) {
+        return resolveFailureAutoRemindStage(record, LocalDateTime.now());
+    }
+
+    private String resolveFailureAutoRemindStage(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
         String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
         if (isFailureTerminal(handlingStatus)) {
             return "completed";
@@ -1506,7 +1832,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         Integer reminderCount = record.getReminderCount();
         int resolvedReminderCount = reminderCount == null ? 0 : reminderCount;
         LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
-        boolean overdue = deadline != null && LocalDateTime.now().isAfter(deadline);
+        boolean overdue = deadline != null && evaluationTime.isAfter(deadline);
         if (overdue && resolvedReminderCount >= FAILURE_AUTO_REMIND_MAX_COUNT) {
             return "escalation_due";
         }
@@ -1520,6 +1846,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private String resolveFailureSlaStatus(AiResumeFailureRecordDTO record) {
+        return resolveFailureSlaStatus(record, LocalDateTime.now());
+    }
+
+    private String resolveFailureSlaStatus(AiResumeFailureRecordDTO record, LocalDateTime evaluationTime) {
         if (!StringUtils.hasText(resolveFailureNotificationSentAt(record))) {
             return "not_started";
         }
@@ -1533,7 +1863,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             evaluatedAt = parseTime(record.getHandledAt());
         }
         if (evaluatedAt == null) {
-            evaluatedAt = LocalDateTime.now();
+            evaluatedAt = evaluationTime;
         }
         if (evaluatedAt.isAfter(deadline)) {
             return "breached";
@@ -1647,5 +1977,20 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private record UserContext(User user, ActorProfile actorProfile) {
+    }
+
+    private record GovernanceSweepDecision(String actionType,
+                                           String actionStatus,
+                                           String detail,
+                                           String beforeCollaborationStatus,
+                                           String beforeNotificationStatus,
+                                           String beforeNotificationReceiptStatus,
+                                           String beforeAutoRemindStage,
+                                           String beforeSlaStatus,
+                                           int beforeReminderCount) {
+
+        private boolean isDue() {
+            return "ready".equals(actionStatus);
+        }
     }
 }
