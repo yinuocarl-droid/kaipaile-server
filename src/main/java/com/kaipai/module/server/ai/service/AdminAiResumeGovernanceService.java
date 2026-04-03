@@ -44,4 +44,8 @@ public interface AdminAiResumeGovernanceService {
     AdminAiResumeFailureItemDTO manualTakeoverFailure(String failureId, AdminAiResumeFailureActionDTO action);
 
     AdminAiResumeFailureItemDTO skipAutoRemind(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO recordNotification(String failureId, AdminAiResumeFailureActionDTO action);
+
+    AdminAiResumeFailureItemDTO recordNotificationReceipt(String failureId, AdminAiResumeFailureActionDTO action);
 }

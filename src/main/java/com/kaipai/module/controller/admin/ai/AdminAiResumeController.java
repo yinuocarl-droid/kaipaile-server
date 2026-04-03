@@ -171,6 +171,28 @@ public class AdminAiResumeController {
         ));
     }
 
+    @Operation(summary = "AI 简历失败样本记录通知结果")
+    @PostMapping("/failures/{failureId}/record-notification")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeFailureItemDTO> recordNotification(@PathVariable String failureId,
+                                                             @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.recordNotification(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
+    @Operation(summary = "AI 简历失败样本记录通知回执")
+    @PostMapping("/failures/{failureId}/record-notification-receipt")
+    @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")
+    public R<AdminAiResumeFailureItemDTO> recordNotificationReceipt(@PathVariable String failureId,
+                                                                    @RequestBody(required = false) AdminAiResumeFailureActionDTO action) {
+        return R.ok(adminAiResumeGovernanceService.recordNotificationReceipt(
+                failureId,
+                action == null ? new AdminAiResumeFailureActionDTO() : action
+        ));
+    }
+
     @Operation(summary = "AI 简历失败样本升级处理")
     @PostMapping("/failures/{failureId}/escalate")
     @PreAuthorize("hasAuthority('action.system.ai-resume.resolve')")

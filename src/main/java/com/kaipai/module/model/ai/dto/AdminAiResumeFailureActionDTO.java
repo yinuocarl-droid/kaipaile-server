@@ -10,4 +10,8 @@ public class AdminAiResumeFailureActionDTO {
     private Long assignedAdminId;
 
     private String escalationRoleCode;
+
+    private String notificationStatus;
+
+    private String notificationReceiptStatus;
 }

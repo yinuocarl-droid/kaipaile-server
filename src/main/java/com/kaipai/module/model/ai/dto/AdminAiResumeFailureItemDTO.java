@@ -74,9 +74,13 @@ public class AdminAiResumeFailureItemDTO {
 
     private String notificationSentAt;
 
+    private String notificationFailureReason;
+
     private String notificationReceiptStatus;
 
     private String notificationReceiptAt;
+
+    private String notificationReceiptFailureReason;
 
     private String autoRemindStage;
 

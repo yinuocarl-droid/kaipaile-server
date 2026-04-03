@@ -31,6 +31,18 @@ public class AiResumeFailureHandlingNoteDTO {
 
     private String assignmentAcknowledgedAt;
 
+    private String notificationStatus;
+
+    private String notificationSentAt;
+
+    private String notificationFailureReason;
+
+    private String notificationReceiptStatus;
+
+    private String notificationReceiptAt;
+
+    private String notificationReceiptFailureReason;
+
     private Integer reminderCount;
 
     private Long lastRemindedByAdminId;
