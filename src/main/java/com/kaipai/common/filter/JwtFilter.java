@@ -2,6 +2,7 @@ package com.kaipai.common.filter;
 
 import com.kaipai.common.auth.AdminAuthenticatedUser;
 import com.kaipai.common.util.JwtUtil;
+import com.kaipai.module.server.ai.config.AiResumeNotificationProperties;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -26,17 +27,28 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
 
+    private static final String CALLBACK_PATH = "/internal/ai/resume/notification-receipts/provider";
+    private static final String CALLBACK_PRINCIPAL = "ai-notification-provider-callback";
+
     private final JwtUtil jwtUtil;
+    private final AiResumeNotificationProperties aiResumeNotificationProperties;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String token = extractToken(request);
-        if (StringUtils.hasText(token) && jwtUtil.validateToken(token)) {
-            Claims claims = jwtUtil.parseClaims(token);
-            UsernamePasswordAuthenticationToken auth = buildAuthentication(claims);
-            SecurityContextHolder.getContext().setAuthentication(auth);
+        if (SecurityContextHolder.getContext().getAuthentication() == null) {
+            UsernamePasswordAuthenticationToken callbackAuth = buildProviderCallbackAuthentication(request);
+            if (callbackAuth != null) {
+                SecurityContextHolder.getContext().setAuthentication(callbackAuth);
+            } else {
+                String token = extractToken(request);
+                if (StringUtils.hasText(token) && jwtUtil.validateToken(token)) {
+                    Claims claims = jwtUtil.parseClaims(token);
+                    UsernamePasswordAuthenticationToken auth = buildAuthentication(claims);
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                }
+            }
         }
         chain.doFilter(request, response);
     }
@@ -72,6 +84,43 @@ public class JwtFilter extends OncePerRequestFilter {
             return bearerToken.substring(7);
         }
         return null;
+    }
+
+    private UsernamePasswordAuthenticationToken buildProviderCallbackAuthentication(HttpServletRequest request) {
+        if (!isProviderCallbackRequest(request)) {
+            return null;
+        }
+        String headerName = trimToNull(aiResumeNotificationProperties.getCallbackHeader());
+        String expectedToken = trimToNull(aiResumeNotificationProperties.getCallbackToken());
+        String actualToken = headerName == null ? null : trimToNull(request.getHeader(headerName));
+        if (expectedToken == null || !expectedToken.equals(actualToken)) {
+            return null;
+        }
+        return new UsernamePasswordAuthenticationToken(
+                CALLBACK_PRINCIPAL,
+                null,
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_SYSTEM"))
+        );
+    }
+
+    private boolean isProviderCallbackRequest(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        String requestUri = trimToNull(request.getRequestURI());
+        if (requestUri == null) {
+            return false;
+        }
+        return CALLBACK_PATH.equals(requestUri)
+                || requestUri.endsWith(CALLBACK_PATH)
+                || requestUri.endsWith(CALLBACK_PATH + "/");
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     private Set<String> extractStringSet(Collection<?> values) {

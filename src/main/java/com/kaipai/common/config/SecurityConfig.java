@@ -32,6 +32,8 @@ public class SecurityConfig {
     private static final String[] WHITE_LIST = {
             "/auth/**",
             "/api/auth/**",
+            "/internal/ai/resume/notification-receipts/provider",
+            "/api/internal/ai/resume/notification-receipts/provider",
             "/admin/auth/login",
             "/doc.html",
             "/api/doc.html",
