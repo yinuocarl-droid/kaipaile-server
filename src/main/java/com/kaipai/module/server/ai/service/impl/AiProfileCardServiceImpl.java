@@ -12,6 +12,7 @@ import com.kaipai.module.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
+import com.kaipai.module.model.card.dto.ActorCardConfigRespDTO;
 import com.kaipai.module.model.card.dto.ActorCardConfigSaveDTO;
 import com.kaipai.module.model.card.dto.ActorMyShareCardItemDTO;
 import com.kaipai.module.model.card.dto.CreateShareCardDTO;
@@ -208,7 +209,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             throw new BizException("AI 图片生成结果为空");
         }
         if (StringUtils.hasText(result.imageUrl())) {
-            return result.imageUrl().trim();
+            return generatedImageStorage.uploadFromUrl(result.imageUrl().trim(), "ai-profile-card");
         }
         if (result.imageBytes() != null && result.imageBytes().length > 0) {
             return generatedImageStorage.upload(
@@ -326,6 +327,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     }
 
     private AiProfileCardTaskRespDTO toTaskResp(ActorAiProfileCardTask task) {
+        task = ensurePersistedGeneratedImage(task);
         AiProfileCardTaskRespDTO dto = new AiProfileCardTaskRespDTO();
         dto.setTaskId(task.getTaskId());
         dto.setStatus(task.getStatus());
@@ -341,6 +343,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     }
 
     private AiProfileCardArtifactRespDTO toArtifactResp(ActorAiProfileCardTask task) {
+        task = ensurePersistedGeneratedImage(task);
         AiProfileCardArtifactRespDTO dto = new AiProfileCardArtifactRespDTO();
         dto.setArtifactId(task.getTaskId());
         dto.setTaskId(task.getTaskId());
@@ -352,6 +355,68 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
         return dto;
+    }
+
+    private ActorAiProfileCardTask ensurePersistedGeneratedImage(ActorAiProfileCardTask task) {
+        if (task == null
+                || !STATUS_SUCCESS.equals(task.getStatus())
+                || !StringUtils.hasText(task.getGeneratedImageUrl())
+                || generatedImageStorage.isManagedUrl(task.getGeneratedImageUrl())) {
+            return task;
+        }
+        String originalImageUrl = task.getGeneratedImageUrl().trim();
+        try {
+            String persistedImageUrl = generatedImageStorage.uploadFromUrl(originalImageUrl, "ai-profile-card");
+            ActorAiProfileCardTask update = new ActorAiProfileCardTask();
+            update.setTaskId(task.getTaskId());
+            update.setGeneratedImageUrl(persistedImageUrl);
+            updateById(update);
+            replaceGeneratedImageInCardConfig(task, originalImageUrl, persistedImageUrl);
+            task.setGeneratedImageUrl(persistedImageUrl);
+        } catch (Exception error) {
+            log.warn("AI profile card generated image persist fallback failed, taskId={}", task.getTaskId(), error);
+        }
+        return task;
+    }
+
+    private void replaceGeneratedImageInCardConfig(ActorAiProfileCardTask task,
+                                                   String originalImageUrl,
+                                                   String persistedImageUrl) {
+        if (task.getShareCardId() == null || task.getShareCardId() <= 0 || !StringUtils.hasText(persistedImageUrl)) {
+            return;
+        }
+        try {
+            ActorCardConfigRespDTO current = actorCardConfigService.actorConfig(task.getShareCardId());
+            List<String> photos = new ArrayList<>(safeList(current.getHighlightedPhotos()));
+            boolean replaced = false;
+            for (int index = 0; index < photos.size(); index++) {
+                if (originalImageUrl.equals(photos.get(index))) {
+                    photos.set(index, persistedImageUrl);
+                    replaced = true;
+                }
+            }
+            if (!replaced && !photos.contains(persistedImageUrl)) {
+                photos.add(0, persistedImageUrl);
+            }
+
+            ActorCardConfigSaveDTO dto = new ActorCardConfigSaveDTO();
+            dto.setShareCardId(task.getShareCardId());
+            dto.setLayoutVariant(current.getLayoutVariant());
+            dto.setPrimaryColor(current.getPrimaryColor());
+            dto.setAccentColor(current.getAccentColor());
+            dto.setBackgroundColor(current.getBackgroundColor());
+            dto.setHighlightedExperiences(current.getHighlightedExperiences());
+            dto.setHighlightedPhotos(photos.stream()
+                    .filter(StringUtils::hasText)
+                    .distinct()
+                    .limit(3)
+                    .toList());
+            dto.setTagOrder(current.getTagOrder());
+            actorCardConfigService.saveActorConfig(task.getUserId(), dto);
+        } catch (Exception error) {
+            log.warn("AI profile card config generated image replacement failed, taskId={}, shareCardId={}",
+                    task.getTaskId(), task.getShareCardId(), error);
+        }
     }
 
     private LambdaQueryWrapper<ActorAiProfileCardTask> successArtifactQuery() {

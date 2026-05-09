@@ -54,7 +54,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
                     .build();
             SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), config);
             JsonNode submitted = submitEditTask(client, request, sourceImage, config);
-            AiProfileImageGenerationResult immediateResult = parseImageResult(submitted);
+            AiProfileImageGenerationResult immediateResult = parseImageResult(submitted, config.getEndpoint());
             if (immediateResult != null) {
                 return immediateResult;
             }
@@ -119,7 +119,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
             JsonNode task = objectMapper.readTree(response.body());
             String status = firstText(task, "/status", "/data/status");
             if ("succeeded".equalsIgnoreCase(status) || "success".equalsIgnoreCase(status) || "completed".equalsIgnoreCase(status)) {
-                AiProfileImageGenerationResult result = parseImageResult(task);
+                AiProfileImageGenerationResult result = parseImageResult(task, config.getEndpoint());
                 if (result != null) {
                     return result;
                 }
@@ -152,21 +152,41 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
         return new SourceImage(response.body(), contentType, fileNameForContentType(contentType));
     }
 
-    private AiProfileImageGenerationResult parseImageResult(JsonNode root) {
+    private AiProfileImageGenerationResult parseImageResult(JsonNode root, String endpoint) {
         if (root == null || root.isMissingNode()) {
             return null;
         }
         String imageUrl = firstText(root,
                 "/imageUrl",
+                "/image_url",
                 "/url",
+                "/data/imageUrl",
+                "/data/image_url",
+                "/data/url",
                 "/data/0/url",
                 "/data/0/imageUrl",
+                "/data/0/image_url",
+                "/images/0/url",
+                "/images/0/imageUrl",
+                "/images/0/image_url",
+                "/output/0",
+                "/output/0/url",
+                "/output/0/imageUrl",
+                "/output/0/image_url",
                 "/result/data/0/url",
                 "/result/data/0/imageUrl",
+                "/result/data/0/image_url",
+                "/result/output/0",
+                "/result/output/0/url",
                 "/data/result/data/0/url",
-                "/data/result/data/0/imageUrl");
+                "/data/result/data/0/imageUrl",
+                "/data/result/data/0/image_url",
+                "/data/output/0",
+                "/data/output/0/url",
+                "/data/output/0/imageUrl",
+                "/data/output/0/image_url");
         if (StringUtils.hasText(imageUrl)) {
-            return AiProfileImageGenerationResult.imageUrl(imageUrl.trim());
+            return AiProfileImageGenerationResult.imageUrl(resolveImageUrl(imageUrl.trim(), endpoint));
         }
 
         String b64Json = firstText(root,
@@ -241,6 +261,19 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
     private String authHeader(AiProfileCardProperties.KplyykProvider config) {
         return StringUtils.hasText(config.getAuthHeader()) ? config.getAuthHeader().trim() : "Authorization";
+    }
+
+    private String resolveImageUrl(String imageUrl, String endpoint) {
+        if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+            return imageUrl;
+        }
+        if (imageUrl.startsWith("//")) {
+            return "https:" + imageUrl;
+        }
+        if (!StringUtils.hasText(endpoint)) {
+            return imageUrl;
+        }
+        return URI.create(endpoint).resolve(imageUrl).toString();
     }
 
     private byte[] decodeBase64Image(String value) {
