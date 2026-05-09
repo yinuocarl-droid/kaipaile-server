@@ -13,8 +13,6 @@ public class UserAdminListItemDTO {
     private Integer userType;
     private String role;
     private Integer realAuthStatus;
-    private Integer membershipTier;
-    private Integer membershipStatus;
     private Integer referralStatus;
     private Integer validInviteCount;
     private UserAdminEntitlementSummaryDTO entitlementSummary;

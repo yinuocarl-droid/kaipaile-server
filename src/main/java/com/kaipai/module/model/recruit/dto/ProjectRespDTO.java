@@ -7,7 +7,7 @@ public class ProjectRespDTO {
 
     private Long id;
 
-    private Long companyId;
+    private Long crewId;
 
     private String title;
 

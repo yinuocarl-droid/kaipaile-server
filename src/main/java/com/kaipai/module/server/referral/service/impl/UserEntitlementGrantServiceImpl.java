@@ -21,6 +21,7 @@ import com.kaipai.module.model.system.entity.AdminOperationLog;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
+import com.kaipai.module.server.referral.mapper.ReferralRecordMapper;
 import com.kaipai.module.server.referral.mapper.ReferralPolicyMapper;
 import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
 import com.kaipai.module.server.referral.service.UserEntitlementGrantService;
@@ -40,6 +41,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -47,12 +50,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlementGrantMapper, UserEntitlementGrant> implements UserEntitlementGrantService {
 
+    private static final Pattern POLICY_ID_PATTERN = Pattern.compile("policyId=(\\d+)");
+
     private final AdminOperationLogger adminOperationLogger;
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
     private final PaymentOrderMapper paymentOrderMapper;
     private final ReferralPolicyMapper referralPolicyMapper;
+    private final ReferralRecordMapper referralRecordMapper;
 
     @Override
     public PageResult<UserEntitlementGrantItemDTO> adminGrantList(UserEntitlementGrantListQueryDTO query) {
@@ -80,6 +86,9 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
         }
         if (StringUtils.hasText(query.getSourceType())) {
             wrapper.eq(UserEntitlementGrant::getSourceType, query.getSourceType().trim());
+        }
+        if (query.getSourceRefId() != null) {
+            wrapper.eq(UserEntitlementGrant::getSourceRefId, query.getSourceRefId());
         }
         if (query.getEffectiveFrom() != null) {
             wrapper.ge(UserEntitlementGrant::getEffectiveTime, query.getEffectiveFrom());
@@ -147,20 +156,32 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
 
     @Override
     public UserEntitlementGrant grantManual(UserEntitlementGrantGrantRequestDTO request) {
+        if (request == null || request.getUserId() == null) {
+            throw new BizException("用户不能为空");
+        }
+        if (userMapper.selectById(request.getUserId()) == null) {
+            throw new BizException("用户不存在");
+        }
+        if (!StringUtils.hasText(request.getGrantType())) {
+            throw new BizException("资格类型不能为空");
+        }
+        if (!StringUtils.hasText(request.getGrantCode())) {
+            throw new BizException("资格编码不能为空");
+        }
         LambdaQueryWrapper<UserEntitlementGrant> existsFlag = new LambdaQueryWrapper<>();
         existsFlag.eq(UserEntitlementGrant::getUserId, request.getUserId())
-                .eq(UserEntitlementGrant::getGrantCode, request.getGrantCode());
+                .eq(UserEntitlementGrant::getGrantCode, request.getGrantCode().trim());
         if (count(existsFlag) > 0) {
             throw new BizException("grant with same code already exists");
         }
         UserEntitlementGrant grant = new UserEntitlementGrant();
         grant.setUserId(request.getUserId());
-        grant.setGrantType(request.getGrantType());
-        grant.setGrantCode(request.getGrantCode());
+        grant.setGrantType(request.getGrantType().trim());
+        grant.setGrantCode(request.getGrantCode().trim());
         grant.setStatus(1);
         grant.setEffectiveTime(request.getEffectiveTime() == null ? LocalDateTime.now() : request.getEffectiveTime());
         grant.setExpireTime(request.getExpireTime());
-        grant.setSourceType(request.getSourceType());
+        grant.setSourceType(StringUtils.hasText(request.getSourceType()) ? request.getSourceType().trim() : "manual");
         grant.setSourceRefId(request.getSourceRefId());
         grant.setRemark(request.getRemark());
         save(grant);
@@ -302,6 +323,18 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
             }
             return info;
         }
+        if (Objects.equals("referral", grant.getSourceType()) && grant.getSourceRefId() != null) {
+            var referral = referralRecordMapper.selectById(grant.getSourceRefId());
+            if (referral != null) {
+                info.setSourceTitle(StringUtils.hasText(referral.getInviteCodeSnapshot())
+                        ? referral.getInviteCodeSnapshot()
+                        : "referral#" + referral.getReferralId());
+                info.setSourceStatus(referral.getStatus() == null ? null : String.valueOf(referral.getStatus()));
+                info.setRelatedBizType("invite_referral");
+                info.setRelatedBizId(referral.getInviteeUserId());
+            }
+            return info;
+        }
         if (Objects.equals("manual", grant.getSourceType())) {
             info.setSourceTitle("manual");
         }
@@ -329,10 +362,7 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
     }
 
     private UserEntitlementGrantDetailDTO.RelatedPolicyInfo toRelatedPolicy(UserEntitlementGrant grant) {
-        if (!Objects.equals("policy", grant.getSourceType()) || grant.getSourceRefId() == null) {
-            return null;
-        }
-        ReferralPolicy policy = referralPolicyMapper.selectById(grant.getSourceRefId());
+        ReferralPolicy policy = resolveRelatedPolicy(grant);
         if (policy == null) {
             return null;
         }
@@ -456,5 +486,44 @@ public class UserEntitlementGrantServiceImpl extends ServiceImpl<UserEntitlement
             return user.getPhone();
         }
         return actorProfile == null ? null : actorProfile.getPhone();
+    }
+
+    private ReferralPolicy resolveRelatedPolicy(UserEntitlementGrant grant) {
+        if (grant == null) {
+            return null;
+        }
+        if (Objects.equals("policy", grant.getSourceType()) && grant.getSourceRefId() != null) {
+            return referralPolicyMapper.selectById(grant.getSourceRefId());
+        }
+        if (!Objects.equals("referral", grant.getSourceType())) {
+            return null;
+        }
+        Long policyId = extractPolicyIdFromRemark(grant.getRemark());
+        if (policyId != null) {
+            ReferralPolicy policy = referralPolicyMapper.selectById(policyId);
+            if (policy != null) {
+                return policy;
+            }
+        }
+        return referralPolicyMapper.selectOne(new LambdaQueryWrapper<ReferralPolicy>()
+                .eq(ReferralPolicy::getEnabled, 1)
+                .orderByDesc(ReferralPolicy::getLastUpdate)
+                .orderByDesc(ReferralPolicy::getPolicyId)
+                .last("limit 1"));
+    }
+
+    private Long extractPolicyIdFromRemark(String remark) {
+        if (!StringUtils.hasText(remark)) {
+            return null;
+        }
+        Matcher matcher = POLICY_ID_PATTERN.matcher(remark);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(matcher.group(1));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }

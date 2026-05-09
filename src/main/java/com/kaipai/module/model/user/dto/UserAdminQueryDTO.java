@@ -18,7 +18,6 @@ public class UserAdminQueryDTO {
     private Integer role;
     private Integer userType;
     private Integer realAuthStatus;
-    private Integer membershipStatus;
     private Integer referralStatus;
     private Integer entitlementStatus;
 }

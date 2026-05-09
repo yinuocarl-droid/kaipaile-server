@@ -26,6 +26,12 @@ public class CosUtil {
     private final COSClient cosClient;
     private final CosConfig cosConfig;
 
+    private static final long MB = 1024L * 1024L;
+    private static final long AVATAR_MAX_SIZE = 2 * MB;
+    private static final long PHOTO_MAX_SIZE = 5 * MB;
+    private static final long LICENSE_MAX_SIZE = 5 * MB;
+    private static final long VIDEO_MAX_SIZE = 100 * MB;
+
     /** 允许上传的图片类型 */
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
             "image/jpeg", "image/png", "image/gif", "image/webp"
@@ -45,6 +51,7 @@ public class CosUtil {
      */
     public String uploadImage(MultipartFile file, String folder) {
         validateFileType(file, ALLOWED_IMAGE_TYPES);
+        validateFileSize(file, imageMaxSize(folder), imageMaxSizeMessage(folder));
         return upload(file, folder);
     }
 
@@ -57,6 +64,7 @@ public class CosUtil {
      */
     public String uploadVideo(MultipartFile file, String folder) {
         validateFileType(file, ALLOWED_VIDEO_TYPES);
+        validateFileSize(file, VIDEO_MAX_SIZE, "视频大小不能超过100MB");
         return upload(file, folder);
     }
 
@@ -106,6 +114,30 @@ public class CosUtil {
         if (contentType == null || !allowedTypes.contains(contentType)) {
             throw new BizException(ResultCode.FILE_TYPE_NOT_ALLOWED);
         }
+    }
+
+    private void validateFileSize(MultipartFile file, long maxSize, String message) {
+        if (file.getSize() > maxSize) {
+            throw new BizException(ResultCode.FILE_SIZE_EXCEEDED.getCode(), message);
+        }
+    }
+
+    private long imageMaxSize(String folder) {
+        return switch (folder) {
+            case "avatar" -> AVATAR_MAX_SIZE;
+            case "license" -> LICENSE_MAX_SIZE;
+            case "photo" -> PHOTO_MAX_SIZE;
+            default -> PHOTO_MAX_SIZE;
+        };
+    }
+
+    private String imageMaxSizeMessage(String folder) {
+        return switch (folder) {
+            case "avatar" -> "头像图片不能超过2MB";
+            case "license" -> "营业执照图片不能超过5MB";
+            case "photo" -> "作品图片不能超过5MB";
+            default -> "图片大小不能超过5MB";
+        };
     }
 
     private String buildUrl(String key) {

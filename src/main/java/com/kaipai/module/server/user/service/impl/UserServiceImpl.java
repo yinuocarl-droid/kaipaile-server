@@ -6,8 +6,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
-import com.kaipai.module.model.membership.entity.MembershipAccount;
-import com.kaipai.module.model.membership.entity.MembershipChangeLog;
+import com.kaipai.module.model.capability.entity.CapabilityAccount;
 import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.referral.entity.InviteCode;
 import com.kaipai.module.model.referral.entity.ReferralRecord;
@@ -22,12 +21,12 @@ import com.kaipai.module.model.user.dto.UserSessionRespDTO;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
-import com.kaipai.module.server.membership.mapper.MembershipAccountMapper;
-import com.kaipai.module.server.membership.mapper.MembershipChangeLogMapper;
+import com.kaipai.module.server.capability.mapper.CapabilityAccountMapper;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.referral.mapper.InviteCodeMapper;
 import com.kaipai.module.server.referral.mapper.ReferralRecordMapper;
 import com.kaipai.module.server.referral.mapper.UserEntitlementGrantMapper;
+import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.refund.mapper.RefundOrderMapper;
 import com.kaipai.module.server.system.mapper.AdminOperationLogMapper;
 import com.kaipai.module.server.user.mapper.UserMapper;
@@ -58,7 +57,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final List<Integer> PAID_ORDER_STATUSES = List.of(1, 3, 4);
     private static final int USER_TYPE_ACTOR = 1;
     private static final int USER_TYPE_CREW = 2;
-    private static final int MEMBERSHIP_STATUS_ACTIVE = 1;
+    private static final int CAPABILITY_STATUS_ACTIVE = 1;
     private static final int INVITE_CODE_STATUS_ACTIVE = 1;
     private static final int REFERRAL_STATUS_VALID = 1;
     private static final int REFERRAL_STATUS_UNDER_REVIEW = 3;
@@ -66,14 +65,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     private final ActorProfileMapper actorProfileMapper;
     private final IdentityVerificationMapper identityVerificationMapper;
-    private final MembershipAccountMapper membershipAccountMapper;
-    private final MembershipChangeLogMapper membershipChangeLogMapper;
+    private final CapabilityAccountMapper capabilityAccountMapper;
     private final UserEntitlementGrantMapper userEntitlementGrantMapper;
     private final ReferralRecordMapper referralRecordMapper;
     private final InviteCodeMapper inviteCodeMapper;
     private final PaymentOrderMapper paymentOrderMapper;
     private final RefundOrderMapper refundOrderMapper;
     private final AdminOperationLogMapper adminOperationLogMapper;
+    private final ReferralRecordService referralRecordService;
 
     @Override
     public UserSessionRespDTO currentUser(Long userId) {
@@ -112,9 +111,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         Set<Long> scopedUserIds = null;
         Integer role = query.getRole() != null ? query.getRole() : query.getUserType();
 
-        if (query.getMembershipStatus() != null) {
-            scopedUserIds = intersectUserScope(scopedUserIds, selectUserIdsByMembershipStatus(query.getMembershipStatus()));
-        }
         if (query.getReferralStatus() != null) {
             scopedUserIds = intersectUserScope(scopedUserIds, selectUserIdsByReferralStatus(query.getReferralStatus()));
         }
@@ -160,14 +156,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .map(User::getUserId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Map<Long, ActorProfile> actorProfileMap = selectActorProfileMap(userIds);
-        Map<Long, MembershipAccount> membershipAccountMap = selectMembershipAccountMap(userIds);
         Map<Long, ReferralRecord> selfReferralMap = selectSelfReferralMap(userIds);
         Map<Long, List<UserEntitlementGrant>> entitlementMap = selectEntitlementMap(userIds);
 
         List<UserAdminListItemDTO> list = result.getRecords().stream()
                 .map(user -> toListItem(user,
                         actorProfileMap.get(user.getUserId()),
-                        membershipAccountMap.get(user.getUserId()),
                         selfReferralMap.get(user.getUserId()),
                         entitlementMap.getOrDefault(user.getUserId(), Collections.emptyList())))
                 .toList();
@@ -188,14 +182,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .eq(IdentityVerification::getUserId, userId)
                 .orderByDesc(IdentityVerification::getCreateTime)
                 .orderByDesc(IdentityVerification::getVerificationId)
-                .last("limit 1"));
-        MembershipAccount membershipAccount = membershipAccountMapper.selectOne(new LambdaQueryWrapper<MembershipAccount>()
-                .eq(MembershipAccount::getUserId, userId)
-                .last("limit 1"));
-        MembershipChangeLog latestMembershipChange = membershipChangeLogMapper.selectOne(new LambdaQueryWrapper<MembershipChangeLog>()
-                .eq(MembershipChangeLog::getUserId, userId)
-                .orderByDesc(MembershipChangeLog::getCreateTime)
-                .orderByDesc(MembershipChangeLog::getChangeLogId)
                 .last("limit 1"));
         InviteCode inviteCode = inviteCodeMapper.selectOne(new LambdaQueryWrapper<InviteCode>()
                 .eq(InviteCode::getUserId, userId)
@@ -227,17 +213,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setActorProfileSummary(buildActorProfileSummary(actorProfile));
         dto.setVerifySummary(buildVerifySummary(user, latestVerification));
         dto.setReferralSummary(buildReferralSummary(user, inviteCode, selfReferral, inviterRecords));
-        dto.setMembershipSummary(buildMembershipSummary(membershipAccount, latestMembershipChange));
         dto.setEntitlementSummary(buildEntitlementSummary(grants));
         dto.setPaymentSummary(buildPaymentSummary(paymentOrders));
         dto.setRefundSummary(buildRefundSummary(refundOrders));
-        dto.setRecentOperationLogs(buildRecentOperationLogs(latestVerification, membershipAccount, grants, refundOrders));
+        dto.setRecentOperationLogs(buildRecentOperationLogs(latestVerification, grants, refundOrders));
         return dto;
     }
 
     private UserAdminListItemDTO toListItem(User user,
                                             ActorProfile actorProfile,
-                                            MembershipAccount membershipAccount,
                                             ReferralRecord selfReferral,
                                             List<UserEntitlementGrant> grants) {
         UserAdminListItemDTO dto = new UserAdminListItemDTO();
@@ -247,8 +231,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setUserType(user.getUserType());
         dto.setRole(resolveRole(user.getUserType()));
         dto.setRealAuthStatus(user.getRealAuthStatus());
-        dto.setMembershipTier(membershipAccount == null ? null : membershipAccount.getTier());
-        dto.setMembershipStatus(membershipAccount == null ? null : membershipAccount.getStatus());
         dto.setReferralStatus(selfReferral == null ? null : selfReferral.getStatus());
         dto.setValidInviteCount(user.getValidInviteCount());
         dto.setEntitlementSummary(buildEntitlementSummary(grants));
@@ -344,27 +326,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return summary;
     }
 
-    private UserAdminDetailDTO.MembershipSummary buildMembershipSummary(MembershipAccount account, MembershipChangeLog latestChange) {
-        if (account == null && latestChange == null) {
-            return null;
-        }
-        UserAdminDetailDTO.MembershipSummary summary = new UserAdminDetailDTO.MembershipSummary();
-        if (account != null) {
-            summary.setMembershipId(account.getMembershipId());
-            summary.setTier(account.getTier());
-            summary.setStatus(account.getStatus());
-            summary.setEffectiveTime(account.getEffectiveTime());
-            summary.setExpireTime(account.getExpireTime());
-            summary.setSourceType(account.getSourceType());
-            summary.setSourceRefId(account.getSourceRefId());
-        }
-        if (latestChange != null) {
-            summary.setLastChangeReason(latestChange.getChangeReason());
-            summary.setLastChangeTime(latestChange.getCreateTime());
-        }
-        return summary;
-    }
-
     private UserAdminEntitlementSummaryDTO buildEntitlementSummary(List<UserEntitlementGrant> grants) {
         UserAdminEntitlementSummaryDTO summary = new UserAdminEntitlementSummaryDTO();
         if (grants == null || grants.isEmpty()) {
@@ -447,15 +408,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     private List<UserAdminDetailDTO.RecentOperationLogItem> buildRecentOperationLogs(IdentityVerification verification,
-                                                                                      MembershipAccount membershipAccount,
                                                                                       List<UserEntitlementGrant> grants,
                                                                                       List<RefundOrder> refundOrders) {
         List<AdminOperationLog> logs = new ArrayList<>();
         if (verification != null) {
             logs.addAll(selectRecentAdminLogs("identity_verification", Collections.singleton(verification.getVerificationId()), 5));
-        }
-        if (membershipAccount != null) {
-            logs.addAll(selectRecentAdminLogs("membership_account", Collections.singleton(membershipAccount.getMembershipId()), 5));
         }
         Set<Long> grantIds = grants.stream().map(UserEntitlementGrant::getGrantId).collect(Collectors.toSet());
         if (!grantIds.isEmpty()) {
@@ -500,14 +457,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .last("limit " + limit));
     }
 
-    private Set<Long> selectUserIdsByMembershipStatus(Integer membershipStatus) {
-        return membershipAccountMapper.selectList(new LambdaQueryWrapper<MembershipAccount>()
-                        .eq(MembershipAccount::getStatus, membershipStatus))
-                .stream()
-                .map(MembershipAccount::getUserId)
-                .collect(Collectors.toSet());
-    }
-
     private Set<Long> selectUserIdsByReferralStatus(Integer referralStatus) {
         return referralRecordMapper.selectList(new LambdaQueryWrapper<ReferralRecord>()
                         .eq(ReferralRecord::getStatus, referralStatus))
@@ -546,15 +495,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return actorProfileMapper.selectList(new LambdaQueryWrapper<ActorProfile>().in(ActorProfile::getUserId, userIds))
                 .stream()
                 .collect(Collectors.toMap(ActorProfile::getUserId, Function.identity(), (left, right) -> left));
-    }
-
-    private Map<Long, MembershipAccount> selectMembershipAccountMap(Set<Long> userIds) {
-        if (userIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        return membershipAccountMapper.selectList(new LambdaQueryWrapper<MembershipAccount>().in(MembershipAccount::getUserId, userIds))
-                .stream()
-                .collect(Collectors.toMap(MembershipAccount::getUserId, Function.identity(), (left, right) -> left));
     }
 
     private Map<Long, ReferralRecord> selectSelfReferralMap(Set<Long> userIds) {
@@ -602,7 +542,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             return "actor";
         }
         if (Objects.equals(userType, 2)) {
-            return "company";
+            return "crew";
         }
         if (Objects.equals(userType, 3)) {
             return "platform_admin";
@@ -611,11 +551,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     private UserSessionRespDTO buildCurrentUser(User user) {
-        MembershipAccount membershipAccount = membershipAccountMapper.selectOne(new LambdaQueryWrapper<MembershipAccount>()
-                .eq(MembershipAccount::getUserId, user.getUserId())
-                .eq(MembershipAccount::getStatus, MEMBERSHIP_STATUS_ACTIVE)
-                .orderByDesc(MembershipAccount::getExpireTime)
-                .orderByDesc(MembershipAccount::getMembershipId)
+        referralRecordService.reconcileInviteeReferral(user.getUserId());
+        CapabilityAccount capabilityAccount = capabilityAccountMapper.selectOne(new LambdaQueryWrapper<CapabilityAccount>()
+                .eq(CapabilityAccount::getUserId, user.getUserId())
+                .eq(CapabilityAccount::getStatus, CAPABILITY_STATUS_ACTIVE)
+                .orderByDesc(CapabilityAccount::getExpireTime)
+                .orderByDesc(CapabilityAccount::getCapabilityId)
                 .last("limit 1"));
         InviteCode inviteCode = inviteCodeMapper.selectOne(new LambdaQueryWrapper<InviteCode>()
                 .eq(InviteCode::getUserId, user.getUserId())
@@ -650,7 +591,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setTotalInviteCount(inviterRecords.size());
         dto.setFlaggedInviteCount(flaggedInviteCount);
         dto.setPendingInviteCount(Math.max(0, inviterRecords.size() - validInviteCount - flaggedInviteCount));
-        dto.setMembershipTier(resolveMembershipTier(membershipAccount));
+        dto.setCapabilityTier(resolveCapabilityTier(capabilityAccount));
         return dto;
     }
 
@@ -659,10 +600,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 || Objects.equals(record.getStatus(), REFERRAL_STATUS_UNDER_REVIEW);
     }
 
-    private String resolveMembershipTier(MembershipAccount membershipAccount) {
-        if (membershipAccount == null || membershipAccount.getTier() == null || membershipAccount.getTier() <= 0) {
-            return "none";
+    private String resolveCapabilityTier(CapabilityAccount capabilityAccount) {
+        if (capabilityAccount == null || capabilityAccount.getTier() == null || capabilityAccount.getTier() <= 0) {
+            return "base";
         }
-        return membershipAccount.getTier() >= 2 ? "vip" : "member";
+        return capabilityAccount.getTier() >= 2 ? "pro" : "plus";
     }
 }

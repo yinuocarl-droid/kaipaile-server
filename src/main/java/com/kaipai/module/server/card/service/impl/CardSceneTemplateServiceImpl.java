@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kaipai.common.auth.AdminAuthContext;
 import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
@@ -32,6 +33,8 @@ import com.kaipai.module.model.card.entity.TemplatePublishLog;
 import com.kaipai.module.server.card.mapper.CardSceneTemplateMapper;
 import com.kaipai.module.server.card.service.CardSceneTemplateService;
 import com.kaipai.module.server.card.service.TemplatePublishLogService;
+import com.kaipai.module.server.card.support.CurrentPhaseShareArtifactSupport;
+import com.kaipai.module.server.card.support.TemplateSceneCodeValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -42,6 +45,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,7 +53,14 @@ import java.util.stream.Collectors;
 public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateMapper, CardSceneTemplate> implements CardSceneTemplateService {
 
     private static final int STATUS_ENABLED = 1;
-
+    private static final Set<String> ARTIFACT_PRESET_FIELDS = Set.of(
+            "coverImage",
+            "heroEyebrow",
+            "requiredInviteCount",
+            "contentFocus",
+            CurrentPhaseShareArtifactSupport.MINI_PROGRAM_CARD,
+            CurrentPhaseShareArtifactSupport.POSTER,
+            "pageConfig");
     private final TemplatePublishLogService publishLogService;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
@@ -61,23 +72,26 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
                 .eq(CardSceneTemplate::getStatus, STATUS_ENABLED)
                 .orderByAsc(CardSceneTemplate::getSortNo)
                 .orderByDesc(CardSceneTemplate::getLastUpdate));
-        if (templates.isEmpty()) {
-            return List.of(
-                    buildDefaultTemplate("general"),
-                    buildDefaultTemplate("urban"),
-                    buildDefaultTemplate("commercial"),
-                    buildDefaultTemplate("costume"),
-                    buildDefaultTemplate("artistic")
-            );
-        }
         return templates.stream().map(this::toActorSceneTemplate).toList();
+    }
+
+    @Override
+    public String resolveSceneDisplayName(String templateSceneCode) {
+        String normalizedTemplateSceneCode = normalizeTemplateSceneCode(templateSceneCode);
+        return actorSceneTemplates().stream()
+                .filter(item -> normalizeTemplateSceneCode(item.getTemplateSceneCode()).equals(normalizedTemplateSceneCode))
+                .map(ActorSceneTemplateRespDTO::getName)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElseThrow(() -> new BizException("场景模板不存在或未启用"));
     }
 
     @Override
     public PageResult<TemplateItemDTO> adminTemplateList(TemplateListQueryDTO dto) {
         Page<CardSceneTemplate> page = new Page<>(dto.getPageNo(), dto.getPageSize());
+        String templateSceneCode = normalizeOptionalTemplateSceneCode(dto.getTemplateSceneCode());
         LambdaQueryWrapper<CardSceneTemplate> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StringUtils.hasText(dto.getSceneKey()), CardSceneTemplate::getSceneKey, dto.getSceneKey())
+        wrapper.eq(StringUtils.hasText(templateSceneCode), CardSceneTemplate::getTemplateSceneCode, templateSceneCode)
                 .eq(dto.getStatus() != null, CardSceneTemplate::getStatus, dto.getStatus())
                 .eq(StringUtils.hasText(dto.getTier()), CardSceneTemplate::getTier, dto.getTier())
                 .orderByAsc(CardSceneTemplate::getSortNo);
@@ -85,6 +99,8 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         List<TemplateItemDTO> list = page.getRecords().stream().map(template -> {
             TemplateItemDTO dtoItem = new TemplateItemDTO();
             BeanUtils.copyProperties(template, dtoItem);
+            dtoItem.setRequiredInviteCount(resolveRequiredInviteCount(template.getArtifactPresetJson(), template.getTemplateSceneCode()));
+            dtoItem.setRequiredLevel(resolveRequiredLevel(template.getRequiredLevel(), dtoItem.getRequiredInviteCount()));
             dtoItem.setUpdateTime(template.getLastUpdate());
             return dtoItem;
         }).collect(Collectors.toList());
@@ -96,14 +112,20 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         CardSceneTemplate template = requireTemplate(templateId);
         TemplateDetailDTO dto = new TemplateDetailDTO();
         BeanUtils.copyProperties(template, dto);
+        dto.setRequiredInviteCount(resolveRequiredInviteCount(template.getArtifactPresetJson(), template.getTemplateSceneCode()));
+        dto.setRequiredLevel(resolveRequiredLevel(template.getRequiredLevel(), dto.getRequiredInviteCount()));
         dto.setPublishLogs(publishLogService.listByTemplateId(templateId));
         return dto;
     }
 
     @Override
     public void createTemplate(TemplateCreateDTO dto) {
+        String templateSceneCode = normalizeTemplateSceneCode(dto.getTemplateSceneCode());
         CardSceneTemplate template = new CardSceneTemplate();
         BeanUtils.copyProperties(dto, template);
+        template.setTemplateSceneCode(templateSceneCode);
+        template.setRequiredLevel(resolveRequiredLevel(dto.getRequiredLevel(), dto.getRequiredInviteCount()));
+        template.setArtifactPresetJson(mergeArtifactPresetJson(null, dto.getArtifactPresetJson(), dto.getRequiredInviteCount(), templateSceneCode));
         template.setStatus(1);
         save(template);
         adminOperationLogger.log(AdminOperationLogCommand.builder()
@@ -121,7 +143,17 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
     public void updateTemplate(TemplateUpdateDTO dto) {
         CardSceneTemplate template = requireTemplate(dto.getTemplateId());
         Map<String, Object> beforeSnapshot = snapshot(template);
+        String existingArtifactPresetJson = template.getArtifactPresetJson();
         BeanUtils.copyProperties(dto, template);
+        template.setRequiredLevel(resolveRequiredLevel(dto.getRequiredLevel(),
+                dto.getRequiredInviteCount() == null
+                        ? resolveRequiredInviteCount(existingArtifactPresetJson, template.getTemplateSceneCode())
+                        : dto.getRequiredInviteCount()));
+        template.setArtifactPresetJson(mergeArtifactPresetJson(
+                existingArtifactPresetJson,
+                dto.getArtifactPresetJson(),
+                dto.getRequiredInviteCount(),
+                template.getTemplateSceneCode()));
         template.setLastUpdate(LocalDateTime.now());
         updateById(template);
         adminOperationLogger.log(AdminOperationLogCommand.builder()
@@ -226,9 +258,10 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
     @Override
     public PageResult<ThemeTokenItemDTO> adminThemeTokenList(ThemeTokenQueryDTO dto) {
         Page<CardSceneTemplate> page = new Page<>(dto.getPageNo(), dto.getPageSize());
+        String templateSceneCode = normalizeOptionalTemplateSceneCode(dto.getTemplateSceneCode());
         LambdaQueryWrapper<CardSceneTemplate> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(dto.getTemplateId() != null, CardSceneTemplate::getTemplateId, dto.getTemplateId())
-                .eq(StringUtils.hasText(dto.getSceneKey()), CardSceneTemplate::getSceneKey, dto.getSceneKey())
+                .eq(StringUtils.hasText(templateSceneCode), CardSceneTemplate::getTemplateSceneCode, templateSceneCode)
                 .eq(dto.getStatus() != null, CardSceneTemplate::getStatus, dto.getStatus())
                 .eq(StringUtils.hasText(dto.getTemplateCode()), CardSceneTemplate::getTemplateCode, dto.getTemplateCode())
                 .orderByAsc(CardSceneTemplate::getSortNo);
@@ -258,10 +291,11 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
     @Override
     public PageResult<ShareArtifactItemDTO> adminShareArtifactList(ShareArtifactQueryDTO dto) {
         Page<CardSceneTemplate> page = new Page<>(dto.getPageNo(), dto.getPageSize());
+        String templateSceneCode = normalizeOptionalTemplateSceneCode(dto.getTemplateSceneCode());
         LambdaQueryWrapper<CardSceneTemplate> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(dto.getTemplateId() != null, CardSceneTemplate::getTemplateId, dto.getTemplateId())
                 .eq(StringUtils.hasText(dto.getTemplateCode()), CardSceneTemplate::getTemplateCode, dto.getTemplateCode())
-                .eq(StringUtils.hasText(dto.getSceneKey()), CardSceneTemplate::getSceneKey, dto.getSceneKey())
+                .eq(StringUtils.hasText(templateSceneCode), CardSceneTemplate::getTemplateSceneCode, templateSceneCode)
                 .eq(dto.getStatus() != null, CardSceneTemplate::getStatus, dto.getStatus())
                 .orderByAsc(CardSceneTemplate::getSortNo);
         Page<CardSceneTemplate> result = page(page, wrapper);
@@ -272,7 +306,11 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
     public void updateShareArtifact(Long templateId, ShareArtifactUpdateDTO dto) {
         CardSceneTemplate template = requireTemplate(templateId);
         Map<String, Object> beforeSnapshot = snapshot(template);
-        template.setArtifactPresetJson(dto.getArtifactPresetJson());
+        template.setArtifactPresetJson(mergeArtifactPresetJson(
+                template.getArtifactPresetJson(),
+                dto.getArtifactPresetJson(),
+                resolveRequiredInviteCount(template.getArtifactPresetJson(), template.getTemplateSceneCode()),
+                template.getTemplateSceneCode()));
         template.setLastUpdate(LocalDateTime.now());
         updateById(template);
         adminOperationLogger.log(AdminOperationLogCommand.builder()
@@ -288,50 +326,85 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
     }
 
     private ActorSceneTemplateRespDTO toActorSceneTemplate(CardSceneTemplate template) {
-        ActorSceneTemplateRespDTO dto = buildDefaultTemplate(template.getSceneKey());
-        dto.setSceneKey(normalizeSceneKey(template.getSceneKey()));
-        if (StringUtils.hasText(template.getTemplateName())) {
-            dto.setName(template.getTemplateName());
-        }
-        if (StringUtils.hasText(template.getDescription())) {
-            dto.setDescription(template.getDescription());
-        }
-        if (StringUtils.hasText(template.getLayoutVariant())) {
-            dto.setLayoutVariant(template.getLayoutVariant());
-        }
-        dto.setTier(StringUtils.hasText(template.getTier())
-                ? template.getTier()
-                : Boolean.TRUE.equals(template.getMembershipRequired()) ? "paid" : "free");
-        dto.setRequiredLevel(template.getRequiredLevel() == null ? 1 : template.getRequiredLevel());
+        ActorSceneTemplateRespDTO dto = new ActorSceneTemplateRespDTO();
+        dto.setThemeColors(new ActorSceneTemplateRespDTO.ThemeColors());
+        dto.setPageConfig(new ActorSceneTemplateRespDTO.PageConfig());
+        dto.setTemplateId(template.getTemplateId());
+        dto.setTemplateSceneCode(normalizeTemplateSceneCode(template.getTemplateSceneCode()));
+        dto.setName(requireText(template.getTemplateName(), "模板名称缺失"));
+        dto.setDescription(template.getDescription());
+        dto.setLayoutVariant(normalizeRuntimeLayoutVariant(template.getLayoutVariant()));
+        dto.setTier(requireText(template.getTier(), "模板 tier 缺失"));
+        Integer requiredInviteCount = resolveRequiredInviteCount(template.getArtifactPresetJson(), template.getTemplateSceneCode());
+        dto.setRequiredInviteCount(requiredInviteCount);
+        dto.setRequiredLevel(resolveRequiredLevel(template.getRequiredLevel(), requiredInviteCount));
         applyThemeOverride(dto.getThemeColors(), template.getBaseThemeJson());
         applyArtifactOverride(dto, template.getArtifactPresetJson());
         return dto;
     }
 
     private void applyThemeOverride(ActorSceneTemplateRespDTO.ThemeColors themeColors, String baseThemeJson) {
-        JsonNode root = readJson(baseThemeJson);
-        if (root == null) {
-            return;
+        JsonNode root = requireObjectJson(baseThemeJson, "模板 base_theme_json 缺失或格式错误");
+        JsonNode themeNode = root.get("themeColors");
+        if (themeNode == null || !themeNode.isObject()) {
+            throw new BizException("模板 themeColors 缺失或格式错误");
         }
-        JsonNode themeNode = root.has("themeColors") ? root.get("themeColors") : root;
-        themeColors.setPrimary(textValue(themeNode, "primary", themeColors.getPrimary()));
-        themeColors.setAccent(textValue(themeNode, "accent", themeColors.getAccent()));
-        themeColors.setBackground(textValue(themeNode, "background", themeColors.getBackground()));
-        themeColors.setText(textValue(themeNode, "text", themeColors.getText()));
-        themeColors.setHeroText(textValue(themeNode, "heroText", themeColors.getHeroText()));
+        themeColors.setPrimary(requireText(textValue(themeNode, "primary", null), "模板 primary 颜色缺失"));
+        themeColors.setAccent(requireText(textValue(themeNode, "accent", null), "模板 accent 颜色缺失"));
+        themeColors.setBackground(requireText(textValue(themeNode, "background", null), "模板 background 颜色缺失"));
+        themeColors.setText(requireText(textValue(themeNode, "text", null), "模板 text 颜色缺失"));
+        themeColors.setHeroText(requireText(textValue(themeNode, "heroText", null), "模板 heroText 颜色缺失"));
     }
 
     private void applyArtifactOverride(ActorSceneTemplateRespDTO dto, String artifactPresetJson) {
-        JsonNode root = readJson(artifactPresetJson);
-        if (root == null) {
-            return;
-        }
-        dto.setCoverImage(textValue(root, "coverImage", dto.getCoverImage()));
-        dto.setHeroEyebrow(textValue(root, "heroEyebrow", dto.getHeroEyebrow()));
-        JsonNode focusNode = root.has("contentFocus") ? root.get("contentFocus") : root.get("focus");
+        JsonNode root = requireObjectJson(artifactPresetJson, "模板 artifact_preset_json 缺失或格式错误");
+        requireCurrentArtifactPreset(root);
+        dto.setCoverImage(textValue(root, "coverImage", null));
+        dto.setHeroEyebrow(textValue(root, "heroEyebrow", null));
+        dto.setRequiredInviteCount(intValue(root, "requiredInviteCount", dto.getRequiredInviteCount()));
+        JsonNode focusNode = root.get("contentFocus");
         if (focusNode != null && focusNode.isArray()) {
             dto.setContentFocus(readStringArray(focusNode));
         }
+        applyPageConfigOverride(dto, root);
+    }
+
+    private void applyPageConfigOverride(ActorSceneTemplateRespDTO dto, JsonNode root) {
+        if (dto.getPageConfig() == null) {
+            dto.setPageConfig(new ActorSceneTemplateRespDTO.PageConfig());
+        }
+        ActorSceneTemplateRespDTO.PageConfig pageConfig = dto.getPageConfig();
+        JsonNode pageConfigNode = root.get("pageConfig");
+        if (pageConfigNode == null || !pageConfigNode.isObject()) {
+            throw new BizException("模板 pageConfig 缺失或格式错误");
+        }
+
+        pageConfig.setLayoutPreset(requireText(textValue(pageConfigNode, "layoutPreset", null), "模板 pageConfig.layoutPreset 缺失"));
+        pageConfig.setSurface(requireText(textValue(pageConfigNode, "surface", null), "模板 pageConfig.surface 缺失"));
+        pageConfig.setDensity(requireText(textValue(pageConfigNode, "density", null), "模板 pageConfig.density 缺失"));
+        pageConfig.setHeroStyle(requireText(textValue(pageConfigNode, "heroStyle", null), "模板 pageConfig.heroStyle 缺失"));
+
+        if (pageConfig.getSections() == null) {
+            pageConfig.setSections(new ActorSceneTemplateRespDTO.Sections());
+        }
+        JsonNode sectionsNode = pageConfigNode.get("sections");
+        if (sectionsNode == null || !sectionsNode.isObject()) {
+            throw new BizException("模板 pageConfig.sections 缺失或格式错误");
+        }
+        pageConfig.getSections().setProfile(requireBooleanValue(sectionsNode, "profile", "模板 pageConfig.sections.profile 缺失"));
+        pageConfig.getSections().setStats(requireBooleanValue(sectionsNode, "stats", "模板 pageConfig.sections.stats 缺失"));
+        pageConfig.getSections().setTimeline(requireBooleanValue(sectionsNode, "timeline", "模板 pageConfig.sections.timeline 缺失"));
+        pageConfig.getSections().setContactCta(requireBooleanValue(sectionsNode, "contactCta", "模板 pageConfig.sections.contactCta 缺失"));
+
+        if (pageConfig.getActions() == null) {
+            pageConfig.setActions(new ActorSceneTemplateRespDTO.Actions());
+        }
+        JsonNode actionsNode = pageConfigNode.get("actions");
+        if (actionsNode == null || !actionsNode.isObject()) {
+            throw new BizException("模板 pageConfig.actions 缺失或格式错误");
+        }
+        pageConfig.getActions().setPrimary(requireText(textValue(actionsNode, "primary", null), "模板 pageConfig.actions.primary 缺失"));
+        pageConfig.getActions().setSecondary(requireText(textValue(actionsNode, "secondary", null), "模板 pageConfig.actions.secondary 缺失"));
     }
 
     private JsonNode readJson(String raw) {
@@ -340,9 +413,17 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         }
         try {
             return objectMapper.readTree(raw);
-        } catch (Exception ignore) {
+        } catch (Exception ex) {
             return null;
         }
+    }
+
+    private JsonNode requireObjectJson(String raw, String message) {
+        JsonNode node = readJson(raw);
+        if (node == null || !node.isObject()) {
+            throw new BizException(message);
+        }
+        return node;
     }
 
     private List<String> readStringArray(JsonNode arrayNode) {
@@ -368,88 +449,145 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         return node.get(fieldName).asText();
     }
 
-    private String normalizeSceneKey(String sceneKey) {
-        return StringUtils.hasText(sceneKey) ? sceneKey.trim() : "general";
+    private String requireText(String value, String message) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(message);
+        }
+        return value.trim();
     }
 
-    private ActorSceneTemplateRespDTO buildDefaultTemplate(String sceneKey) {
-        ActorSceneTemplateRespDTO dto = new ActorSceneTemplateRespDTO();
-        dto.setSceneKey(normalizeSceneKey(sceneKey));
-        dto.setCoverImage("");
-        dto.setThemeColors(new ActorSceneTemplateRespDTO.ThemeColors());
-        switch (dto.getSceneKey()) {
-            case "urban" -> {
-                dto.setName("都市");
-                dto.setDescription("突出生活质感、都市表达与台词感。");
-                dto.setHeroEyebrow("URBAN SCREEN TEST");
-                dto.setLayoutVariant("compact");
-                dto.setContentFocus(List.of("lifestyle", "urban", "dialogue"));
-                dto.setTier("free");
-                dto.setRequiredLevel(1);
-                dto.getThemeColors().setPrimary("#4d7cff");
-                dto.getThemeColors().setAccent("#a9d0ff");
-                dto.getThemeColors().setBackground("#edf4ff");
-                dto.getThemeColors().setText("#162033");
-                dto.getThemeColors().setHeroText("#ffffff");
-            }
-            case "commercial" -> {
-                dto.setName("商业");
-                dto.setDescription("偏向广告、短视频与商业镜头感。");
-                dto.setHeroEyebrow("COMMERCIAL LOOKBOOK");
-                dto.setLayoutVariant("compact");
-                dto.setContentFocus(List.of("portrait", "commercial", "camera"));
-                dto.setTier("free");
-                dto.setRequiredLevel(2);
-                dto.getThemeColors().setPrimary("#ff8e33");
-                dto.getThemeColors().setAccent("#ffd0a7");
-                dto.getThemeColors().setBackground("#fff6ec");
-                dto.getThemeColors().setText("#2a190c");
-                dto.getThemeColors().setHeroText("#ffffff");
-            }
-            case "costume" -> {
-                dto.setName("古装");
-                dto.setDescription("突出古装扮相、气质和身段表达。");
-                dto.setHeroEyebrow("COSTUME REEL");
-                dto.setLayoutVariant("spacious");
-                dto.setContentFocus(List.of("production", "costume", "body"));
-                dto.setTier("free");
-                dto.setRequiredLevel(2);
-                dto.getThemeColors().setPrimary("#8d5f3c");
-                dto.getThemeColors().setAccent("#ddc2a0");
-                dto.getThemeColors().setBackground("#f6efe8");
-                dto.getThemeColors().setText("#2c231d");
-                dto.getThemeColors().setHeroText("#ffffff");
-            }
-            case "artistic" -> {
-                dto.setName("文艺");
-                dto.setDescription("突出质感、表演深度和胶片氛围。");
-                dto.setHeroEyebrow("ART HOUSE PROFILE");
-                dto.setLayoutVariant("magazine");
-                dto.setContentFocus(List.of("production", "artistic", "depth"));
-                dto.setTier("free");
-                dto.setRequiredLevel(4);
-                dto.getThemeColors().setPrimary("#6e5a74");
-                dto.getThemeColors().setAccent("#c9b6cf");
-                dto.getThemeColors().setBackground("#f4eef6");
-                dto.getThemeColors().setText("#241d29");
-                dto.getThemeColors().setHeroText("#ffffff");
-            }
-            default -> {
-                dto.setName("通用");
-                dto.setDescription("适合首次分享的全量信息名片。");
-                dto.setHeroEyebrow("GENERAL CAST CARD");
-                dto.setLayoutVariant("compact");
-                dto.setContentFocus(List.of("all", "portrait", "work"));
-                dto.setTier("free");
-                dto.setRequiredLevel(1);
-                dto.getThemeColors().setPrimary("#ff7a45");
-                dto.getThemeColors().setAccent("#ffb178");
-                dto.getThemeColors().setBackground("#fff7f0");
-                dto.getThemeColors().setText("#181b22");
-                dto.getThemeColors().setHeroText("#ffffff");
+    private Integer intValue(JsonNode node, String fieldName, Integer defaultValue) {
+        if (node == null || !node.has(fieldName) || node.get(fieldName).isNull()) {
+            return defaultValue;
+        }
+        JsonNode field = node.get(fieldName);
+        if (field.isInt() || field.isLong()) {
+            return field.asInt();
+        }
+        if (field.isTextual() && StringUtils.hasText(field.asText())) {
+            try {
+                return Integer.parseInt(field.asText().trim());
+            } catch (NumberFormatException ex) {
+                return defaultValue;
             }
         }
-        return dto;
+        return defaultValue;
+    }
+
+    private Boolean booleanValue(JsonNode node, String fieldName, Boolean defaultValue) {
+        if (node == null || !node.has(fieldName) || node.get(fieldName).isNull()) {
+            return defaultValue;
+        }
+        JsonNode field = node.get(fieldName);
+        if (field.isBoolean()) {
+            return field.asBoolean();
+        }
+        if (field.isTextual() && StringUtils.hasText(field.asText())) {
+            return Boolean.parseBoolean(field.asText().trim());
+        }
+        return defaultValue;
+    }
+
+    private Boolean requireBooleanValue(JsonNode node, String fieldName, String message) {
+        if (node == null || !node.has(fieldName) || node.get(fieldName).isNull()) {
+            throw new BizException(message);
+        }
+        JsonNode field = node.get(fieldName);
+        if (!field.isBoolean()) {
+            throw new BizException(message + "或格式错误");
+        }
+        return field.asBoolean();
+    }
+
+    private String normalizeTemplateSceneCode(String templateSceneCode) {
+        return TemplateSceneCodeValidator.requireAllowed(templateSceneCode);
+    }
+
+    private String normalizeOptionalTemplateSceneCode(String templateSceneCode) {
+        return TemplateSceneCodeValidator.normalizeOptional(templateSceneCode);
+    }
+
+    private Integer resolveRequiredInviteCount(String artifactPresetJson, String templateSceneCode) {
+        JsonNode root = requireObjectJson(artifactPresetJson, "模板 artifact_preset_json 缺失或格式错误");
+        requireCurrentArtifactPreset(root);
+        return intValue(root, "requiredInviteCount", null);
+    }
+
+    private Integer resolveRequiredLevel(Integer requiredLevel, Integer requiredInviteCount) {
+        if (requiredLevel != null && requiredLevel > 0) {
+            return requiredLevel;
+        }
+        int inviteCount = requiredInviteCount == null ? -1 : requiredInviteCount;
+        if (requiredInviteCount != null) {
+            if (inviteCount >= 8) {
+                return 5;
+            }
+            if (inviteCount >= 5) {
+                return 4;
+            }
+            if (inviteCount >= 3) {
+                return 3;
+            }
+            if (inviteCount >= 1) {
+                return 2;
+            }
+            return 1;
+        }
+        return null;
+    }
+
+    private String mergeArtifactPresetJson(String existingJson, String incomingJson, Integer requiredInviteCount, String templateSceneCode) {
+        String sourceJson = incomingJson != null ? incomingJson : existingJson;
+        ObjectNode root = requireObjectNode(sourceJson, "模板 artifact_preset_json 缺失或格式错误");
+        if (requiredInviteCount != null) {
+            root.put("requiredInviteCount", Math.max(requiredInviteCount, 0));
+        }
+        requireCurrentArtifactPreset(root);
+        return writeJson(root);
+    }
+
+    private void requireCurrentArtifactPreset(JsonNode root) {
+        if (!root.isObject()) {
+            throw new BizException("模板 artifact_preset_json 必须是对象");
+        }
+        root.fieldNames().forEachRemaining(fieldName -> {
+            if (!ARTIFACT_PRESET_FIELDS.contains(fieldName)) {
+                throw new BizException("模板 artifact_preset_json 包含非当前字段: " + fieldName);
+            }
+        });
+        requireArtifactPresetNode(root, CurrentPhaseShareArtifactSupport.MINI_PROGRAM_CARD);
+        requireArtifactPresetNode(root, CurrentPhaseShareArtifactSupport.POSTER);
+    }
+
+    private void requireArtifactPresetNode(JsonNode root, String fieldName) {
+        JsonNode artifactNode = root.get(fieldName);
+        if (artifactNode != null && !artifactNode.isObject()) {
+            throw new BizException("模板 artifact_preset_json." + fieldName + " 必须是对象");
+        }
+    }
+
+    private String normalizeRuntimeLayoutVariant(String rawVariant) {
+        String normalized = StringUtils.hasText(rawVariant) ? rawVariant.trim() : null;
+        if (!StringUtils.hasText(normalized)) {
+            throw new BizException("模板 layoutVariant 缺失");
+        }
+        return switch (normalized) {
+            case "magazine", "spacious", "compact" -> normalized;
+            default -> throw new BizException("模板 layoutVariant 不合法");
+        };
+    }
+
+    private ObjectNode requireObjectNode(String raw, String message) {
+        JsonNode node = requireObjectJson(raw, message);
+        return ((ObjectNode) node).deepCopy();
+    }
+
+    private String writeJson(JsonNode node) {
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception ex) {
+            throw new BizException("模板 JSON 序列化失败");
+        }
     }
 
     private CardSceneTemplate requireTemplate(Long templateId) {
@@ -485,12 +623,13 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("templateId", template.getTemplateId());
         snapshot.put("templateCode", template.getTemplateCode());
-        snapshot.put("sceneKey", template.getSceneKey());
+        snapshot.put("templateSceneCode", template.getTemplateSceneCode());
         snapshot.put("templateName", template.getTemplateName());
         snapshot.put("layoutVariant", template.getLayoutVariant());
         snapshot.put("tier", template.getTier());
         snapshot.put("requiredLevel", template.getRequiredLevel());
-        snapshot.put("membershipRequired", template.getMembershipRequired());
+        snapshot.put("requiredInviteCount", resolveRequiredInviteCount(template.getArtifactPresetJson(), template.getTemplateSceneCode()));
+        snapshot.put("unlockRequired", template.getUnlockRequired());
         snapshot.put("status", template.getStatus());
         snapshot.put("sortNo", template.getSortNo());
         return snapshot;
@@ -513,7 +652,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         context.put("template_id", template.getTemplateId());
         context.put("template_code", template.getTemplateCode());
         context.put("template_status_after", template.getStatus());
-        context.put("scene_code", template.getSceneKey());
+        context.put("template_scene_code", template.getTemplateSceneCode());
         context.put("reason", reason);
         return context;
     }
@@ -530,7 +669,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("template_id", template.getTemplateId());
         context.put("template_code", template.getTemplateCode());
-        context.put("scene_key", template.getSceneKey());
+        context.put("template_scene_code", template.getTemplateSceneCode());
         context.put("base_theme_json", template.getBaseThemeJson());
         return context;
     }
@@ -539,7 +678,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("template_id", template.getTemplateId());
         context.put("template_code", template.getTemplateCode());
-        context.put("scene_key", template.getSceneKey());
+        context.put("template_scene_code", template.getTemplateSceneCode());
         context.put("artifact_preset_json", template.getArtifactPresetJson());
         return context;
     }
@@ -548,7 +687,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         ThemeTokenItemDTO dto = new ThemeTokenItemDTO();
         dto.setTemplateId(template.getTemplateId());
         dto.setTemplateCode(template.getTemplateCode());
-        dto.setSceneKey(template.getSceneKey());
+        dto.setTemplateSceneCode(template.getTemplateSceneCode());
         dto.setTemplateName(template.getTemplateName());
         dto.setStatus(template.getStatus());
         dto.setBaseThemeJson(template.getBaseThemeJson());
@@ -560,7 +699,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         ShareArtifactItemDTO dto = new ShareArtifactItemDTO();
         dto.setTemplateId(template.getTemplateId());
         dto.setTemplateCode(template.getTemplateCode());
-        dto.setSceneKey(template.getSceneKey());
+        dto.setTemplateSceneCode(template.getTemplateSceneCode());
         dto.setTemplateName(template.getTemplateName());
         dto.setStatus(template.getStatus());
         dto.setArtifactPresetJson(template.getArtifactPresetJson());
@@ -568,3 +707,7 @@ public class CardSceneTemplateServiceImpl extends ServiceImpl<CardSceneTemplateM
         return dto;
     }
 }
+
+
+
+

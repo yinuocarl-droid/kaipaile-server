@@ -22,3 +22,6 @@ public class TemplatePublishLogItemDTO {
     private String snapshotJson;
     private LocalDateTime publishedAt;
 }
+
+
+

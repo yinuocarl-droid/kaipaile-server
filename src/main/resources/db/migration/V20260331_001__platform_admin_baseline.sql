@@ -4,7 +4,7 @@
 --    create_user_id / create_user_name / create_time /
 --    update_user_id / update_user_name / last_update.
 -- 2. Keep business truth in MySQL; do not rely on Redis for truth.
--- 3. Avoid physical foreign keys in this phase to reduce deployment coupling.
+-- 3. Avoid physical foreign keys to keep deployment ordering explicit.
 -- 4. `cooperation_order` keeps its existing cooperation-order semantics in this round and is not altered here.
 
 ALTER TABLE `user`
@@ -120,11 +120,11 @@ CREATE TABLE `referral_policy` (
   KEY `idx_referral_policy_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='referral policy config';
 
-CREATE TABLE `membership_product` (
+CREATE TABLE `capability_product` (
   `product_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `product_code` VARCHAR(64) NOT NULL COMMENT 'product code',
   `product_name` VARCHAR(64) NOT NULL COMMENT 'product name',
-  `membership_tier` TINYINT NOT NULL COMMENT '0 none, 1 member, 2 vip',
+  `capability_tier` TINYINT NOT NULL COMMENT '0 base, 1 plus, 2 pro',
   `duration_days` INT NOT NULL COMMENT 'duration days',
   `list_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'list price',
   `sale_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'sale price',
@@ -141,15 +141,15 @@ CREATE TABLE `membership_product` (
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`product_id`),
-  UNIQUE KEY `uk_membership_product_code` (`product_code`),
-  KEY `idx_membership_product_status_sort_no` (`status`, `sort_no`),
-  KEY `idx_membership_product_membership_tier` (`membership_tier`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='membership products';
+  UNIQUE KEY `uk_capability_product_code` (`product_code`),
+  KEY `idx_capability_product_status_sort_no` (`status`, `sort_no`),
+  KEY `idx_capability_product_capability_tier` (`capability_tier`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='capability products';
 
-CREATE TABLE `membership_account` (
-  `membership_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
+CREATE TABLE `capability_account` (
+  `capability_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `user_id` BIGINT NOT NULL COMMENT 'user id',
-  `tier` TINYINT NOT NULL DEFAULT 0 COMMENT '0 none, 1 member, 2 vip',
+  `tier` TINYINT NOT NULL DEFAULT 0 COMMENT '0 base, 1 plus, 2 pro',
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0 inactive, 1 active, 2 expired, 3 closed',
   `effective_time` DATETIME DEFAULT NULL COMMENT 'effective time',
   `expire_time` DATETIME DEFAULT NULL COMMENT 'expire time',
@@ -164,13 +164,13 @@ CREATE TABLE `membership_account` (
   `update_user_id` BIGINT DEFAULT NULL,
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`membership_id`),
-  UNIQUE KEY `uk_membership_account_user_id` (`user_id`),
-  KEY `idx_membership_account_tier_status` (`tier`, `status`),
-  KEY `idx_membership_account_expire_time` (`expire_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='current membership account';
+  PRIMARY KEY (`capability_id`),
+  UNIQUE KEY `uk_capability_account_user_id` (`user_id`),
+  KEY `idx_capability_account_tier_status` (`tier`, `status`),
+  KEY `idx_capability_account_expire_time` (`expire_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='current capability account';
 
-CREATE TABLE `membership_change_log` (
+CREATE TABLE `capability_change_log` (
   `change_log_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `user_id` BIGINT NOT NULL COMMENT 'user id',
   `before_tier` TINYINT NOT NULL DEFAULT 0 COMMENT 'before tier',
@@ -191,17 +191,17 @@ CREATE TABLE `membership_change_log` (
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`change_log_id`),
-  KEY `idx_membership_change_log_user_id_create_time` (`user_id`, `create_time`),
-  KEY `idx_membership_change_log_source_type_source_ref_id` (`source_type`, `source_ref_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='membership change logs';
+  KEY `idx_capability_change_log_user_id_create_time` (`user_id`, `create_time`),
+  KEY `idx_capability_change_log_source_type_source_ref_id` (`source_type`, `source_ref_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='capability change logs';
 
 CREATE TABLE `payment_order` (
   `payment_order_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `order_no` VARCHAR(64) NOT NULL COMMENT 'payment order no',
   `user_id` BIGINT NOT NULL COMMENT 'buyer user id',
-  `biz_type` VARCHAR(32) NOT NULL COMMENT 'membership_purchase, membership_renewal',
+  `biz_type` VARCHAR(32) NOT NULL COMMENT 'capability_purchase, capability_renewal',
   `biz_ref_id` BIGINT DEFAULT NULL COMMENT 'business ref id',
-  `product_id` BIGINT NOT NULL COMMENT 'membership product id',
+  `product_id` BIGINT NOT NULL COMMENT 'capability product id',
   `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'pay amount',
   `currency_code` VARCHAR(8) NOT NULL DEFAULT 'CNY' COMMENT 'currency code',
   `pay_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0 pending, 1 paid, 2 closed, 3 refunded, 4 partial_refunded',
@@ -222,7 +222,7 @@ CREATE TABLE `payment_order` (
   KEY `idx_payment_order_user_id_pay_status` (`user_id`, `pay_status`),
   KEY `idx_payment_order_product_id` (`product_id`),
   KEY `idx_payment_order_create_time` (`create_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='payment orders for membership';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='payment orders for capability';
 
 CREATE TABLE `payment_transaction` (
   `transaction_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
@@ -302,13 +302,13 @@ CREATE TABLE `refund_operate_log` (
 CREATE TABLE `card_scene_template` (
   `template_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `template_code` VARCHAR(64) NOT NULL COMMENT 'template code',
-  `scene_key` VARCHAR(32) NOT NULL COMMENT 'general, costume, urban, commercial, artistic',
+  `template_scene_code` VARCHAR(32) NOT NULL COMMENT 'classic, costume, urban, commercial, artistic',
   `template_name` VARCHAR(64) NOT NULL COMMENT 'template name',
   `description` VARCHAR(255) DEFAULT NULL COMMENT 'template description',
   `layout_variant` VARCHAR(32) NOT NULL COMMENT 'compact, spacious, magazine',
   `tier` VARCHAR(16) NOT NULL DEFAULT 'free' COMMENT 'free, paid',
   `required_level` TINYINT NOT NULL DEFAULT 1 COMMENT 'required invite level',
-  `membership_required` TINYINT NOT NULL DEFAULT 0 COMMENT '0 no, 1 member required',
+  `unlock_required` TINYINT NOT NULL DEFAULT 0 COMMENT '0 public, 1 unlock required',
   `base_theme_json` JSON NOT NULL COMMENT 'base theme tokens',
   `artifact_preset_json` JSON DEFAULT NULL COMMENT 'share artifact presets',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1 active, 2 inactive',
@@ -322,19 +322,17 @@ CREATE TABLE `card_scene_template` (
   `update_user_id` BIGINT DEFAULT NULL,
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `chk_card_scene_template_template_scene_code` CHECK (`template_scene_code` IN ('classic', 'urban', 'costume', 'commercial', 'artistic')),
   PRIMARY KEY (`template_id`),
   UNIQUE KEY `uk_card_scene_template_template_code` (`template_code`),
-  KEY `idx_card_scene_template_scene_key_status` (`scene_key`, `status`),
+  KEY `idx_card_scene_template_template_scene_code_status` (`template_scene_code`, `status`),
   KEY `idx_card_scene_template_required_level` (`required_level`),
   KEY `idx_card_scene_template_sort_no` (`sort_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='card scene templates';
 
 CREATE TABLE `actor_card_config` (
   `config_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
-  `user_id` BIGINT NOT NULL COMMENT 'user id',
-  `actor_profile_id` BIGINT NOT NULL COMMENT 'actor profile id',
-  `scene_key` VARCHAR(32) NOT NULL COMMENT 'scene key',
-  `template_id` BIGINT NOT NULL COMMENT 'template id',
+  `share_card_id` BIGINT NOT NULL COMMENT 'user share card id',
   `layout_variant` VARCHAR(32) NOT NULL COMMENT 'layout variant',
   `primary_color` VARCHAR(7) DEFAULT NULL COMMENT 'hex primary color',
   `accent_color` VARCHAR(7) DEFAULT NULL COMMENT 'hex accent color',
@@ -352,18 +350,14 @@ CREATE TABLE `actor_card_config` (
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`config_id`),
-  UNIQUE KEY `uk_actor_card_config_user_scene_key` (`user_id`, `scene_key`),
-  KEY `idx_actor_card_config_actor_profile_id` (`actor_profile_id`),
-  KEY `idx_actor_card_config_template_id` (`template_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='actor card config by scene';
+  UNIQUE KEY `uk_actor_card_config_share_card_id` (`share_card_id`),
+  KEY `idx_actor_card_config_last_update` (`last_update`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='actor card config by share card';
 
 CREATE TABLE `actor_share_preference` (
   `preference_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
-  `user_id` BIGINT NOT NULL COMMENT 'user id',
-  `scene_key` VARCHAR(32) NOT NULL COMMENT 'scene key',
-  `preferred_artifact` VARCHAR(32) NOT NULL COMMENT 'miniProgramCard, poster, publicCardPage, inviteCard',
-  `preferred_tone` VARCHAR(32) DEFAULT NULL COMMENT 'natural, professional, commercial',
-  `enable_fortune_theme` TINYINT NOT NULL DEFAULT 0 COMMENT '0 no, 1 yes',
+  `share_card_id` BIGINT NOT NULL COMMENT 'user share card id',
+  `preferred_artifact` VARCHAR(32) NOT NULL COMMENT 'miniProgramCard, poster',
   `version` INT NOT NULL DEFAULT 0,
   `deleted` TINYINT NOT NULL DEFAULT 0,
   `rid` VARCHAR(64) DEFAULT NULL,
@@ -374,46 +368,15 @@ CREATE TABLE `actor_share_preference` (
   `update_user_name` VARCHAR(64) DEFAULT '',
   `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`preference_id`),
-  UNIQUE KEY `uk_actor_share_preference_user_scene_key` (`user_id`, `scene_key`),
-  KEY `idx_actor_share_preference_preferred_artifact` (`preferred_artifact`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='actor share preferences';
-
-CREATE TABLE `fortune_report` (
-  `fortune_report_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
-  `user_id` BIGINT NOT NULL COMMENT 'user id',
-  `report_month` DATE NOT NULL COMMENT 'month stored as first day of month',
-  `zodiac_animal` VARCHAR(16) NOT NULL COMMENT 'zodiac animal key',
-  `zodiac_fortune` JSON DEFAULT NULL COMMENT 'zodiac fortune payload',
-  `constellation` VARCHAR(16) NOT NULL COMMENT 'constellation key',
-  `constellation_fortune` JSON DEFAULT NULL COMMENT 'constellation fortune payload',
-  `ziwei_star` VARCHAR(32) DEFAULT NULL COMMENT 'ziwei star key',
-  `ziwei_profile` JSON DEFAULT NULL COMMENT 'ziwei profile payload',
-  `lucky_color` VARCHAR(7) NOT NULL COMMENT 'hex lucky color',
-  `lucky_color_name` VARCHAR(32) NOT NULL COMMENT 'lucky color name',
-  `lucky_color_interpretation` VARCHAR(255) DEFAULT NULL COMMENT 'lucky color interpretation',
-  `lucky_number` INT NOT NULL COMMENT 'lucky number',
-  `lucky_number_interpretation` VARCHAR(255) DEFAULT NULL COMMENT 'lucky number interpretation',
-  `birth_hour` VARCHAR(4) DEFAULT NULL COMMENT 'birth hour used in generation',
-  `source_type` VARCHAR(16) NOT NULL DEFAULT 'ai' COMMENT 'ai, fallback',
-  `raw_payload` JSON DEFAULT NULL COMMENT 'raw ai payload',
-  `version` INT NOT NULL DEFAULT 0,
-  `deleted` TINYINT NOT NULL DEFAULT 0,
-  `rid` VARCHAR(64) DEFAULT NULL,
-  `create_user_id` BIGINT DEFAULT NULL,
-  `create_user_name` VARCHAR(64) DEFAULT '',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `update_user_id` BIGINT DEFAULT NULL,
-  `update_user_name` VARCHAR(64) DEFAULT '',
-  `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`fortune_report_id`),
-  UNIQUE KEY `uk_fortune_report_user_id_report_month` (`user_id`, `report_month`),
-  KEY `idx_fortune_report_source_type` (`source_type`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='monthly fortune reports';
+  UNIQUE KEY `uk_actor_share_preference_share_card_id` (`share_card_id`),
+  KEY `idx_actor_share_preference_preferred_artifact` (`preferred_artifact`),
+  CONSTRAINT `chk_actor_share_preference_preferred_artifact` CHECK (`preferred_artifact` IN ('miniProgramCard', 'poster'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='actor share preferences by share card';
 
 CREATE TABLE `user_entitlement_grant` (
   `grant_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `user_id` BIGINT NOT NULL COMMENT 'user id',
-  `grant_type` VARCHAR(32) NOT NULL COMMENT 'invite_eligibility, vip_trial, theme_access',
+  `grant_type` VARCHAR(32) NOT NULL COMMENT 'invite_eligibility, pro_trial, theme_access',
   `grant_code` VARCHAR(64) NOT NULL COMMENT 'grant code',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1 active, 2 expired, 3 revoked',
   `effective_time` DATETIME DEFAULT NULL COMMENT 'effective time',
@@ -524,7 +487,7 @@ CREATE TABLE `admin_operation_log` (
   `operation_log_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
   `admin_user_id` BIGINT NOT NULL COMMENT 'operator admin user id',
   `admin_user_name` VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'operator admin user name',
-  `module_code` VARCHAR(64) NOT NULL COMMENT 'verify, referral, membership, refund, content, system',
+  `module_code` VARCHAR(64) NOT NULL COMMENT 'verify, referral, capability, refund, content, system',
   `operation_code` VARCHAR(64) NOT NULL COMMENT 'approve, reject, publish, grant, revoke',
   `target_type` VARCHAR(64) NOT NULL COMMENT 'entity type',
   `target_id` BIGINT DEFAULT NULL COMMENT 'entity id',
@@ -577,3 +540,5 @@ CREATE TABLE `template_publish_log` (
   KEY `idx_template_publish_log_template_id_published_at` (`template_id`, `published_at`),
   KEY `idx_template_publish_log_action_type` (`action_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='template publish logs';
+
+

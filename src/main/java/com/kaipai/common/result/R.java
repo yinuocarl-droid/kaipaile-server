@@ -42,7 +42,7 @@ public class R<T> implements Serializable {
 
     public static <T> R<T> fail(String message) {
         R<T> r = new R<>();
-        r.setCode(ResultCode.FAILED.getCode());
+        r.setCode(ResultCode.PARAM_ERROR.getCode());
         r.setMessage(message);
         return r;
     }

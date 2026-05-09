@@ -9,9 +9,9 @@ public class AdminRecruitProjectListItemDTO {
 
     private Long crewUserId;
 
-    private Long companyProfileId;
+    private Long crewProfileId;
 
-    private String companyName;
+    private String crewName;
 
     private String contactName;
 

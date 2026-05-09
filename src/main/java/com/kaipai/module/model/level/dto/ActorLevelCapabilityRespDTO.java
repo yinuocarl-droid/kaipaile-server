@@ -13,7 +13,5 @@ public class ActorLevelCapabilityRespDTO {
 
     private Integer aiQuotaPerMonth;
 
-    private Boolean canUseLuckyColor;
-
     private Boolean paidSkinFreePreview;
 }

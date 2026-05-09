@@ -1,0 +1,20 @@
+CREATE TABLE `user_share_card` (
+  `share_card_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
+  `user_id` BIGINT NOT NULL COMMENT 'owner user id',
+  `actor_profile_id` BIGINT DEFAULT NULL COMMENT 'owner actor profile id',
+  `template_id` BIGINT DEFAULT NULL COMMENT 'current template id',
+  `share_status` VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT 'active, archived',
+  `default_card` TINYINT NOT NULL DEFAULT 0 COMMENT 'whether this is default card',
+  `version` INT NOT NULL DEFAULT 0,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  `rid` VARCHAR(64) DEFAULT NULL,
+  `create_user_id` BIGINT DEFAULT NULL,
+  `create_user_name` VARCHAR(64) DEFAULT '',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_user_id` BIGINT DEFAULT NULL,
+  `update_user_name` VARCHAR(64) DEFAULT '',
+  `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`share_card_id`),
+  KEY `idx_user_share_card_user_status` (`user_id`, `share_status`),
+  KEY `idx_user_share_card_template_id` (`template_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='independent user owned share cards';

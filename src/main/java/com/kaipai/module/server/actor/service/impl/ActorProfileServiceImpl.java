@@ -19,7 +19,8 @@ import com.kaipai.module.server.actor.mapper.ActorExperienceMapper;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.service.AiResumeApplyRecorder;
-import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.capability.service.CapabilityAccountService;
+import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,34 +39,38 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
 
     private final ActorExperienceMapper actorExperienceMapper;
     private final UserMapper userMapper;
-    private final MembershipAccountService membershipAccountService;
+    private final CapabilityAccountService capabilityAccountService;
     private final ObjectMapper objectMapper;
     private final AiResumeApplyRecorder aiResumeApplyRecorder;
+    private final ReferralRecordService referralRecordService;
 
     @Override
     public ActorProfileDTO mine(Long currentUserId) {
-        return buildProfile(currentUserId, true, true);
+        return buildProfile(currentUserId, true);
     }
 
     @Override
     public ActorProfileDTO profile(Long userId) {
-        return buildProfile(userId, false, true);
+        return buildProfile(userId, false);
     }
 
     @Override
     public ActorProfileDTO detail(Long userId, boolean includeContact) {
-        return buildProfile(userId, includeContact, false);
+        return buildProfile(userId, includeContact);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveProfile(Long currentUserId, ActorProfileSaveDTO dto) {
-        ActorProfileDTO beforeProfile = buildProfile(currentUserId, true, true);
         User user = requireUser(currentUserId);
         ActorProfile profile = getOne(new LambdaQueryWrapper<ActorProfile>()
                 .eq(ActorProfile::getUserId, currentUserId)
                 .last("limit 1"), false);
         boolean creating = profile == null;
+        if (creating && hasAiResumeApplyMeta(dto)) {
+            throw new BizException("演员档案不存在，不能应用 AI 草稿");
+        }
+        ActorProfileDTO beforeProfile = creating ? null : buildProfile(currentUserId, true);
         if (profile == null) {
             profile = new ActorProfile();
             profile.setUserId(currentUserId);
@@ -98,7 +103,10 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         }
 
         syncExperiences(profile, dto.getWorkExperiences());
-        aiResumeApplyRecorder.recordAppliedDraft(currentUserId, beforeProfile, dto);
+        referralRecordService.reconcileInviteeReferral(currentUserId);
+        if (hasAiResumeApplyMeta(dto)) {
+            aiResumeApplyRecorder.recordAppliedDraft(currentUserId, beforeProfile, dto);
+        }
     }
 
     @Override
@@ -136,17 +144,17 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
 
         Page<ActorProfile> result = page(page, wrapper);
         List<ActorProfileDTO> list = result.getRecords().stream()
-                .map(item -> buildProfile(item.getUserId(), false, false))
+                .map(item -> buildProfile(item.getUserId(), false))
                 .toList();
         return new PageResult<>(result.getTotal(), list);
     }
 
-    private ActorProfileDTO buildProfile(Long userId, boolean includePrivate, boolean allowFallback) {
+    private ActorProfileDTO buildProfile(Long userId, boolean includePrivate) {
         User user = requireUser(userId);
         ActorProfile profile = getOne(new LambdaQueryWrapper<ActorProfile>()
                 .eq(ActorProfile::getUserId, userId)
                 .last("limit 1"), false);
-        if (profile == null && !allowFallback) {
+        if (profile == null) {
             throw new BizException("演员档案不存在");
         }
 
@@ -173,11 +181,21 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         dto.setBodyType(extras.bodyType);
         dto.setHairStyle(extras.hairStyle);
         dto.setLanguages(extras.languages == null ? new ArrayList<>() : extras.languages);
-        dto.setContactPhone(includePrivate ? firstNonBlank(profile == null ? null : profile.getPhone(), user.getPhone(), "") : null);
+        String contactPhone = firstNonBlank(profile == null ? null : profile.getPhone(), user.getPhone(), "");
+        dto.setHasContactPhone(StringUtils.hasText(contactPhone));
+        dto.setContactPhone(includePrivate ? contactPhone : null);
         dto.setRealName(includePrivate ? firstNonBlank(profile == null ? null : profile.getRealName(), null, null) : null);
         dto.setIsCertified(resolveCertified(profile, user));
-        dto.setCapabilitySummary(membershipAccountService.actorLevelInfo(userId));
+        dto.setCapabilitySummary(capabilityAccountService.actorLevelInfo(userId));
         return dto;
+    }
+
+    private boolean hasAiResumeApplyMeta(ActorProfileSaveDTO dto) {
+        return dto != null
+                && dto.getAiResumeApplyMeta() != null
+                && StringUtils.hasText(dto.getAiResumeApplyMeta().getDraftId())
+                && dto.getAiResumeApplyMeta().getAppliedPatchIds() != null
+                && !dto.getAiResumeApplyMeta().getAppliedPatchIds().isEmpty();
     }
 
     private List<ActorWorkExperienceDTO> loadExperiences(Long userId) {
@@ -466,14 +484,14 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         return value == null ? "" : value;
     }
 
-    private String firstNonBlank(String first, String second, String fallback) {
+    private String firstNonBlank(String first, String second, String defaultValue) {
         if (StringUtils.hasText(first)) {
             return first.trim();
         }
         if (StringUtils.hasText(second)) {
             return second.trim();
         }
-        return fallback;
+        return defaultValue;
     }
 
     private <T> List<T> safeList(List<T> values) {

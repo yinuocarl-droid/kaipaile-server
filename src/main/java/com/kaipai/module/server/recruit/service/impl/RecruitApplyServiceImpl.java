@@ -171,7 +171,7 @@ public class RecruitApplyServiceImpl extends ServiceImpl<RecruitApplyMapper, Rec
         RecruitApplyRespDTO dto = new RecruitApplyRespDTO();
         dto.setId(apply.getRecruitApplyId());
         dto.setRoleId(apply.getRecruitPostId());
-        dto.setActorId(apply.getActorUserId());
+        dto.setProfileUserId(apply.getActorUserId());
         dto.setStatus(toFrontendStatus(apply.getApplyStatus()));
         dto.setRemark(defaultText(apply.getApplyMessage()));
         dto.setApplyTime(formatDateTime(apply.getCreateTime()));
@@ -181,7 +181,7 @@ public class RecruitApplyServiceImpl extends ServiceImpl<RecruitApplyMapper, Rec
                 .eq(ActorProfile::getUserId, apply.getActorUserId())
                 .last("limit 1")
                 .one();
-        dto.setActorName(firstNonBlank(actorProfile == null ? null : actorProfile.getNickName(), actorUser.getUserName(), "未命名演员"));
+        dto.setActorName(firstNonBlank(actorProfile == null ? null : actorProfile.getNickName(), actorUser.getUserName(), null));
         dto.setActorAvatar(firstNonBlank(actorProfile == null ? null : actorProfile.getAvatarUrl(), actorUser.getAvatarUrl(), ""));
         dto.setActorPhone(firstNonBlank(actorProfile == null ? null : actorProfile.getPhone(), actorUser.getPhone(), ""));
 
@@ -303,13 +303,13 @@ public class RecruitApplyServiceImpl extends ServiceImpl<RecruitApplyMapper, Rec
         return value == null ? "" : value;
     }
 
-    private String firstNonBlank(String first, String second, String fallback) {
+    private String firstNonBlank(String first, String second, String defaultValue) {
         if (StringUtils.hasText(first)) {
             return first.trim();
         }
         if (StringUtils.hasText(second)) {
             return second.trim();
         }
-        return fallback;
+        return defaultValue;
     }
 }

@@ -27,6 +27,9 @@ import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
 import com.kaipai.module.model.ai.dto.AiResumeFailureHandlingNoteDTO;
 import com.kaipai.module.model.ai.dto.AiResumeFailureRecordDTO;
 import com.kaipai.module.model.ai.dto.AiResumeHistoryItemDTO;
+import com.kaipai.module.model.ai.dto.AiResumeNotificationDispatchResultDTO;
+import com.kaipai.module.model.ai.dto.AiResumeNotificationSendCommand;
+import com.kaipai.module.model.ai.entity.AiResumeNotificationDelivery;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import com.kaipai.module.model.system.dto.AdminRoleAiGovernanceMatrixItemDTO;
 import com.kaipai.module.model.system.entity.AdminUser;
@@ -35,7 +38,9 @@ import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.ai.service.AdminAiResumeGovernanceService;
 import com.kaipai.module.server.ai.service.AiResumeFailureRecordService;
-import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.ai.service.AiResumeNotificationDeliveryService;
+import com.kaipai.module.server.ai.service.AiResumeNotificationDispatchService;
+import com.kaipai.module.server.capability.service.CapabilityAccountService;
 import com.kaipai.module.server.system.service.AdminRoleService;
 import com.kaipai.module.server.system.service.AdminUserRoleService;
 import com.kaipai.module.server.system.service.AdminUserService;
@@ -63,6 +68,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -72,12 +78,20 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private static final TypeReference<List<AiResumeHistoryItemDTO>> HISTORY_LIST_TYPE = new TypeReference<>() {
     };
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
+    private static final DateTimeFormatter SWEEP_REQUEST_ID_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final int OVERVIEW_TOP_QUOTA_LIMIT = 5;
     private static final int OVERVIEW_RECENT_HISTORY_LIMIT = 5;
     private static final int FAILURE_ASSIGN_ACK_SLA_HOURS = 4;
     private static final int FAILURE_AUTO_REMIND_COOLDOWN_HOURS = 1;
     private static final int FAILURE_AUTO_REMIND_MAX_COUNT = 2;
     private static final String HISTORY_KEY_PREFIX = "ai:resume_polish:history:";
+    private static final AdminAuthenticatedUser SYSTEM_GOVERNANCE_OPERATOR = AdminAuthenticatedUser.builder()
+            .adminUserId(0L)
+            .account("system")
+            .userName("system")
+            .roleCodes(Set.of("SYSTEM"))
+            .permissions(Set.of())
+            .build();
     private static final Map<String, List<String>> FAILURE_ALLOWED_TRANSITIONS = Map.of(
             "pending", List.of("reviewed", "retry_advised", "escalated", "ignored", "closed"),
             "reviewed", List.of("retry_advised", "escalated", "ignored", "closed"),
@@ -91,8 +105,10 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     private final ObjectMapper objectMapper;
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
-    private final MembershipAccountService membershipAccountService;
+    private final CapabilityAccountService capabilityAccountService;
     private final AiResumeFailureRecordService aiResumeFailureRecordService;
+    private final AiResumeNotificationDeliveryService aiResumeNotificationDeliveryService;
+    private final AiResumeNotificationDispatchService aiResumeNotificationDispatchService;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
     private final AdminUserService adminUserService;
@@ -471,15 +487,34 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setHandledByAdminId(admin.getAdminUserId());
         current.setHandledByAdminName(admin.getUserName());
         current.setHandledAt(now);
-        current.setNotificationStatus(requestedStatus);
-        current.setNotificationSentAt("send_failed".equals(requestedStatus) ? null : now);
-        current.setNotificationFailureReason("send_failed".equals(requestedStatus) ? action == null ? null : action.getReason() : null);
-        if (!"send_failed".equals(requestedStatus)) {
+        AdminUser assignedAdmin = resolveAssignedAdminUser(current);
+        AiResumeNotificationDelivery delivery;
+        if ("send_failed".equals(requestedStatus)) {
+            current.setNotificationStatus(requestedStatus);
+            delivery = aiResumeNotificationDeliveryService.recordManualNotification(
+                    current,
+                    admin,
+                    assignedAdmin,
+                    requestedStatus,
+                    action == null ? null : action.getReason()
+            );
+            current.setNotificationSentAt(null);
+            current.setNotificationFailureReason(action == null ? null : action.getReason());
+        } else {
+            AiResumeNotificationDispatchResultDTO dispatchResult = aiResumeNotificationDispatchService.dispatch(
+                    buildNotificationSendCommand(current, admin, assignedAdmin,
+                            current.getRequestId(), "admin_dispatch", action == null ? null : action.getReason())
+            );
+            delivery = dispatchResult.getDelivery();
+            current.setNotificationStatus(delivery == null ? "send_failed" : delivery.getSendStatus());
+            current.setNotificationSentAt(formatTime(delivery == null ? null : delivery.getSentAt()));
+            current.setNotificationFailureReason(delivery == null ? "notification_dispatch_missing" : delivery.getSendFailureReason());
             current.setNotificationReceiptStatus(null);
             current.setNotificationReceiptAt(null);
             current.setNotificationReceiptFailureReason(null);
             clearFailureAutoRemindSkip(current);
         }
+        applyNotificationDeliverySummary(current, delivery);
         current.setHandlingNotes(appendHandlingNote(current, "record_notification", currentStatus,
                 action == null ? null : action.getReason(), admin, null, null));
         aiResumeFailureRecordService.recordFailure(current);
@@ -527,6 +562,15 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setHandledByAdminName(admin.getUserName());
         current.setHandledAt(now);
         current.setNotificationReceiptStatus(requestedStatus);
+        AdminUser assignedAdmin = resolveAssignedAdminUser(current);
+        AiResumeNotificationDelivery delivery = aiResumeNotificationDeliveryService.recordManualNotificationReceipt(
+                current,
+                admin,
+                assignedAdmin,
+                requestedStatus,
+                action == null ? null : action.getReason()
+        );
+        applyNotificationDeliverySummary(current, delivery);
         current.setNotificationReceiptAt("receipt_failed".equals(requestedStatus) ? null : now);
         current.setNotificationReceiptFailureReason("receipt_failed".equals(requestedStatus) ? action == null ? null : action.getReason() : null);
         current.setHandlingNotes(appendHandlingNote(current, "record_notification_receipt", currentStatus,
@@ -561,9 +605,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
     }
 
     private AdminAiResumeGovernanceSweepResultDTO sweepGovernance(AdminAiResumeGovernanceSweepRequestDTO request, boolean dryRun) {
-        AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
-        LocalDateTime evaluationTime = resolveGovernanceEvaluationTime(request);
-        List<AiResumeFailureRecordDTO> records = loadGovernanceSweepRecords(request);
+        AdminAuthenticatedUser currentAdmin = adminAuthContext.getCurrentAdmin();
+        AdminAuthenticatedUser operator = currentAdmin == null ? SYSTEM_GOVERNANCE_OPERATOR : currentAdmin;
+        String triggerSource = currentAdmin == null ? "scheduled" : "admin";
+        AdminAiResumeGovernanceSweepRequestDTO effectiveRequest = normalizeGovernanceSweepRequest(request);
+        LocalDateTime evaluationTime = resolveGovernanceEvaluationTime(effectiveRequest);
+        List<AiResumeFailureRecordDTO> records = loadGovernanceSweepRecords(effectiveRequest);
         List<AdminAiResumeGovernanceSweepItemDTO> items = new ArrayList<>();
 
         int dueCount = 0;
@@ -589,11 +636,11 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 }
                 item = buildGovernanceSweepItem(record, evaluationTime, decision, null, null);
             } else if ("auto_remind".equals(decision.actionType())) {
-                AiResumeFailureRecordDTO updated = executeAutoRemind(record, admin, request, decision);
+                AiResumeFailureRecordDTO updated = executeAutoRemind(record, operator, effectiveRequest, decision);
                 executedCount++;
                 item = buildGovernanceSweepItem(updated, evaluationTime, decision, updated, "executed");
             } else if ("timeout_escalation".equals(decision.actionType())) {
-                AiResumeFailureRecordDTO updated = executeTimeoutEscalation(record, admin, request, decision);
+                AiResumeFailureRecordDTO updated = executeTimeoutEscalation(record, operator, effectiveRequest, decision);
                 executedCount++;
                 item = buildGovernanceSweepItem(updated, evaluationTime, decision, updated, "executed");
             } else {
@@ -605,6 +652,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
 
         AdminAiResumeGovernanceSweepResultDTO dto = new AdminAiResumeGovernanceSweepResultDTO();
         dto.setDryRun(dryRun);
+        dto.setRequestId(effectiveRequest.getRequestId());
+        dto.setTriggerSource(triggerSource);
+        dto.setOperatorName(operator.getUserName());
         dto.setEvaluatedAt(evaluationTime.format(TIME_FORMATTER));
         dto.setTotalCount(records.size());
         dto.setDueCount(dueCount);
@@ -614,6 +664,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         dto.setSkippedCount(skippedCount);
         dto.setItems(items);
         return dto;
+    }
+
+    private AdminAiResumeGovernanceSweepRequestDTO normalizeGovernanceSweepRequest(AdminAiResumeGovernanceSweepRequestDTO request) {
+        AdminAiResumeGovernanceSweepRequestDTO effective = request == null ? new AdminAiResumeGovernanceSweepRequestDTO() : request;
+        if (!StringUtils.hasText(effective.getRequestId())) {
+            effective.setRequestId(buildGovernanceSweepRequestId());
+        } else {
+            effective.setRequestId(effective.getRequestId().trim());
+        }
+        return effective;
     }
 
     private List<AiResumeFailureRecordDTO> loadGovernanceSweepRecords(AdminAiResumeGovernanceSweepRequestDTO request) {
@@ -630,6 +690,12 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         return records.stream()
                 .limit(resolveGovernanceSweepLimit(request))
                 .toList();
+    }
+
+    private String buildGovernanceSweepRequestId() {
+        String timestamp = LocalDateTime.now().format(SWEEP_REQUEST_ID_TIME_FORMATTER);
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        return "ai-governance-sweep-" + timestamp + "-" + suffix;
     }
 
     private int resolveGovernanceSweepLimit(AdminAiResumeGovernanceSweepRequestDTO request) {
@@ -661,56 +727,56 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         String handlingStatus = record == null ? null : normalizeFailureHandlingStatus(record.getHandlingStatus());
 
         if (record == null) {
-            return new GovernanceSweepDecision("none", "skipped", "failure_missing",
+            return new GovernanceSweepDecision("base", "skipped", "failure_missing",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (isFailureTerminal(handlingStatus)) {
-            return new GovernanceSweepDecision("none", "skipped", "terminal_failure",
+            return new GovernanceSweepDecision("base", "skipped", "terminal_failure",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (record.getAssignedAdminId() == null) {
-            return new GovernanceSweepDecision("none", "skipped", "unassigned_failure",
+            return new GovernanceSweepDecision("base", "skipped", "unassigned_failure",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (StringUtils.hasText(record.getAssignmentAcknowledgedAt())) {
-            return new GovernanceSweepDecision("none", "skipped", "already_acknowledged",
+            return new GovernanceSweepDecision("base", "skipped", "already_acknowledged",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (StringUtils.hasText(record.getManualTakeoverAt())) {
-            return new GovernanceSweepDecision("none", "skipped", "manual_takeover_already_recorded",
+            return new GovernanceSweepDecision("base", "skipped", "manual_takeover_already_recorded",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (StringUtils.hasText(record.getAutoRemindSkippedAt())) {
-            return new GovernanceSweepDecision("none", "skipped", "auto_remind_skipped",
+            return new GovernanceSweepDecision("base", "skipped", "auto_remind_skipped",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if ("pending_send".equals(beforeNotificationStatus) || "send_failed".equals(beforeNotificationStatus)) {
-            return new GovernanceSweepDecision("none", "skipped", "notification_not_ready",
+            return new GovernanceSweepDecision("base", "skipped", "notification_not_ready",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
 
         LocalDateTime deadline = parseTime(resolveFailureClaimDeadlineAt(record));
         if (deadline == null) {
-            return new GovernanceSweepDecision("none", "skipped", "claim_deadline_missing",
+            return new GovernanceSweepDecision("base", "skipped", "claim_deadline_missing",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
         if (!evaluationTime.isAfter(deadline)) {
-            return new GovernanceSweepDecision("none", "not_due", "within_ack_sla",
+            return new GovernanceSweepDecision("base", "not_due", "within_ack_sla",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
 
         LocalDateTime cooldownBase = resolveFailureLastGovernanceTouchTime(record);
         if (cooldownBase != null && evaluationTime.isBefore(cooldownBase.plusHours(FAILURE_AUTO_REMIND_COOLDOWN_HOURS))) {
-            return new GovernanceSweepDecision("none", "not_due", "auto_remind_cooldown",
+            return new GovernanceSweepDecision("base", "not_due", "auto_remind_cooldown",
                     beforeCollaborationStatus, beforeNotificationStatus, beforeNotificationReceiptStatus,
                     beforeAutoRemindStage, beforeSlaStatus, beforeReminderCount);
         }
@@ -757,12 +823,25 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         current.setLastRemindedByAdminId(admin.getAdminUserId());
         current.setLastRemindedByAdminName(admin.getUserName());
         current.setLastRemindedAt(now);
-        clearFailureNotificationEvidence(current);
+        AdminUser assignedAdmin = resolveAssignedAdminUser(current);
+        AiResumeNotificationDispatchResultDTO dispatchResult = aiResumeNotificationDispatchService.dispatch(
+                buildNotificationSendCommand(current, admin, assignedAdmin,
+                        request == null ? null : request.getRequestId(), "governance_sweep", reason)
+        );
+        AiResumeNotificationDelivery delivery = dispatchResult.getDelivery();
+        current.setNotificationStatus(delivery == null ? "send_failed" : delivery.getSendStatus());
+        current.setNotificationSentAt(formatTime(delivery == null ? null : delivery.getSentAt()));
+        current.setNotificationFailureReason(delivery == null ? "notification_dispatch_missing" : delivery.getSendFailureReason());
+        current.setNotificationReceiptStatus(null);
+        current.setNotificationReceiptAt(null);
+        current.setNotificationReceiptFailureReason(null);
+        applyNotificationDeliverySummary(current, delivery);
         clearFailureAutoRemindSkip(current);
         current.setHandlingNotes(appendHandlingNote(current, "auto_remind", currentStatus, reason, admin, null, null));
         aiResumeFailureRecordService.recordFailure(current);
 
         adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .requestId(request.getRequestId())
                 .moduleCode("system")
                 .operationCode("ai_resume_auto_remind")
                 .targetType("ai_resume_failure")
@@ -792,6 +871,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         aiResumeFailureRecordService.recordFailure(current);
 
         adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .requestId(request.getRequestId())
                 .moduleCode("system")
                 .operationCode("ai_resume_timeout_escalation")
                 .targetType("ai_resume_failure")
@@ -922,7 +1002,6 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setPhone(resolvePhone(context));
             item.setRealAuthStatus(context == null || context.user() == null ? null : context.user().getRealAuthStatus());
             item.setLevel(levelInfo == null ? null : levelInfo.getLevel());
-            item.setMembershipTier(levelInfo == null ? null : levelInfo.getMembershipTier());
             item.setTotalQuota(levelInfo == null || levelInfo.getLevelCapability() == null ? null : levelInfo.getLevelCapability().getAiQuotaPerMonth());
             item.setUsedCount(record.usedCount());
             items.add(item);
@@ -950,7 +1029,6 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setPhone(resolvePhone(context));
             item.setRealAuthStatus(context == null || context.user() == null ? null : context.user().getRealAuthStatus());
             item.setLevel(levelInfo == null ? null : levelInfo.getLevel());
-            item.setMembershipTier(levelInfo == null ? null : levelInfo.getMembershipTier());
             item.setRequestId(record.getRequestId());
             item.setConversationId(record.getConversationId());
             item.setInstruction(record.getInstruction());
@@ -977,9 +1055,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             item.setClaimDeadlineAt(resolveFailureClaimDeadlineAt(record));
             item.setCollaborationStatus(resolveFailureCollaborationStatus(record));
             item.setNotificationStatus(resolveFailureNotificationStatus(record));
+            item.setNotificationDeliveryId(record.getNotificationDeliveryId());
+            item.setNotificationSourceType(record.getNotificationSourceType());
+            item.setNotificationChannelCode(record.getNotificationChannelCode());
+            item.setNotificationRecipient(record.getNotificationRecipient());
+            item.setNotificationProviderCode(record.getNotificationProviderCode());
+            item.setNotificationProviderMessageId(record.getNotificationProviderMessageId());
             item.setNotificationSentAt(resolveFailureNotificationSentAt(record));
             item.setNotificationFailureReason(resolveFailureNotificationFailureReason(record));
             item.setNotificationReceiptStatus(resolveFailureNotificationReceiptStatus(record));
+            item.setNotificationReceiptSourceType(record.getNotificationReceiptSourceType());
             item.setNotificationReceiptAt(resolveFailureNotificationReceiptAt(record));
             item.setNotificationReceiptFailureReason(resolveFailureNotificationReceiptFailureReason(record));
             item.setAutoRemindStage(resolveFailureAutoRemindStage(record));
@@ -1064,7 +1149,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                 continue;
             }
             try {
-                result.put(userId, membershipAccountService.actorLevelInfo(userId));
+                result.put(userId, capabilityAccountService.actorLevelInfo(userId));
             } catch (RuntimeException ignored) {
                 // keep this governance page readable even when a single user's等级信息不可用
             }
@@ -1082,7 +1167,6 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         item.setPhone(resolvePhone(context));
         item.setRealAuthStatus(context == null || context.user() == null ? null : context.user().getRealAuthStatus());
         item.setLevel(levelInfo == null ? null : levelInfo.getLevel());
-        item.setMembershipTier(levelInfo == null ? null : levelInfo.getMembershipTier());
         item.setDraftId(record.history().getDraftId());
         item.setRequestId(record.history().getRequestId());
         item.setConversationId(record.history().getConversationId());
@@ -1360,7 +1444,7 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
                     dto.setAdminRoleId(item.getAdminRoleId());
                     dto.setRoleCode(item.getRoleCode());
                     dto.setRoleName(item.getRoleName());
-                    dto.setRolloutStage(item.getRolloutStage());
+                    dto.setPermissionStage(item.getPermissionStage());
                     return dto;
                 })
                 .toList();
@@ -1508,9 +1592,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         note.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
         note.setAssignmentAcknowledgedAt(record.getAssignmentAcknowledgedAt());
         note.setNotificationStatus(record.getNotificationStatus());
+        note.setNotificationDeliveryId(record.getNotificationDeliveryId());
+        note.setNotificationSourceType(record.getNotificationSourceType());
+        note.setNotificationChannelCode(record.getNotificationChannelCode());
+        note.setNotificationRecipient(record.getNotificationRecipient());
+        note.setNotificationProviderCode(record.getNotificationProviderCode());
+        note.setNotificationProviderMessageId(record.getNotificationProviderMessageId());
         note.setNotificationSentAt(record.getNotificationSentAt());
         note.setNotificationFailureReason(record.getNotificationFailureReason());
         note.setNotificationReceiptStatus(record.getNotificationReceiptStatus());
+        note.setNotificationReceiptSourceType(record.getNotificationReceiptSourceType());
         note.setNotificationReceiptAt(record.getNotificationReceiptAt());
         note.setNotificationReceiptFailureReason(record.getNotificationReceiptFailureReason());
         note.setReminderCount(record.getReminderCount());
@@ -1549,9 +1640,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             copy.setAssignmentAcknowledgedByAdminName(value.getAssignmentAcknowledgedByAdminName());
             copy.setAssignmentAcknowledgedAt(value.getAssignmentAcknowledgedAt());
             copy.setNotificationStatus(value.getNotificationStatus());
+            copy.setNotificationDeliveryId(value.getNotificationDeliveryId());
+            copy.setNotificationSourceType(value.getNotificationSourceType());
+            copy.setNotificationChannelCode(value.getNotificationChannelCode());
+            copy.setNotificationRecipient(value.getNotificationRecipient());
+            copy.setNotificationProviderCode(value.getNotificationProviderCode());
+            copy.setNotificationProviderMessageId(value.getNotificationProviderMessageId());
             copy.setNotificationSentAt(value.getNotificationSentAt());
             copy.setNotificationFailureReason(value.getNotificationFailureReason());
             copy.setNotificationReceiptStatus(value.getNotificationReceiptStatus());
+            copy.setNotificationReceiptSourceType(value.getNotificationReceiptSourceType());
             copy.setNotificationReceiptAt(value.getNotificationReceiptAt());
             copy.setNotificationReceiptFailureReason(value.getNotificationReceiptFailureReason());
             copy.setReminderCount(value.getReminderCount());
@@ -1659,11 +1757,57 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
             return;
         }
         record.setNotificationStatus(null);
+        record.setNotificationDeliveryId(null);
+        record.setNotificationSourceType(null);
+        record.setNotificationChannelCode(null);
+        record.setNotificationRecipient(null);
+        record.setNotificationProviderCode(null);
+        record.setNotificationProviderMessageId(null);
         record.setNotificationSentAt(null);
         record.setNotificationFailureReason(null);
         record.setNotificationReceiptStatus(null);
+        record.setNotificationReceiptSourceType(null);
         record.setNotificationReceiptAt(null);
         record.setNotificationReceiptFailureReason(null);
+    }
+
+    private AdminUser resolveAssignedAdminUser(AiResumeFailureRecordDTO record) {
+        if (record == null || record.getAssignedAdminId() == null) {
+            return null;
+        }
+        return adminUserService.getById(record.getAssignedAdminId());
+    }
+
+    private void applyNotificationDeliverySummary(AiResumeFailureRecordDTO record, AiResumeNotificationDelivery delivery) {
+        if (record == null || delivery == null) {
+            return;
+        }
+        record.setNotificationDeliveryId(delivery.getDeliveryId());
+        record.setNotificationSourceType(delivery.getSendSourceType());
+        record.setNotificationChannelCode(delivery.getChannelCode());
+        record.setNotificationRecipient(resolveDeliveryRecipient(delivery));
+        record.setNotificationProviderCode(delivery.getProviderCode());
+        record.setNotificationProviderMessageId(delivery.getProviderMessageId());
+        record.setNotificationReceiptSourceType(delivery.getReceiptSourceType());
+    }
+
+    private String resolveDeliveryRecipient(AiResumeNotificationDelivery delivery) {
+        if (delivery == null) {
+            return null;
+        }
+        if (StringUtils.hasText(delivery.getRecipientName()) && StringUtils.hasText(delivery.getRecipientPhone())) {
+            return delivery.getRecipientName().trim() + " / " + delivery.getRecipientPhone().trim();
+        }
+        if (StringUtils.hasText(delivery.getRecipientName()) && StringUtils.hasText(delivery.getRecipientEmail())) {
+            return delivery.getRecipientName().trim() + " / " + delivery.getRecipientEmail().trim();
+        }
+        if (StringUtils.hasText(delivery.getRecipientPhone())) {
+            return delivery.getRecipientPhone().trim();
+        }
+        if (StringUtils.hasText(delivery.getRecipientEmail())) {
+            return delivery.getRecipientEmail().trim();
+        }
+        return StringUtils.hasText(delivery.getRecipientName()) ? delivery.getRecipientName().trim() : null;
     }
 
     private void clearFailureManualTakeover(AiResumeFailureRecordDTO record) {
@@ -1760,6 +1904,9 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         if (StringUtils.hasText(record.getNotificationSentAt())) {
             return record.getNotificationSentAt();
         }
+        if (Objects.equals(record.getNotificationStatus(), "send_failed")) {
+            return null;
+        }
         if (StringUtils.hasText(record.getLastRemindedAt())) {
             return record.getLastRemindedAt();
         }
@@ -1806,6 +1953,26 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
 
     private String resolveFailureNotificationReceiptFailureReason(AiResumeFailureRecordDTO record) {
         return record == null ? null : record.getNotificationReceiptFailureReason();
+    }
+
+    private AiResumeNotificationSendCommand buildNotificationSendCommand(AiResumeFailureRecordDTO current,
+                                                                         AdminAuthenticatedUser admin,
+                                                                         AdminUser assignedAdmin,
+                                                                         String requestId,
+                                                                         String sendSourceType,
+                                                                         String reason) {
+        AiResumeNotificationSendCommand command = new AiResumeNotificationSendCommand();
+        command.setFailureRecord(current);
+        command.setOperator(admin);
+        command.setRecipientAdmin(assignedAdmin);
+        command.setRequestId(requestId);
+        command.setSendSourceType(sendSourceType);
+        command.setReason(reason);
+        return command;
+    }
+
+    private String formatTime(LocalDateTime value) {
+        return value == null ? null : value.format(TIME_FORMATTER);
     }
 
     private String resolveFailureAutoRemindStage(AiResumeFailureRecordDTO record) {
@@ -1906,9 +2073,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         copy.setAssignmentAcknowledgedByAdminName(record.getAssignmentAcknowledgedByAdminName());
         copy.setAssignmentAcknowledgedAt(record.getAssignmentAcknowledgedAt());
         copy.setNotificationStatus(record.getNotificationStatus());
+        copy.setNotificationDeliveryId(record.getNotificationDeliveryId());
+        copy.setNotificationSourceType(record.getNotificationSourceType());
+        copy.setNotificationChannelCode(record.getNotificationChannelCode());
+        copy.setNotificationRecipient(record.getNotificationRecipient());
+        copy.setNotificationProviderCode(record.getNotificationProviderCode());
+        copy.setNotificationProviderMessageId(record.getNotificationProviderMessageId());
         copy.setNotificationSentAt(record.getNotificationSentAt());
         copy.setNotificationFailureReason(record.getNotificationFailureReason());
         copy.setNotificationReceiptStatus(record.getNotificationReceiptStatus());
+        copy.setNotificationReceiptSourceType(record.getNotificationReceiptSourceType());
         copy.setNotificationReceiptAt(record.getNotificationReceiptAt());
         copy.setNotificationReceiptFailureReason(record.getNotificationReceiptFailureReason());
         copy.setReminderCount(record.getReminderCount());
@@ -1952,9 +2126,16 @@ public class AdminAiResumeGovernanceServiceImpl implements AdminAiResumeGovernan
         context.put("claim_deadline_at", resolveFailureClaimDeadlineAt(record));
         context.put("collaboration_status", resolveFailureCollaborationStatus(record));
         context.put("notification_status", resolveFailureNotificationStatus(record));
+        context.put("notification_delivery_id", record.getNotificationDeliveryId());
+        context.put("notification_source_type", record.getNotificationSourceType());
+        context.put("notification_channel_code", record.getNotificationChannelCode());
+        context.put("notification_recipient", record.getNotificationRecipient());
+        context.put("notification_provider_code", record.getNotificationProviderCode());
+        context.put("notification_provider_message_id", record.getNotificationProviderMessageId());
         context.put("notification_sent_at", resolveFailureNotificationSentAt(record));
         context.put("notification_failure_reason", resolveFailureNotificationFailureReason(record));
         context.put("notification_receipt_status", resolveFailureNotificationReceiptStatus(record));
+        context.put("notification_receipt_source_type", record.getNotificationReceiptSourceType());
         context.put("notification_receipt_at", resolveFailureNotificationReceiptAt(record));
         context.put("notification_receipt_failure_reason", resolveFailureNotificationReceiptFailureReason(record));
         context.put("auto_remind_stage", resolveFailureAutoRemindStage(record));

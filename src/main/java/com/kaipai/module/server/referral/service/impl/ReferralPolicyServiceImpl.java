@@ -115,15 +115,18 @@ public class ReferralPolicyServiceImpl extends ServiceImpl<ReferralPolicyMapper,
     }
 
     private void applySave(ReferralPolicy policy, AdminReferralPolicySaveDTO dto) {
-        policy.setPolicyName(dto.getPolicyName());
-        policy.setEnabled(dto.getEnabled());
-        policy.setRequireRealAuth(dto.getRequireRealAuth());
-        policy.setRequireProfileCompletion(dto.getRequireProfileCompletion());
-        policy.setProfileCompletionThreshold(dto.getProfileCompletionThreshold());
-        policy.setSameDeviceLimit(dto.getSameDeviceLimit());
-        policy.setHourlyInviteLimit(dto.getHourlyInviteLimit());
-        policy.setAutoGrantEnabled(dto.getAutoGrantEnabled());
-        policy.setGrantRuleJson(dto.getGrantRuleJson());
+        if (dto == null || !StringUtils.hasText(dto.getPolicyName())) {
+            throw new BizException("邀请规则名称不能为空");
+        }
+        policy.setPolicyName(dto.getPolicyName().trim());
+        policy.setEnabled(dto.getEnabled() == null ? 1 : dto.getEnabled());
+        policy.setRequireRealAuth(dto.getRequireRealAuth() == null ? 0 : dto.getRequireRealAuth());
+        policy.setRequireProfileCompletion(dto.getRequireProfileCompletion() == null ? 0 : dto.getRequireProfileCompletion());
+        policy.setProfileCompletionThreshold(dto.getProfileCompletionThreshold() == null ? 0 : dto.getProfileCompletionThreshold());
+        policy.setSameDeviceLimit(dto.getSameDeviceLimit() == null ? 0 : dto.getSameDeviceLimit());
+        policy.setHourlyInviteLimit(dto.getHourlyInviteLimit() == null ? 0 : dto.getHourlyInviteLimit());
+        policy.setAutoGrantEnabled(dto.getAutoGrantEnabled() == null ? 0 : dto.getAutoGrantEnabled());
+        policy.setGrantRuleJson(StringUtils.hasText(dto.getGrantRuleJson()) ? dto.getGrantRuleJson().trim() : "{}");
     }
 
     private AdminReferralPolicyDetailDTO toDetail(ReferralPolicy policy) {

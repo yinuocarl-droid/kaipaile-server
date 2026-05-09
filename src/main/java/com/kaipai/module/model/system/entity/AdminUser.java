@@ -25,3 +25,5 @@ public class AdminUser extends BaseEntity {
     private LocalDateTime lastLoginTime;
     private String lastLoginIp;
 }
+
+

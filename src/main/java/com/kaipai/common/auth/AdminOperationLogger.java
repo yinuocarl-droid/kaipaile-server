@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.DigestUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -39,7 +40,7 @@ public class AdminOperationLogger {
         logEntity.setOperationCode(command.getOperationCode());
         logEntity.setTargetType(command.getTargetType());
         logEntity.setTargetId(command.getTargetId());
-        logEntity.setRequestId(resolveRequestId(request));
+        logEntity.setRequestId(resolveRequestId(request, command.getRequestId()));
         logEntity.setClientIp(resolveClientIp(request));
         logEntity.setUserAgent(request == null ? null : request.getHeader("User-Agent"));
         logEntity.setBeforeSnapshotJson(toJson(command.getBeforeSnapshot()));
@@ -58,7 +59,10 @@ public class AdminOperationLogger {
         return attributes == null ? null : attributes.getRequest();
     }
 
-    private String resolveRequestId(HttpServletRequest request) {
+    private String resolveRequestId(HttpServletRequest request, String commandRequestId) {
+        if (StringUtils.hasText(commandRequestId)) {
+            return normalizeRequestId(commandRequestId);
+        }
         if (request == null) {
             return UUID.randomUUID().toString();
         }

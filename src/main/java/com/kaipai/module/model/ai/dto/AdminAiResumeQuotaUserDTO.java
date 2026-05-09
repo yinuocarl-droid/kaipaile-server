@@ -15,8 +15,6 @@ public class AdminAiResumeQuotaUserDTO {
 
     private Integer level;
 
-    private String membershipTier;
-
     private Integer totalQuota;
 
     private Integer usedCount;

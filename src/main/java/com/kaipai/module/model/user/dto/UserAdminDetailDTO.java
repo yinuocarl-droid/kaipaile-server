@@ -14,7 +14,6 @@ public class UserAdminDetailDTO {
     private ActorProfileSummary actorProfileSummary;
     private VerifySummary verifySummary;
     private ReferralSummary referralSummary;
-    private MembershipSummary membershipSummary;
     private UserAdminEntitlementSummaryDTO entitlementSummary;
     private PaymentSummary paymentSummary;
     private RefundSummary refundSummary;
@@ -85,19 +84,6 @@ public class UserAdminDetailDTO {
         private Integer pendingInviteCount;
         private Integer invalidInviteCount;
         private LocalDateTime lastInvitedAt;
-    }
-
-    @Data
-    public static class MembershipSummary {
-        private Long membershipId;
-        private Integer tier;
-        private Integer status;
-        private LocalDateTime effectiveTime;
-        private LocalDateTime expireTime;
-        private String sourceType;
-        private Long sourceRefId;
-        private String lastChangeReason;
-        private LocalDateTime lastChangeTime;
     }
 
     @Data

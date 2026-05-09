@@ -5,7 +5,7 @@ import lombok.Data;
 @Data
 public class ProjectSaveDTO {
 
-    private Long companyId;
+    private Long crewId;
 
     private String title;
 

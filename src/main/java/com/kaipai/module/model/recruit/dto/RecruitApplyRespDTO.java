@@ -9,7 +9,7 @@ public class RecruitApplyRespDTO {
 
     private Long roleId;
 
-    private Long actorId;
+    private Long profileUserId;
 
     /**
      * Frontend enum: 1 pending, 2 approved, 3 rejected, 4 cancelled.

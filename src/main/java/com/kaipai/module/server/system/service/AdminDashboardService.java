@@ -7,3 +7,5 @@ public interface AdminDashboardService {
 
     AdminDashboardOverviewDTO overview(AdminDashboardOverviewQueryDTO query);
 }
+
+

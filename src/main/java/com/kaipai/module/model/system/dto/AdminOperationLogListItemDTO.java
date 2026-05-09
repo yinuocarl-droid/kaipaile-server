@@ -20,3 +20,5 @@ public class AdminOperationLogListItemDTO {
     private LocalDateTime confirmedAt;
     private LocalDateTime createTime;
 }
+
+

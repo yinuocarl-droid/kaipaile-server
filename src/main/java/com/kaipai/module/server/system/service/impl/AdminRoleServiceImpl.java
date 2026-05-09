@@ -46,13 +46,13 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
     private static final String OPERATION_LOGS_PAGE_PERMISSION = "page.system.operation-logs";
     private static final String AI_REVIEW_ACTION_PERMISSION = "action.system.ai-resume.review";
     private static final String AI_RESOLVE_ACTION_PERMISSION = "action.system.ai-resume.resolve";
-    private static final String RECRUIT_MENU_PERMISSION = "menu.recruit";
     private static final String RECRUIT_PROJECTS_PAGE_PERMISSION = "page.recruit.projects";
     private static final String RECRUIT_ROLES_PAGE_PERMISSION = "page.recruit.roles";
     private static final String RECRUIT_APPLIES_PAGE_PERMISSION = "page.recruit.applies";
     private static final String RECRUIT_PROJECT_STATUS_ACTION_PERMISSION = "action.recruit.project.status";
     private static final String RECRUIT_ROLE_STATUS_ACTION_PERMISSION = "action.recruit.role.status";
     private static final String ADMIN_USERS_PAGE_PERMISSION = "page.system.admin-users";
+    private static final String REMOVED_RECRUIT_MENU_PERMISSION = "menu." + "recruit";
 
     private final ObjectMapper objectMapper;
     private final AdminOperationLogger adminOperationLogger;
@@ -109,16 +109,16 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         long aiReadyRoleCount = items.stream()
                 .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getAiReady()))
                 .count();
-        long fallbackRoleCount = items.stream()
-                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+        long operationLogsPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
                 .count();
         long pendingRoleCount = items.stream()
                 .filter(item -> isEnabledRole(item)
                         && !Boolean.TRUE.equals(item.getAiReady())
-                        && !Boolean.TRUE.equals(item.getReliesOnFallback()))
+                        && !Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
                 .count();
-        long fallbackBoundUserCount = items.stream()
-                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+        long operationLogsPermissionGapBoundUserCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
                 .mapToLong(item -> item.getBoundUserCount() == null ? 0L : item.getBoundUserCount())
                 .sum();
 
@@ -126,10 +126,10 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         dto.setTotalRoleCount(items.size());
         dto.setEnabledRoleCount((int) enabledRoleCount);
         dto.setAiReadyRoleCount((int) aiReadyRoleCount);
-        dto.setFallbackRoleCount((int) fallbackRoleCount);
+        dto.setOperationLogsPermissionGapRoleCount((int) operationLogsPermissionGapRoleCount);
         dto.setPendingRoleCount((int) pendingRoleCount);
-        dto.setFallbackBoundUserCount(fallbackBoundUserCount);
-        dto.setCanRetireFallback(fallbackRoleCount == 0 && fallbackBoundUserCount == 0);
+        dto.setOperationLogsPermissionGapBoundUserCount(operationLogsPermissionGapBoundUserCount);
+        dto.setOperationLogsPermissionGapCleared(operationLogsPermissionGapRoleCount == 0 && operationLogsPermissionGapBoundUserCount == 0);
         dto.setList(items);
         return dto;
     }
@@ -156,16 +156,28 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         long recruitReadyRoleCount = items.stream()
                 .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitReady()))
                 .count();
-        long fallbackRoleCount = items.stream()
-                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+        long pageReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getPageReady()))
+                .count();
+        long actionReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getActionReady()))
+                .count();
+        long recruitPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitPermissionGap()))
+                .count();
+        long pagePermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getPagePermissionGap()))
+                .count();
+        long actionPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getActionPermissionGap()))
                 .count();
         long pendingRoleCount = items.stream()
                 .filter(item -> isEnabledRecruitRole(item)
                         && !Boolean.TRUE.equals(item.getRecruitReady())
-                        && !Boolean.TRUE.equals(item.getReliesOnFallback()))
+                        && !Boolean.TRUE.equals(item.getRecruitPermissionGap()))
                 .count();
-        long fallbackBoundUserCount = items.stream()
-                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getReliesOnFallback()))
+        long recruitPermissionGapBoundUserCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitPermissionGap()))
                 .mapToLong(item -> item.getBoundUserCount() == null ? 0L : item.getBoundUserCount())
                 .sum();
 
@@ -173,10 +185,16 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         dto.setTotalRoleCount(items.size());
         dto.setEnabledRoleCount((int) enabledRoleCount);
         dto.setRecruitReadyRoleCount((int) recruitReadyRoleCount);
-        dto.setFallbackRoleCount((int) fallbackRoleCount);
+        dto.setPageReadyRoleCount((int) pageReadyRoleCount);
+        dto.setActionReadyRoleCount((int) actionReadyRoleCount);
+        dto.setRecruitPermissionGapRoleCount((int) recruitPermissionGapRoleCount);
+        dto.setPagePermissionGapRoleCount((int) pagePermissionGapRoleCount);
+        dto.setActionPermissionGapRoleCount((int) actionPermissionGapRoleCount);
         dto.setPendingRoleCount((int) pendingRoleCount);
-        dto.setFallbackBoundUserCount(fallbackBoundUserCount);
-        dto.setCanRetireFallback(fallbackRoleCount == 0 && fallbackBoundUserCount == 0);
+        dto.setRecruitPermissionGapBoundUserCount(recruitPermissionGapBoundUserCount);
+        dto.setPagePermissionGapCleared(pagePermissionGapRoleCount == 0);
+        dto.setActionPermissionGapCleared(actionPermissionGapRoleCount == 0);
+        dto.setRecruitPermissionGapCleared(recruitPermissionGapRoleCount == 0 && recruitPermissionGapBoundUserCount == 0);
         dto.setList(items);
         return dto;
     }
@@ -275,7 +293,7 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         copy.setRoleName(dto.getRoleName().trim());
         copy.setRemark(dto.getRemark());
         copy.setStatus(1);
-        copy.setMenuPermissionsJson(source.getMenuPermissionsJson());
+        copy.setMenuPermissionsJson(writeMenuPermissions(readPermissions(source.getMenuPermissionsJson())));
         copy.setPagePermissionsJson(source.getPagePermissionsJson());
         copy.setActionPermissionsJson(source.getActionPermissionsJson());
         save(copy);
@@ -307,7 +325,7 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         role.setRoleName(dto.getRoleName().trim());
         role.setStatus(dto.getStatus());
         role.setRemark(dto.getRemark());
-        role.setMenuPermissionsJson(writePermissions(dto.getMenuPermissions()));
+        role.setMenuPermissionsJson(writeMenuPermissions(dto.getMenuPermissions()));
         role.setPagePermissionsJson(writePermissions(dto.getPagePermissions()));
         role.setActionPermissionsJson(writePermissions(dto.getActionPermissions()));
     }
@@ -341,6 +359,14 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         }
     }
 
+    private String writeMenuPermissions(List<String> permissions) {
+        List<String> safePermissions = permissions == null ? Collections.emptyList() : permissions;
+        if (safePermissions.contains(REMOVED_RECRUIT_MENU_PERMISSION)) {
+            throw new BizException("菜单权限不允许写入");
+        }
+        return writePermissions(safePermissions);
+    }
+
     private AdminRoleAiGovernanceMatrixItemDTO toAiGovernanceMatrixItem(AdminRole role, long boundUserCount) {
         List<String> pagePermissions = readPermissions(role.getPagePermissionsJson());
         List<String> actionPermissions = readPermissions(role.getActionPermissionsJson());
@@ -349,7 +375,7 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         boolean hasAiReviewAction = actionPermissions.contains(AI_REVIEW_ACTION_PERMISSION);
         boolean hasAiResolveAction = actionPermissions.contains(AI_RESOLVE_ACTION_PERMISSION);
         boolean aiReady = hasAiGovernancePage && hasAiReviewAction && hasAiResolveAction;
-        boolean reliesOnFallback = hasOperationLogsPage && !aiReady;
+        boolean operationLogsPermissionGap = hasOperationLogsPage && !aiReady;
         boolean hasAnyAiPermission = hasAiGovernancePage || hasAiReviewAction || hasAiResolveAction;
 
         AdminRoleAiGovernanceMatrixItemDTO dto = new AdminRoleAiGovernanceMatrixItemDTO();
@@ -363,36 +389,36 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         dto.setHasAiReviewAction(hasAiReviewAction);
         dto.setHasAiResolveAction(hasAiResolveAction);
         dto.setAiReady(aiReady);
-        dto.setReliesOnFallback(reliesOnFallback);
-        dto.setRolloutStage(resolveAiGovernanceStage(aiReady, reliesOnFallback, hasOperationLogsPage, hasAnyAiPermission));
+        dto.setOperationLogsPermissionGap(operationLogsPermissionGap);
+        dto.setPermissionStage(resolveAiGovernanceStage(aiReady, operationLogsPermissionGap, hasOperationLogsPage, hasAnyAiPermission));
         dto.setMissingPermissions(buildMissingPermissions(hasAiGovernancePage, hasAiReviewAction, hasAiResolveAction));
         return dto;
     }
 
     private AdminRoleRecruitGovernanceMatrixItemDTO toRecruitGovernanceMatrixItem(AdminRole role, long boundUserCount) {
-        List<String> menuPermissions = readPermissions(role.getMenuPermissionsJson());
         List<String> pagePermissions = readPermissions(role.getPagePermissionsJson());
         List<String> actionPermissions = readPermissions(role.getActionPermissionsJson());
-        boolean hasRecruitMenu = menuPermissions.contains(RECRUIT_MENU_PERMISSION);
         boolean hasRecruitProjectsPage = pagePermissions.contains(RECRUIT_PROJECTS_PAGE_PERMISSION);
         boolean hasRecruitRolesPage = pagePermissions.contains(RECRUIT_ROLES_PAGE_PERMISSION);
         boolean hasRecruitAppliesPage = pagePermissions.contains(RECRUIT_APPLIES_PAGE_PERMISSION);
         boolean hasRecruitProjectStatusAction = actionPermissions.contains(RECRUIT_PROJECT_STATUS_ACTION_PERMISSION);
         boolean hasRecruitRoleStatusAction = actionPermissions.contains(RECRUIT_ROLE_STATUS_ACTION_PERMISSION);
         boolean hasAdminUsersPage = pagePermissions.contains(ADMIN_USERS_PAGE_PERMISSION);
-        boolean recruitReady = hasRecruitMenu
-                && hasRecruitProjectsPage
+        boolean pageReady = hasRecruitProjectsPage
                 && hasRecruitRolesPage
-                && hasRecruitAppliesPage
-                && hasRecruitProjectStatusAction
+                && hasRecruitAppliesPage;
+        boolean actionReady = hasRecruitProjectStatusAction
                 && hasRecruitRoleStatusAction;
-        boolean hasAnyRecruitPermission = hasRecruitMenu
-                || hasRecruitProjectsPage
+        boolean recruitReady = pageReady
+                && actionReady;
+        boolean hasAnyRecruitRuntimePermission = hasRecruitProjectsPage
                 || hasRecruitRolesPage
                 || hasRecruitAppliesPage
                 || hasRecruitProjectStatusAction
                 || hasRecruitRoleStatusAction;
-        boolean reliesOnFallback = hasAdminUsersPage && !recruitReady;
+        boolean pagePermissionGap = hasAdminUsersPage && !pageReady;
+        boolean actionPermissionGap = hasAdminUsersPage && !actionReady;
+        boolean recruitPermissionGap = pagePermissionGap || actionPermissionGap;
 
         AdminRoleRecruitGovernanceMatrixItemDTO dto = new AdminRoleRecruitGovernanceMatrixItemDTO();
         dto.setAdminRoleId(role.getAdminRoleId());
@@ -400,18 +426,20 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         dto.setRoleName(role.getRoleName());
         dto.setStatus(role.getStatus());
         dto.setBoundUserCount(boundUserCount);
-        dto.setHasRecruitMenu(hasRecruitMenu);
         dto.setHasRecruitProjectsPage(hasRecruitProjectsPage);
         dto.setHasRecruitRolesPage(hasRecruitRolesPage);
         dto.setHasRecruitAppliesPage(hasRecruitAppliesPage);
         dto.setHasRecruitProjectStatusAction(hasRecruitProjectStatusAction);
         dto.setHasRecruitRoleStatusAction(hasRecruitRoleStatusAction);
         dto.setHasAdminUsersPage(hasAdminUsersPage);
+        dto.setPageReady(pageReady);
+        dto.setActionReady(actionReady);
+        dto.setPagePermissionGap(pagePermissionGap);
+        dto.setActionPermissionGap(actionPermissionGap);
         dto.setRecruitReady(recruitReady);
-        dto.setReliesOnFallback(reliesOnFallback);
-        dto.setRolloutStage(resolveRecruitGovernanceStage(recruitReady, reliesOnFallback, hasAdminUsersPage, hasAnyRecruitPermission));
+        dto.setRecruitPermissionGap(recruitPermissionGap);
+        dto.setPermissionStage(resolveRecruitGovernanceStage(recruitReady, recruitPermissionGap, hasAdminUsersPage, hasAnyRecruitRuntimePermission));
         dto.setMissingPermissions(buildRecruitMissingPermissions(
-                hasRecruitMenu,
                 hasRecruitProjectsPage,
                 hasRecruitRolesPage,
                 hasRecruitAppliesPage,
@@ -435,34 +463,31 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         return missingPermissions;
     }
 
-    private String resolveAiGovernanceStage(boolean aiReady, boolean reliesOnFallback, boolean hasOperationLogsPage,
+    private String resolveAiGovernanceStage(boolean aiReady, boolean operationLogsPermissionGap, boolean hasOperationLogsPage,
                                             boolean hasAnyAiPermission) {
         if (aiReady) {
             return "ai_ready";
         }
-        if (reliesOnFallback && hasAnyAiPermission) {
-            return "compat_transition";
+        if (operationLogsPermissionGap && hasAnyAiPermission) {
+            return "permission_review";
         }
-        if (reliesOnFallback) {
-            return "fallback_only";
+        if (operationLogsPermissionGap) {
+            return "permission_review";
         }
         if (hasOperationLogsPage) {
-            return "fallback_only";
+            return "permission_review";
         }
         if (hasAnyAiPermission) {
-            return "partial_ai";
+            return "ai_partial";
         }
-        return "not_granted";
+        return "unassigned";
     }
 
-    private List<String> buildRecruitMissingPermissions(boolean hasRecruitMenu, boolean hasRecruitProjectsPage,
+    private List<String> buildRecruitMissingPermissions(boolean hasRecruitProjectsPage,
                                                         boolean hasRecruitRolesPage, boolean hasRecruitAppliesPage,
                                                         boolean hasRecruitProjectStatusAction,
                                                         boolean hasRecruitRoleStatusAction) {
         List<String> missingPermissions = new ArrayList<>();
-        if (!hasRecruitMenu) {
-            missingPermissions.add(RECRUIT_MENU_PERMISSION);
-        }
         if (!hasRecruitProjectsPage) {
             missingPermissions.add(RECRUIT_PROJECTS_PAGE_PERMISSION);
         }
@@ -481,44 +506,42 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         return missingPermissions;
     }
 
-    private String resolveRecruitGovernanceStage(boolean recruitReady, boolean reliesOnFallback, boolean hasAdminUsersPage,
-                                                 boolean hasAnyRecruitPermission) {
+    private String resolveRecruitGovernanceStage(boolean recruitReady, boolean recruitPermissionGap, boolean hasAdminUsersPage,
+                                                 boolean hasAnyRecruitRuntimePermission) {
         if (recruitReady) {
             return "recruit_ready";
         }
-        if (reliesOnFallback && hasAnyRecruitPermission) {
-            return "compat_transition";
+        if (recruitPermissionGap && hasAnyRecruitRuntimePermission) {
+            return "permission_review";
         }
-        if (reliesOnFallback) {
-            return "fallback_only";
+        if (recruitPermissionGap) {
+            return "permission_review";
         }
         if (hasAdminUsersPage) {
-            return "fallback_only";
+            return "permission_review";
         }
-        if (hasAnyRecruitPermission) {
-            return "partial_recruit";
+        if (hasAnyRecruitRuntimePermission) {
+            return "recruit_partial";
         }
-        return "not_granted";
+        return "unassigned";
     }
 
     private int aiGovernanceStageRank(AdminRoleAiGovernanceMatrixItemDTO item) {
-        return switch (item.getRolloutStage()) {
-            case "compat_transition" -> 0;
-            case "fallback_only" -> 1;
-            case "partial_ai" -> 2;
-            case "not_granted" -> 3;
-            case "ai_ready" -> 4;
+        return switch (item.getPermissionStage()) {
+            case "permission_review" -> 0;
+            case "ai_partial" -> 1;
+            case "unassigned" -> 2;
+            case "ai_ready" -> 3;
             default -> 5;
         };
     }
 
     private int recruitGovernanceStageRank(AdminRoleRecruitGovernanceMatrixItemDTO item) {
-        return switch (item.getRolloutStage()) {
-            case "compat_transition" -> 0;
-            case "fallback_only" -> 1;
-            case "partial_recruit" -> 2;
-            case "not_granted" -> 3;
-            case "recruit_ready" -> 4;
+        return switch (item.getPermissionStage()) {
+            case "permission_review" -> 0;
+            case "recruit_partial" -> 1;
+            case "unassigned" -> 2;
+            case "recruit_ready" -> 3;
             default -> 5;
         };
     }
@@ -568,3 +591,5 @@ public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole
         return context;
     }
 }
+
+

@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * Membership payment orders.
+ * Capability payment orders.
  */
 @Data
 @EqualsAndHashCode(callSuper = true)

@@ -5,7 +5,7 @@ import com.kaipai.module.model.ai.dto.ActorAiQuotaRespDTO;
 import com.kaipai.module.model.ai.dto.AiResumeErrorCode;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.ai.service.AiQuotaService;
-import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.capability.service.CapabilityAccountService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,7 +22,7 @@ public class AiQuotaServiceImpl implements AiQuotaService {
     private static final String PERIOD_TYPE_MONTHLY = "monthly";
     private final StringRedisTemplate redisTemplate;
     private final UserMapper userMapper;
-    private final MembershipAccountService membershipAccountService;
+    private final CapabilityAccountService capabilityAccountService;
 
     @Override
     public ActorAiQuotaRespDTO quota(Long userId, String quotaType) {
@@ -71,7 +71,7 @@ public class AiQuotaServiceImpl implements AiQuotaService {
     }
 
     private int resolveTotalQuota(User user) {
-        var levelInfo = membershipAccountService.actorLevelInfo(user.getUserId());
+        var levelInfo = capabilityAccountService.actorLevelInfo(user.getUserId());
         if (levelInfo.getLevelCapability() == null || levelInfo.getLevelCapability().getAiQuotaPerMonth() == null) {
             return 0;
         }

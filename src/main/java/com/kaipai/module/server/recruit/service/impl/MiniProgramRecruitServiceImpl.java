@@ -4,9 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
-import com.kaipai.module.model.company.dto.CompanyProfileExtrasDTO;
-import com.kaipai.module.model.company.dto.CompanyProfileRespDTO;
-import com.kaipai.module.model.company.entity.CompanyProfile;
+import com.kaipai.module.model.crew.dto.CrewProfileExtrasDTO;
+import com.kaipai.module.model.crew.dto.CrewProfileRespDTO;
+import com.kaipai.module.model.crew.entity.CrewProfile;
 import com.kaipai.module.model.recruit.dto.ApplyCreateDTO;
 import com.kaipai.module.model.recruit.dto.ApplyQueryDTO;
 import com.kaipai.module.model.recruit.dto.ApplyRespDTO;
@@ -23,8 +23,8 @@ import com.kaipai.module.model.recruit.dto.RoleRespDTO;
 import com.kaipai.module.model.recruit.dto.RoleSaveDTO;
 import com.kaipai.module.model.recruit.entity.RecruitPost;
 import com.kaipai.module.model.user.entity.User;
-import com.kaipai.module.server.company.mapper.CompanyProfileMapper;
-import com.kaipai.module.server.company.service.CompanyProfileService;
+import com.kaipai.module.server.crew.mapper.CrewProfileMapper;
+import com.kaipai.module.server.crew.service.CrewProfileService;
 import com.kaipai.module.server.recruit.mapper.RecruitPostMapper;
 import com.kaipai.module.server.recruit.service.MiniProgramRecruitService;
 import com.kaipai.module.server.recruit.service.RecruitApplyService;
@@ -56,8 +56,8 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     private static final int USER_TYPE_CREW = 2;
     private static final int PROJECT_STATUS_ACTIVE = 1;
 
-    private final CompanyProfileMapper companyProfileMapper;
-    private final CompanyProfileService companyProfileService;
+    private final CrewProfileMapper crewProfileMapper;
+    private final CrewProfileService crewProfileService;
     private final RecruitPostMapper recruitPostMapper;
     private final RecruitPostService recruitPostService;
     private final RecruitApplyService recruitApplyService;
@@ -68,13 +68,13 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     @Transactional(rollbackFor = Exception.class)
     public ProjectRespDTO createProject(Long currentUserId, ProjectSaveDTO dto) {
         requireCrewUser(currentUserId);
-        CompanyProfile profile = ensureCompanyProfile(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        CrewProfile profile = ensureCrewProfile(currentUserId);
+        CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
         List<ProjectRespDTO> projects = new ArrayList<>(safeProjects(extras.getProjects()));
 
         ProjectRespDTO project = new ProjectRespDTO();
         project.setId(nextId());
-        project.setCompanyId(currentUserId);
+        project.setCrewId(currentUserId);
         project.setTitle(requireText(dto == null ? null : dto.getTitle(), "项目名称不能为空"));
         project.setDescription(defaultText(dto == null ? null : dto.getDescription()));
         project.setLocation(defaultText(dto == null ? null : dto.getLocation()));
@@ -86,7 +86,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
 
         projects.add(0, project);
         extras.setProjects(projects);
-        saveCompanyExtras(profile, extras);
+        saveCrewExtras(profile, extras);
         return enrichProject(project);
     }
 
@@ -94,8 +94,8 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     @Transactional(rollbackFor = Exception.class)
     public void updateProject(Long currentUserId, Long projectId, ProjectSaveDTO dto) {
         requireCrewUser(currentUserId);
-        CompanyProfile profile = ensureCompanyProfile(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        CrewProfile profile = ensureCrewProfile(currentUserId);
+        CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
         ProjectRespDTO project = requireMutableProject(extras, projectId);
 
         if (dto != null) {
@@ -122,22 +122,22 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
             }
         }
 
-        saveCompanyExtras(profile, extras);
+        saveCrewExtras(profile, extras);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteProject(Long currentUserId, Long projectId) {
         requireCrewUser(currentUserId);
-        CompanyProfile profile = ensureCompanyProfile(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        CrewProfile profile = ensureCrewProfile(currentUserId);
+        CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
         List<ProjectRespDTO> projects = new ArrayList<>(safeProjects(extras.getProjects()));
         boolean removed = projects.removeIf(item -> Objects.equals(item.getId(), projectId));
         if (!removed) {
             throw new BizException("项目不存在");
         }
         extras.setProjects(projects);
-        saveCompanyExtras(profile, extras);
+        saveCrewExtras(profile, extras);
 
         List<RecruitPost> posts = recruitPostMapper.selectList(new LambdaQueryWrapper<RecruitPost>()
                 .eq(RecruitPost::getUserId, currentUserId)
@@ -154,23 +154,23 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     @Override
     public ProjectRespDTO project(Long currentUserId, Long projectId) {
         requireCrewUser(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(ensureCompanyProfile(currentUserId).getExtendedField());
+        CrewProfileExtrasDTO extras = readCrewExtras(ensureCrewProfile(currentUserId).getExtendedField());
         return enrichProject(requireProject(extras, projectId));
     }
 
     @Override
     public PageResult<ProjectRespDTO> myProjects(Long currentUserId, ProjectQueryDTO query) {
         requireCrewUser(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(ensureCompanyProfile(currentUserId).getExtendedField());
+        CrewProfileExtrasDTO extras = readCrewExtras(ensureCrewProfile(currentUserId).getExtendedField());
         return paginateProjects(filterProjects(safeProjects(extras.getProjects()), currentUserId, query), query);
     }
 
     @Override
     public PageResult<ProjectRespDTO> projectList(ProjectQueryDTO query) {
-        List<ProjectRespDTO> projects = companyProfileMapper.selectList(new LambdaQueryWrapper<CompanyProfile>()
-                        .orderByDesc(CompanyProfile::getCompanyProfileId))
+        List<ProjectRespDTO> projects = crewProfileMapper.selectList(new LambdaQueryWrapper<CrewProfile>()
+                        .orderByDesc(CrewProfile::getCrewProfileId))
                 .stream()
-                .flatMap(profile -> safeProjects(readCompanyExtras(profile.getExtendedField()).getProjects()).stream())
+                .flatMap(profile -> safeProjects(readCrewExtras(profile.getExtendedField()).getProjects()).stream())
                 .map(this::enrichProject)
                 .toList();
         return paginateProjects(filterProjects(projects, null, query), query);
@@ -180,13 +180,13 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     @Transactional(rollbackFor = Exception.class)
     public RoleRespDTO createRole(Long currentUserId, RoleSaveDTO dto) {
         requireCrewUser(currentUserId);
-        CompanyProfile profile = ensureCompanyProfile(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        CrewProfile profile = ensureCrewProfile(currentUserId);
+        CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
         ProjectRespDTO project = requireProject(extras, dto == null ? null : dto.getProjectId());
 
         RecruitPost post = new RecruitPost();
         post.setUserId(currentUserId);
-        post.setCompanyProfileId(profile.getCompanyProfileId());
+        post.setCrewProfileId(profile.getCrewProfileId());
         post.setPostNo("RP" + nextId());
         post.setTitle(firstNonBlank(dto == null ? null : dto.getRoleName(), project.getTitle(), "角色招募"));
         post.setDramaName(project.getTitle());
@@ -222,8 +222,8 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     public void updateRole(Long currentUserId, Long roleId, RoleSaveDTO dto) {
         requireCrewUser(currentUserId);
         RecruitPost post = requireOwnedRole(currentUserId, roleId);
-        CompanyProfile profile = ensureCompanyProfile(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        CrewProfile profile = ensureCrewProfile(currentUserId);
+        CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
         RoleExtraDTO roleExtra = readRoleExtra(post.getExtendedField());
         ProjectRespDTO project = roleExtra.getProjectId() == null ? null : findProject(extras, roleExtra.getProjectId());
         if (dto != null && dto.getProjectId() != null && !Objects.equals(dto.getProjectId(), roleExtra.getProjectId())) {
@@ -282,9 +282,9 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         RecruitRoleRespDTO role = recruitPostService.detail(roleId);
         RoleRespDTO result = toRoleResp(role);
         RoleExtraDTO extra = readRoleExtra(recruitPostMapper.selectById(roleId).getExtendedField());
-        if (extra.getProjectId() != null && result.getCompany() != null) {
-            CompanyProfile profile = loadCompanyProfileByUserId(result.getCompany().getUserId());
-            ProjectRespDTO project = profile == null ? null : findProject(readCompanyExtras(profile.getExtendedField()), extra.getProjectId());
+        if (extra.getProjectId() != null && result.getCrew() != null) {
+            CrewProfile profile = loadCrewProfileByUserId(result.getCrew().getUserId());
+            ProjectRespDTO project = profile == null ? null : findProject(readCrewExtras(profile.getExtendedField()), extra.getProjectId());
             if (project != null) {
                 result.setProjectId(project.getId());
                 result.setProject(enrichProject(project));
@@ -296,7 +296,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     @Override
     public PageResult<RoleRespDTO> rolesByProject(Long currentUserId, Long projectId, RoleQueryDTO query) {
         requireCrewUser(currentUserId);
-        CompanyProfileExtrasDTO extras = readCompanyExtras(ensureCompanyProfile(currentUserId).getExtendedField());
+        CrewProfileExtrasDTO extras = readCrewExtras(ensureCrewProfile(currentUserId).getExtendedField());
         ProjectRespDTO project = requireProject(extras, projectId);
 
         List<RecruitPost> posts = recruitPostMapper.selectList(new LambdaQueryWrapper<RecruitPost>()
@@ -365,13 +365,13 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
 
     private ProjectRespDTO enrichProject(ProjectRespDTO project) {
         ProjectRespDTO copy = copyProject(project);
-        copy.setRoleCount(countRolesByProject(copy.getCompanyId(), copy.getId()));
+        copy.setRoleCount(countRolesByProject(copy.getCrewId(), copy.getId()));
         return copy;
     }
 
     private List<ProjectRespDTO> filterProjects(List<ProjectRespDTO> projects, Long currentUserId, ProjectQueryDTO query) {
         return projects.stream()
-                .filter(item -> currentUserId == null || Objects.equals(item.getCompanyId(), currentUserId))
+                .filter(item -> currentUserId == null || Objects.equals(item.getCrewId(), currentUserId))
                 .filter(item -> query == null || query.getStatus() == null || Objects.equals(item.getStatus(), query.getStatus()))
                 .filter(item -> !StringUtils.hasText(query == null ? null : query.getLocation()) || containsText(item.getLocation(), query.getLocation()))
                 .filter(item -> !StringUtils.hasText(query == null ? null : query.getKeyword())
@@ -402,12 +402,12 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         RoleRespDTO role = toRoleResp(recruitPostService.detail(roleId));
         role.setProjectId(project.getId());
         role.setProject(enrichProject(project));
-        CompanyProfileRespDTO company = companyProfileService.profile(project.getCompanyId());
-        role.setCompany(company);
+        CrewProfileRespDTO crew = crewProfileService.profile(project.getCrewId());
+        role.setCrew(crew);
         return role;
     }
 
-    private ProjectRespDTO requireProject(CompanyProfileExtrasDTO extras, Long projectId) {
+    private ProjectRespDTO requireProject(CrewProfileExtrasDTO extras, Long projectId) {
         ProjectRespDTO project = findProject(extras, projectId);
         if (project == null) {
             throw new BizException("项目不存在");
@@ -415,12 +415,12 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return project;
     }
 
-    private ProjectRespDTO findProject(CompanyProfileExtrasDTO extras, Long projectId) {
+    private ProjectRespDTO findProject(CrewProfileExtrasDTO extras, Long projectId) {
         ProjectRespDTO project = findMutableProject(extras, projectId);
         return project == null ? null : copyProject(project);
     }
 
-    private ProjectRespDTO requireMutableProject(CompanyProfileExtrasDTO extras, Long projectId) {
+    private ProjectRespDTO requireMutableProject(CrewProfileExtrasDTO extras, Long projectId) {
         ProjectRespDTO project = findMutableProject(extras, projectId);
         if (project == null) {
             throw new BizException("项目不存在");
@@ -428,7 +428,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return project;
     }
 
-    private ProjectRespDTO findMutableProject(CompanyProfileExtrasDTO extras, Long projectId) {
+    private ProjectRespDTO findMutableProject(CrewProfileExtrasDTO extras, Long projectId) {
         if (projectId == null) {
             return null;
         }
@@ -438,47 +438,47 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
                 .orElse(null);
     }
 
-    private CompanyProfile ensureCompanyProfile(Long userId) {
-        CompanyProfile profile = loadCompanyProfileByUserId(userId);
+    private CrewProfile ensureCrewProfile(Long userId) {
+        CrewProfile profile = loadCrewProfileByUserId(userId);
         if (profile != null) {
             return profile;
         }
-        CompanyProfile created = new CompanyProfile();
+        CrewProfile created = new CrewProfile();
         created.setUserId(userId);
-        created.setCompanyStatus(1);
-        created.setExtendedField(writeCompanyExtras(new CompanyProfileExtrasDTO()));
-        companyProfileMapper.insert(created);
+        created.setCrewStatus(1);
+        created.setExtendedField(writeCrewExtras(new CrewProfileExtrasDTO()));
+        crewProfileMapper.insert(created);
         return created;
     }
 
-    private CompanyProfile loadCompanyProfileByUserId(Long userId) {
+    private CrewProfile loadCrewProfileByUserId(Long userId) {
         if (userId == null) {
             return null;
         }
-        return companyProfileMapper.selectOne(new LambdaQueryWrapper<CompanyProfile>()
-                .eq(CompanyProfile::getUserId, userId)
+        return crewProfileMapper.selectOne(new LambdaQueryWrapper<CrewProfile>()
+                .eq(CrewProfile::getUserId, userId)
                 .last("limit 1"));
     }
 
-    private CompanyProfileExtrasDTO readCompanyExtras(String raw) {
+    private CrewProfileExtrasDTO readCrewExtras(String raw) {
         if (!StringUtils.hasText(raw)) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
         try {
-            return objectMapper.readValue(raw, CompanyProfileExtrasDTO.class);
+            return objectMapper.readValue(raw, CrewProfileExtrasDTO.class);
         } catch (Exception ignored) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
     }
 
-    private void saveCompanyExtras(CompanyProfile profile, CompanyProfileExtrasDTO extras) {
-        profile.setExtendedField(writeCompanyExtras(extras));
-        companyProfileMapper.updateById(profile);
+    private void saveCrewExtras(CrewProfile profile, CrewProfileExtrasDTO extras) {
+        profile.setExtendedField(writeCrewExtras(extras));
+        crewProfileMapper.updateById(profile);
     }
 
-    private String writeCompanyExtras(CompanyProfileExtrasDTO extras) {
+    private String writeCrewExtras(CrewProfileExtrasDTO extras) {
         try {
-            return objectMapper.writeValueAsString(extras == null ? new CompanyProfileExtrasDTO() : extras);
+            return objectMapper.writeValueAsString(extras == null ? new CrewProfileExtrasDTO() : extras);
         } catch (Exception e) {
             throw new BizException("项目数据序列化失败");
         }
@@ -514,12 +514,12 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return post;
     }
 
-    private int countRolesByProject(Long companyId, Long projectId) {
-        if (companyId == null || projectId == null) {
+    private int countRolesByProject(Long crewId, Long projectId) {
+        if (crewId == null || projectId == null) {
             return 0;
         }
         return (int) recruitPostMapper.selectList(new LambdaQueryWrapper<RecruitPost>()
-                        .eq(RecruitPost::getUserId, companyId))
+                        .eq(RecruitPost::getUserId, crewId))
                 .stream()
                 .filter(post -> Objects.equals(readRoleExtra(post.getExtendedField()).getProjectId(), projectId))
                 .count();
@@ -541,7 +541,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         target.setPublishTime(source.getPublishTime());
         target.setCoverImage(source.getCoverImage());
         target.setProject(toProjectResp(source.getProject()));
-        target.setCompany(toCompanyResp(source.getCompany()));
+        target.setCrew(toCrewResp(source.getCrew()));
         return target;
     }
 
@@ -551,7 +551,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         }
         ProjectRespDTO target = new ProjectRespDTO();
         target.setId(source.getId());
-        target.setCompanyId(source.getCompanyId());
+        target.setCrewId(source.getCrewId());
         target.setTitle(source.getTitle());
         target.setDescription(source.getDescription());
         target.setLocation(source.getLocation());
@@ -563,19 +563,19 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return target;
     }
 
-    private CompanyProfileRespDTO toCompanyResp(RecruitRoleRespDTO.CompanyDTO source) {
+    private CrewProfileRespDTO toCrewResp(RecruitRoleRespDTO.CrewDTO source) {
         if (source == null) {
             return null;
         }
-        CompanyProfileRespDTO target = new CompanyProfileRespDTO();
+        CrewProfileRespDTO target = new CrewProfileRespDTO();
         target.setUserId(source.getUserId());
         target.setAvatar(source.getAvatar());
-        target.setCompanyName(source.getCompanyName());
+        target.setCrewName(source.getCrewName());
         target.setContactName(source.getContactName());
         target.setContactPhone(source.getContactPhone());
         target.setRemark(source.getRemark());
         target.setLocation(source.getLocation());
-        target.setCompanyType(source.getCompanyType());
+        target.setCrewType(source.getCrewType());
         target.setTeamScale(source.getTeamScale());
         target.setFocusDirection(source.getFocusDirection());
         target.setRepresentativeWorks(source.getRepresentativeWorks());
@@ -588,7 +588,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         ApplyRespDTO target = new ApplyRespDTO();
         target.setId(source.getId());
         target.setRoleId(source.getRoleId());
-        target.setActorId(source.getActorId());
+        target.setProfileUserId(source.getProfileUserId());
         target.setStatus(source.getStatus());
         target.setRemark(source.getRemark());
         target.setApplyTime(source.getApplyTime());
@@ -613,7 +613,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
     private ProjectRespDTO copyProject(ProjectRespDTO source) {
         ProjectRespDTO target = new ProjectRespDTO();
         target.setId(source.getId());
-        target.setCompanyId(source.getCompanyId());
+        target.setCrewId(source.getCrewId());
         target.setTitle(source.getTitle());
         target.setDescription(source.getDescription());
         target.setLocation(source.getLocation());
@@ -629,7 +629,7 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return projects == null ? Collections.emptyList() : projects.stream().map(this::copyProject).collect(Collectors.toList());
     }
 
-    private List<ProjectRespDTO> safeProjectRefs(CompanyProfileExtrasDTO extras) {
+    private List<ProjectRespDTO> safeProjectRefs(CrewProfileExtrasDTO extras) {
         if (extras == null || extras.getProjects() == null) {
             return Collections.emptyList();
         }
@@ -675,14 +675,14 @@ public class MiniProgramRecruitServiceImpl implements MiniProgramRecruitService 
         return value.trim();
     }
 
-    private String firstNonBlank(String first, String second, String fallback) {
+    private String firstNonBlank(String first, String second, String defaultValue) {
         if (StringUtils.hasText(first)) {
             return first.trim();
         }
         if (StringUtils.hasText(second)) {
             return second.trim();
         }
-        return fallback;
+        return defaultValue;
     }
 
     private Integer toGenderCode(String gender) {

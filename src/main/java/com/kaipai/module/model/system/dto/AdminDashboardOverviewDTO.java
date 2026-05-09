@@ -12,6 +12,16 @@ public class AdminDashboardOverviewDTO {
     private Long referralRiskPendingCount;
     private Long refundPendingCount;
     private Long todayPaymentOrderCount;
+    private Long activeShareCardCount;
+    private Long activeShareOwnerCount;
+    private Long shareViewCount;
+    private Long uniqueViewerCount;
+    private Long approvedContactRequestCount;
+    private Long pendingContactRequestCount;
+    private Long convertedViewerCount;
+    private Long classicSceneViewCount;
+    private Long urbanSceneViewCount;
+    private Long costumeSceneViewCount;
     private List<RecentItem> recentItems;
 
     @Data
@@ -26,3 +36,5 @@ public class AdminDashboardOverviewDTO {
         private LocalDateTime occurredAt;
     }
 }
+
+

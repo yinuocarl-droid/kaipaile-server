@@ -10,7 +10,7 @@ public class ApplyRespDTO {
 
     private Long roleId;
 
-    private Long actorId;
+    private Long profileUserId;
 
     private Integer status;
 

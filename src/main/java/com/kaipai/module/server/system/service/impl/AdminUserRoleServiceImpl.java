@@ -31,3 +31,5 @@ public class AdminUserRoleServiceImpl extends ServiceImpl<AdminUserRoleMapper, A
         saveBatch(binds);
     }
 }
+
+

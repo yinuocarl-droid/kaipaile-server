@@ -15,16 +15,19 @@ import com.kaipai.module.model.verify.dto.IdentityVerificationListReqDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationStatusRespDTO;
 import com.kaipai.module.model.verify.dto.IdentityVerificationSubmitReqDTO;
 import com.kaipai.module.model.verify.entity.IdentityVerification;
+import com.kaipai.module.model.verify.entity.IdentityVerificationOwner;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.support.ActorProfileCompletionCalculator;
 import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationMapper;
+import com.kaipai.module.server.verify.mapper.IdentityVerificationOwnerMapper;
 import com.kaipai.module.server.verify.service.IdentityVerificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -43,6 +46,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
 
     private final UserMapper userMapper;
     private final ActorProfileMapper actorProfileMapper;
+    private final IdentityVerificationOwnerMapper identityVerificationOwnerMapper;
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
     private final ReferralRecordService referralRecordService;
@@ -88,6 +92,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
                 throw new BizException("已完成实名认证，无需重复提交");
             }
         }
+
+        ensureIdCardOwner(userId, idCardHash);
 
         IdentityVerification duplicateRecord = getOne(new QueryWrapper<IdentityVerification>().lambda()
                 .eq(IdentityVerification::getIdCardHash, idCardHash)
@@ -143,6 +149,12 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         }
         if (req.getUserId() != null) {
             wrapper.eq("user_id", req.getUserId());
+        }
+        if (req.getSubmitTimeFrom() != null) {
+            wrapper.ge("create_time", req.getSubmitTimeFrom());
+        }
+        if (req.getSubmitTimeTo() != null) {
+            wrapper.le("create_time", req.getSubmitTimeTo());
         }
         wrapper.orderByDesc("create_time");
         long total = baseMapper.selectCount(wrapper);
@@ -296,6 +308,37 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
                 .orderByDesc("create_time")
                 .orderByDesc("verification_id")
                 .last("LIMIT 1"), false);
+    }
+
+    private void ensureIdCardOwner(Long userId, String idCardHash) {
+        IdentityVerificationOwner existingOwner = selectOwnerByHash(idCardHash);
+        if (existingOwner != null) {
+            if (!userId.equals(existingOwner.getUserId())) {
+                throw new BizException("该身份证号已被其他账号提交");
+            }
+            return;
+        }
+
+        IdentityVerificationOwner owner = new IdentityVerificationOwner();
+        owner.setUserId(userId);
+        owner.setIdCardHash(idCardHash);
+        try {
+            identityVerificationOwnerMapper.insert(owner);
+        } catch (DuplicateKeyException ex) {
+            IdentityVerificationOwner concurrentOwner = selectOwnerByHash(idCardHash);
+            if (concurrentOwner != null && !userId.equals(concurrentOwner.getUserId())) {
+                throw new BizException("该身份证号已被其他账号提交");
+            }
+            if (concurrentOwner == null) {
+                throw ex;
+            }
+        }
+    }
+
+    private IdentityVerificationOwner selectOwnerByHash(String idCardHash) {
+        return identityVerificationOwnerMapper.selectOne(new QueryWrapper<IdentityVerificationOwner>().lambda()
+                .eq(IdentityVerificationOwner::getIdCardHash, idCardHash)
+                .last("LIMIT 1"));
     }
 
     private IdentityVerificationStatusRespDTO toStatusResp(IdentityVerification record) {

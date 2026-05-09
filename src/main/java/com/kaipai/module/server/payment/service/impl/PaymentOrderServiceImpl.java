@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
-import com.kaipai.module.model.membership.entity.MembershipProduct;
+import com.kaipai.module.model.capability.entity.CapabilityProduct;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderDetailDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderListItemDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderQueryDTO;
@@ -14,7 +14,7 @@ import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.payment.entity.PaymentTransaction;
 import com.kaipai.module.model.refund.entity.RefundOrder;
 import com.kaipai.module.model.user.entity.User;
-import com.kaipai.module.server.membership.mapper.MembershipProductMapper;
+import com.kaipai.module.server.capability.mapper.CapabilityProductMapper;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.payment.mapper.PaymentTransactionMapper;
 import com.kaipai.module.server.payment.service.PaymentOrderService;
@@ -38,10 +38,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, PaymentOrder> implements PaymentOrderService {
 
-    private static final List<String> MEMBERSHIP_BIZ_TYPES = List.of("membership_purchase", "membership_renewal");
+    private static final List<String> CAPABILITY_BIZ_TYPES = List.of("capability_purchase", "capability_renewal");
 
     private final PaymentTransactionMapper paymentTransactionMapper;
-    private final MembershipProductMapper membershipProductMapper;
+    private final CapabilityProductMapper capabilityProductMapper;
     private final RefundOrderMapper refundOrderMapper;
     private final UserMapper userMapper;
 
@@ -54,7 +54,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         if (result.getRecords().isEmpty()) {
             return PageResult.empty();
         }
-        Map<Long, MembershipProduct> productMap = getProductMap(result.getRecords());
+        Map<Long, CapabilityProduct> productMap = getProductMap(result.getRecords());
         Map<Long, User> userMap = getUserMap(result.getRecords());
         List<AdminPaymentOrderListItemDTO> list = result.getRecords().stream()
                 .map(order -> toListItem(order, productMap.get(order.getProductId()), userMap.get(order.getUserId())))
@@ -68,7 +68,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         if (order == null) {
             throw new BizException("支付订单不存在");
         }
-        MembershipProduct product = order.getProductId() == null ? null : membershipProductMapper.selectById(order.getProductId());
+        CapabilityProduct product = order.getProductId() == null ? null : capabilityProductMapper.selectById(order.getProductId());
         User user = order.getUserId() == null ? null : userMapper.selectById(order.getUserId());
         List<PaymentTransaction> transactions = paymentTransactionMapper.selectList(new LambdaQueryWrapper<PaymentTransaction>()
                 .eq(PaymentTransaction::getPaymentOrderId, order.getPaymentOrderId())
@@ -115,7 +115,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         if (StringUtils.hasText(query.getPayChannel())) {
             wrapper.eq(PaymentOrder::getPayChannel, query.getPayChannel().trim());
         }
-        wrapper.in(PaymentOrder::getBizType, MEMBERSHIP_BIZ_TYPES);
+        wrapper.in(PaymentOrder::getBizType, CAPABILITY_BIZ_TYPES);
         if (StringUtils.hasText(query.getBizType())) {
             wrapper.eq(PaymentOrder::getBizType, query.getBizType().trim());
         }
@@ -141,7 +141,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         return wrapper;
     }
 
-    private Map<Long, MembershipProduct> getProductMap(List<PaymentOrder> orders) {
+    private Map<Long, CapabilityProduct> getProductMap(List<PaymentOrder> orders) {
         Set<Long> productIds = orders.stream()
                 .map(PaymentOrder::getProductId)
                 .filter(id -> id != null)
@@ -149,8 +149,8 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         if (productIds.isEmpty()) {
             return Collections.emptyMap();
         }
-        return membershipProductMapper.selectBatchIds(productIds).stream()
-                .collect(Collectors.toMap(MembershipProduct::getProductId, Function.identity()));
+        return capabilityProductMapper.selectBatchIds(productIds).stream()
+                .collect(Collectors.toMap(CapabilityProduct::getProductId, Function.identity()));
     }
 
     private Map<Long, User> getUserMap(List<PaymentOrder> orders) {
@@ -165,7 +165,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
                 .collect(Collectors.toMap(User::getUserId, Function.identity(), (left, right) -> left));
     }
 
-    private AdminPaymentOrderListItemDTO toListItem(PaymentOrder order, MembershipProduct product, User user) {
+    private AdminPaymentOrderListItemDTO toListItem(PaymentOrder order, CapabilityProduct product, User user) {
         AdminPaymentOrderListItemDTO dto = new AdminPaymentOrderListItemDTO();
         dto.setPaymentOrderId(order.getPaymentOrderId());
         dto.setOrderNo(order.getOrderNo());
@@ -208,13 +208,12 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         return info;
     }
 
-    private AdminPaymentOrderDetailDTO.ProductInfo toProductInfo(PaymentOrder order, MembershipProduct product) {
+    private AdminPaymentOrderDetailDTO.ProductInfo toProductInfo(PaymentOrder order, CapabilityProduct product) {
         AdminPaymentOrderDetailDTO.ProductInfo info = new AdminPaymentOrderDetailDTO.ProductInfo();
         info.setProductId(order.getProductId());
         if (product != null) {
             info.setProductCode(product.getProductCode());
             info.setProductName(product.getProductName());
-            info.setMembershipTier(product.getMembershipTier());
             info.setDurationDays(product.getDurationDays());
         }
         return info;
@@ -261,7 +260,7 @@ public class PaymentOrderServiceImpl extends ServiceImpl<PaymentOrderMapper, Pay
         return dto;
     }
 
-    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime fallback) {
-        return primary != null ? primary : fallback;
+    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime secondary) {
+        return primary != null ? primary : secondary;
     }
 }

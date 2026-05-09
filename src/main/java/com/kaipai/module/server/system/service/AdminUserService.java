@@ -28,3 +28,5 @@ public interface AdminUserService extends IService<AdminUser> {
 
     AdminUserDetailRespDTO bindUserRoles(Long adminUserId, AdminUserBindRolesDTO dto);
 }
+
+

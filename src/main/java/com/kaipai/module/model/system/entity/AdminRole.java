@@ -22,3 +22,5 @@ public class AdminRole extends BaseEntity {
     private String pagePermissionsJson;
     private String actionPermissionsJson;
 }
+
+

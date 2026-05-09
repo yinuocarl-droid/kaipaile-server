@@ -11,6 +11,12 @@ public class ActorInviteInfoRespDTO {
 
     private String qrCodeUrl;
 
+    private String qrCodeType;
+
+    private String qrCodeScene;
+
+    private String qrCodePage;
+
     private Integer validInviteCount;
 
     private Integer totalInviteCount;

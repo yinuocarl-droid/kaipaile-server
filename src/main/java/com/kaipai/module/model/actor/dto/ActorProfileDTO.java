@@ -49,6 +49,8 @@ public class ActorProfileDTO {
 
     private String contactPhone;
 
+    private Boolean hasContactPhone;
+
     private String realName;
 
     private Boolean isCertified;

@@ -12,13 +12,13 @@ public class AdminRecruitRoleListItemDTO {
 
     private Long crewUserId;
 
-    private Long companyProfileId;
+    private Long crewProfileId;
 
     private Long projectId;
 
     private String projectTitle;
 
-    private String companyName;
+    private String crewName;
 
     private String roleName;
 

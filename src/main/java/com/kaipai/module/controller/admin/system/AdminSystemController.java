@@ -47,35 +47,35 @@ public class AdminSystemController {
     private final AdminOperationLogService adminOperationLogService;
 
     @Operation(summary = "后台账号列表")
-    @GetMapping({"/users", "/admin-users"})
+    @GetMapping("/users")
     @PreAuthorize("hasAuthority('page.system.admin-users')")
     public R<PageResult<AdminUserListItemDTO>> users(@Valid AdminUserQueryDTO query) {
         return R.ok(adminUserService.adminUserList(query));
     }
 
     @Operation(summary = "后台账号详情")
-    @GetMapping({"/users/{id}", "/admin-users/{id}"})
+    @GetMapping("/users/{id}")
     @PreAuthorize("hasAuthority('page.system.admin-users')")
     public R<AdminUserDetailRespDTO> userDetail(@PathVariable("id") Long id) {
         return R.ok(adminUserService.adminUserDetail(id));
     }
 
     @Operation(summary = "创建后台账号")
-    @PostMapping({"/users", "/admin-users"})
+    @PostMapping("/users")
     @PreAuthorize("hasAuthority('action.system.admin-user.create')")
     public R<AdminUserDetailRespDTO> createUser(@Valid @RequestBody AdminUserCreateDTO dto) {
         return R.ok(adminUserService.createAdminUser(dto));
     }
 
     @Operation(summary = "更新后台账号")
-    @PutMapping({"/users/{id}", "/admin-users/{id}"})
+    @PutMapping("/users/{id}")
     @PreAuthorize("hasAuthority('action.system.admin-user.edit')")
     public R<AdminUserDetailRespDTO> updateUser(@PathVariable("id") Long id, @Valid @RequestBody AdminUserUpdateDTO dto) {
         return R.ok(adminUserService.updateAdminUser(id, dto));
     }
 
     @Operation(summary = "启用后台账号")
-    @PostMapping({"/users/{id}/enable", "/admin-users/{id}/enable"})
+    @PostMapping("/users/{id}/enable")
     @PreAuthorize("hasAuthority('action.system.admin-user.enable')")
     public R<Void> enableUser(@PathVariable("id") Long id, @RequestBody(required = false) AdminUserStatusUpdateDTO dto) {
         AdminUserStatusUpdateDTO request = dto == null ? new AdminUserStatusUpdateDTO() : dto;
@@ -85,7 +85,7 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "禁用后台账号")
-    @PostMapping({"/users/{id}/disable", "/admin-users/{id}/disable"})
+    @PostMapping("/users/{id}/disable")
     @PreAuthorize("hasAuthority('action.system.admin-user.disable')")
     public R<Void> disableUser(@PathVariable("id") Long id, @RequestBody(required = false) AdminUserStatusUpdateDTO dto) {
         AdminUserStatusUpdateDTO request = dto == null ? new AdminUserStatusUpdateDTO() : dto;
@@ -95,7 +95,7 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "重置后台账号密码")
-    @PostMapping({"/users/{id}/reset-password", "/admin-users/{id}/reset-password"})
+    @PostMapping("/users/{id}/reset-password")
     @PreAuthorize("hasAuthority('action.system.admin-user.reset-password')")
     public R<AdminUserDetailRespDTO> resetPassword(@PathVariable("id") Long id,
                                                    @Valid @RequestBody AdminUserPasswordResetDTO dto) {
@@ -103,7 +103,7 @@ public class AdminSystemController {
     }
 
     @Operation(summary = "绑定后台账号角色")
-    @PostMapping({"/users/{id}/bind-roles", "/admin-users/{id}/bind-roles"})
+    @PostMapping("/users/{id}/bind-roles")
     @PreAuthorize("hasAuthority('action.system.admin-user.bind-roles')")
     public R<AdminUserDetailRespDTO> bindRoles(@PathVariable("id") Long id,
                                                @Valid @RequestBody AdminUserBindRolesDTO dto) {

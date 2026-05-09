@@ -20,8 +20,6 @@ public class AdminAiResumeHistoryItemDTO {
 
     private Integer level;
 
-    private String membershipTier;
-
     private String draftId;
 
     private String requestId;

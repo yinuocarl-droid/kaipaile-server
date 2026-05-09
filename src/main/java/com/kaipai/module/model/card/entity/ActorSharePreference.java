@@ -14,9 +14,9 @@ public class ActorSharePreference extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long preferenceId;
-    private Long userId;
-    private String sceneKey;
+    private Long shareCardId;
     private String preferredArtifact;
-    private String preferredTone;
-    private Boolean enableFortuneTheme;
 }
+
+
+

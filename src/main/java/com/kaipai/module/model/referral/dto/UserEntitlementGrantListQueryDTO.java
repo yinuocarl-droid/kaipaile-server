@@ -19,6 +19,7 @@ public class UserEntitlementGrantListQueryDTO {
     private String grantCode;
     private Integer status;
     private String sourceType;
+    private Long sourceRefId;
     private LocalDateTime effectiveFrom;
     private LocalDateTime effectiveTo;
     private LocalDateTime expireFrom;

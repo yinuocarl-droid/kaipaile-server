@@ -9,9 +9,17 @@ public class AdminRoleRecruitGovernanceMatrixRespDTO {
     private Integer totalRoleCount;
     private Integer enabledRoleCount;
     private Integer recruitReadyRoleCount;
-    private Integer fallbackRoleCount;
+    private Integer pageReadyRoleCount;
+    private Integer actionReadyRoleCount;
+    private Integer recruitPermissionGapRoleCount;
+    private Integer pagePermissionGapRoleCount;
+    private Integer actionPermissionGapRoleCount;
     private Integer pendingRoleCount;
-    private Long fallbackBoundUserCount;
-    private Boolean canRetireFallback;
+    private Long recruitPermissionGapBoundUserCount;
+    private Boolean pagePermissionGapCleared;
+    private Boolean actionPermissionGapCleared;
+    private Boolean recruitPermissionGapCleared;
     private List<AdminRoleRecruitGovernanceMatrixItemDTO> list;
 }
+
+

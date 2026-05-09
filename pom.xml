@@ -157,6 +157,13 @@
             <version>5.8.25</version>
         </dependency>
 
+        <!-- ZXing 二维码编码 -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+
         <!-- 测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

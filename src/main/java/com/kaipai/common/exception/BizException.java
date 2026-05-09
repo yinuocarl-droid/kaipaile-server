@@ -17,7 +17,7 @@ public class BizException extends RuntimeException {
 
     public BizException(String message) {
         super(message);
-        this.code = ResultCode.FAILED.getCode();
+        this.code = ResultCode.PARAM_ERROR.getCode();
         this.message = message;
     }
 

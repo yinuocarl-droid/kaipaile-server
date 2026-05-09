@@ -5,11 +5,7 @@ import com.kaipai.common.result.R;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderDetailDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderListItemDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentOrderQueryDTO;
-import com.kaipai.module.model.payment.dto.AdminPaymentTransactionDetailDTO;
-import com.kaipai.module.model.payment.dto.AdminPaymentTransactionListItemDTO;
-import com.kaipai.module.model.payment.dto.AdminPaymentTransactionQueryDTO;
 import com.kaipai.module.server.payment.service.PaymentOrderService;
-import com.kaipai.module.server.payment.service.PaymentTransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,7 +23,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminPaymentController {
 
     private final PaymentOrderService paymentOrderService;
-    private final PaymentTransactionService paymentTransactionService;
 
     @Operation(summary = "支付订单列表")
     @GetMapping("/orders")
@@ -43,17 +38,4 @@ public class AdminPaymentController {
         return R.ok(paymentOrderService.adminOrderDetail(id));
     }
 
-    @Operation(summary = "支付流水列表")
-    @GetMapping("/transactions")
-    @PreAuthorize("hasAuthority('page.payment.transactions')")
-    public R<PageResult<AdminPaymentTransactionListItemDTO>> transactions(@Valid AdminPaymentTransactionQueryDTO query) {
-        return R.ok(paymentTransactionService.adminTransactionList(query));
-    }
-
-    @Operation(summary = "支付流水详情")
-    @GetMapping("/transactions/{id}")
-    @PreAuthorize("hasAuthority('page.payment.transactions')")
-    public R<AdminPaymentTransactionDetailDTO> transactionDetail(@PathVariable Long id) {
-        return R.ok(paymentTransactionService.adminTransactionDetail(id));
-    }
 }

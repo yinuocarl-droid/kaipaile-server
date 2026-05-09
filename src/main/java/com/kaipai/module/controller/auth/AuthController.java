@@ -5,6 +5,7 @@ import com.kaipai.module.model.auth.dto.LoginReqDTO;
 import com.kaipai.module.model.auth.dto.LoginRespDTO;
 import com.kaipai.module.model.auth.dto.RegisterReqDTO;
 import com.kaipai.module.model.auth.dto.SendCodeReqDTO;
+import com.kaipai.module.model.auth.dto.WechatLoginReqDTO;
 import com.kaipai.module.server.auth.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -43,5 +44,12 @@ public class AuthController {
     @PostMapping("/login")
     public R<LoginRespDTO> login(@Valid @RequestBody LoginReqDTO dto) {
         return R.ok(authService.login(dto));
+    }
+
+    @Operation(summary = "微信手机号一键登录",
+            description = "使用微信 getPhoneNumber 返回的 code 换取手机号后登录；若手机号未注册则自动创建账号")
+    @PostMapping("/wechat-login")
+    public R<LoginRespDTO> wechatLogin(@Valid @RequestBody WechatLoginReqDTO dto) {
+        return R.ok(authService.loginByWechat(dto));
     }
 }

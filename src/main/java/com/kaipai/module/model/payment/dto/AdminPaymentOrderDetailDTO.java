@@ -41,7 +41,6 @@ public class AdminPaymentOrderDetailDTO {
         private Long productId;
         private String productCode;
         private String productName;
-        private Integer membershipTier;
         private Integer durationDays;
     }
 

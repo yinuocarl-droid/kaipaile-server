@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * Refund order records for membership purchases.
+ * Refund order records for capability purchases.
  */
 @Data
 @EqualsAndHashCode(callSuper = true)

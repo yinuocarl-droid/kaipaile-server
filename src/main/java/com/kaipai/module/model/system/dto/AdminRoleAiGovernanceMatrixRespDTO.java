@@ -9,9 +9,11 @@ public class AdminRoleAiGovernanceMatrixRespDTO {
     private Integer totalRoleCount;
     private Integer enabledRoleCount;
     private Integer aiReadyRoleCount;
-    private Integer fallbackRoleCount;
+    private Integer operationLogsPermissionGapRoleCount;
     private Integer pendingRoleCount;
-    private Long fallbackBoundUserCount;
-    private Boolean canRetireFallback;
+    private Long operationLogsPermissionGapBoundUserCount;
+    private Boolean operationLogsPermissionGapCleared;
     private List<AdminRoleAiGovernanceMatrixItemDTO> list;
 }
+
+

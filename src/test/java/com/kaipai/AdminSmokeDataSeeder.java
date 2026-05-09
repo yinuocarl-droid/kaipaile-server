@@ -28,7 +28,7 @@ public class AdminSmokeDataSeeder {
     private static final String INVITE_CODE = "SMK100";
     private static final String POLICY_NAME = "SMOKE_POLICY";
     private static final String GRANT_CODE = "SMOKE_GRANT_10000";
-    private static final String PRODUCT_CODE = "SMOKE_MEMBER_30D";
+    private static final String PRODUCT_CODE = "SMOKE_PLUS_30D";
     private static final String ORDER_NO = "SMOKE_PAY_10000";
     private static final String CHANNEL_TRADE_NO = "SMOKE_TX_10000";
     private static final String REFUND_NO = "SMOKE_REFUND_10000";
@@ -48,14 +48,14 @@ public class AdminSmokeDataSeeder {
                 long policyId = upsertReferralPolicy(connection);
                 long inviteCodeId = upsertInviteCode(connection);
                 long referralId = upsertReferralRecord(connection, inviteCodeId);
-                long productId = upsertMembershipProduct(connection);
+                long productId = upsertCapabilityProduct(connection);
                 long paymentOrderId = upsertPaymentOrder(connection, productId);
                 long transactionId = upsertPaymentTransaction(connection, paymentOrderId);
                 long refundOrderId = upsertRefundOrder(connection, paymentOrderId);
                 upsertRefundOperateLog(connection, refundOrderId);
                 long grantId = upsertEntitlementGrant(connection, policyId);
-                upsertMembershipAccount(connection, paymentOrderId);
-                upsertMembershipChangeLog(connection, paymentOrderId);
+                upsertCapabilityAccount(connection, paymentOrderId);
+                upsertCapabilityChangeLog(connection, paymentOrderId);
                 long verificationId = upsertIdentityVerification(connection);
                 long templateId = upsertCardSceneTemplate(connection);
                 upsertTemplatePublishLog(connection, templateId);
@@ -68,7 +68,7 @@ public class AdminSmokeDataSeeder {
                 ids.put("policyId", policyId);
                 ids.put("grantId", grantId);
                 ids.put("productId", productId);
-                ids.put("membershipUserId", USER_ID_10000);
+                ids.put("capabilityUserId", USER_ID_10000);
                 ids.put("paymentOrderId", paymentOrderId);
                 ids.put("transactionId", transactionId);
                 ids.put("refundOrderId", refundOrderId);
@@ -272,25 +272,25 @@ public class AdminSmokeDataSeeder {
                 USER_ID_10000, GRANT_CODE);
     }
 
-    private static long upsertMembershipProduct(Connection connection) throws SQLException {
+    private static long upsertCapabilityProduct(Connection connection) throws SQLException {
         Long productId = queryForLong(connection,
-                "SELECT product_id FROM membership_product WHERE product_code = ? LIMIT 1",
+                "SELECT product_id FROM capability_product WHERE product_code = ? LIMIT 1",
                 PRODUCT_CODE);
-        String benefitConfigJson = "{\"benefitItems\":[{\"benefitCode\":\"priority_support\",\"benefitName\":\"Priority Support\",\"capabilitySummary\":\"admin smoke benefit\",\"status\":1,\"affectedPages\":[\"miniProgramCard\",\"inviteLanding\"],\"artifactTypes\":[\"poster\",\"shareCard\"]}]}";
+        String benefitConfigJson = "{\"benefitItems\":[{\"benefitCode\":\"priority_support\",\"benefitName\":\"Priority Support\",\"capabilitySummary\":\"admin smoke benefit\",\"status\":1,\"affectedPages\":[\"miniProgramCard\",\"inviteLanding\"],\"artifactTypes\":[\"poster\",\"miniProgramCard\"]}]}";
         if (productId == null) {
             executeInsert(connection, """
-                    INSERT INTO membership_product
-                        (product_code, product_name, membership_tier, duration_days, list_price, sale_price, status,
+                    INSERT INTO capability_product
+                        (product_code, product_name, capability_tier, duration_days, list_price, sale_price, status,
                          benefit_config_json, sort_no, create_user_name, update_user_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    PRODUCT_CODE, "Smoke Member 30D", 1, 30, BigDecimal.valueOf(39.90), BigDecimal.valueOf(29.90),
+                    PRODUCT_CODE, "Smoke Plus 30D", 1, 30, BigDecimal.valueOf(39.90), BigDecimal.valueOf(29.90),
                     1, benefitConfigJson, 10, "smoke-seeder", "smoke-seeder");
         } else {
             executeUpdate(connection, """
-                    UPDATE membership_product
+                    UPDATE capability_product
                        SET product_name = ?,
-                           membership_tier = ?,
+                           capability_tier = ?,
                            duration_days = ?,
                            list_price = ?,
                            sale_price = ?,
@@ -301,21 +301,21 @@ public class AdminSmokeDataSeeder {
                            update_user_name = ?
                      WHERE product_id = ?
                     """,
-                    "Smoke Member 30D", 1, 30, BigDecimal.valueOf(39.90), BigDecimal.valueOf(29.90),
+                    "Smoke Plus 30D", 1, 30, BigDecimal.valueOf(39.90), BigDecimal.valueOf(29.90),
                     1, benefitConfigJson, 10, "smoke-seeder", productId);
         }
         return requireId(connection,
-                "SELECT product_id FROM membership_product WHERE product_code = ? LIMIT 1",
+                "SELECT product_id FROM capability_product WHERE product_code = ? LIMIT 1",
                 PRODUCT_CODE);
     }
 
-    private static long upsertMembershipAccount(Connection connection, long paymentOrderId) throws SQLException {
-        Long membershipId = queryForLong(connection,
-                "SELECT membership_id FROM membership_account WHERE user_id = ? LIMIT 1",
+    private static long upsertCapabilityAccount(Connection connection, long paymentOrderId) throws SQLException {
+        Long capabilityId = queryForLong(connection,
+                "SELECT capability_id FROM capability_account WHERE user_id = ? LIMIT 1",
                 USER_ID_10000);
-        if (membershipId == null) {
+        if (capabilityId == null) {
             executeInsert(connection, """
-                    INSERT INTO membership_account
+                    INSERT INTO capability_account
                         (user_id, tier, status, effective_time, expire_time, source_type, source_ref_id,
                          create_user_name, update_user_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -325,7 +325,7 @@ public class AdminSmokeDataSeeder {
                     "smoke-seeder", "smoke-seeder");
         } else {
             executeUpdate(connection, """
-                    UPDATE membership_account
+                    UPDATE capability_account
                        SET tier = ?,
                            status = ?,
                            effective_time = ?,
@@ -334,19 +334,19 @@ public class AdminSmokeDataSeeder {
                            source_ref_id = ?,
                            deleted = 0,
                            update_user_name = ?
-                     WHERE membership_id = ?
+                     WHERE capability_id = ?
                     """,
                     1, 1, timestamp(LocalDateTime.of(2026, 3, 31, 11, 0)),
                     timestamp(LocalDateTime.of(2026, 4, 30, 23, 59)), "payment", paymentOrderId,
-                    "smoke-seeder", membershipId);
+                    "smoke-seeder", capabilityId);
         }
-        return requireId(connection, "SELECT membership_id FROM membership_account WHERE user_id = ? LIMIT 1", USER_ID_10000);
+        return requireId(connection, "SELECT capability_id FROM capability_account WHERE user_id = ? LIMIT 1", USER_ID_10000);
     }
 
-    private static void upsertMembershipChangeLog(Connection connection, long paymentOrderId) throws SQLException {
+    private static void upsertCapabilityChangeLog(Connection connection, long paymentOrderId) throws SQLException {
         Long changeLogId = queryForLong(connection, """
                 SELECT change_log_id
-                  FROM membership_change_log
+                  FROM capability_change_log
                  WHERE user_id = ?
                    AND source_type = ?
                    AND source_ref_id = ?
@@ -355,7 +355,7 @@ public class AdminSmokeDataSeeder {
                 """, USER_ID_10000, "payment", paymentOrderId);
         if (changeLogId == null) {
             executeInsert(connection, """
-                    INSERT INTO membership_change_log
+                    INSERT INTO capability_change_log
                         (user_id, before_tier, after_tier, change_reason, source_type, source_ref_id,
                          effective_time, expire_time, remark, create_user_name, update_user_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -363,10 +363,10 @@ public class AdminSmokeDataSeeder {
                     USER_ID_10000, 0, 1, "购买开通", "payment", paymentOrderId,
                     timestamp(LocalDateTime.of(2026, 3, 31, 11, 0)),
                     timestamp(LocalDateTime.of(2026, 4, 30, 23, 59)),
-                    "smoke membership log", "smoke-seeder", "smoke-seeder");
+                    "smoke capability log", "smoke-seeder", "smoke-seeder");
         } else {
             executeUpdate(connection, """
-                    UPDATE membership_change_log
+                    UPDATE capability_change_log
                        SET before_tier = ?,
                            after_tier = ?,
                            change_reason = ?,
@@ -379,7 +379,7 @@ public class AdminSmokeDataSeeder {
                     """,
                     0, 1, "购买开通", timestamp(LocalDateTime.of(2026, 3, 31, 11, 0)),
                     timestamp(LocalDateTime.of(2026, 4, 30, 23, 59)),
-                    "smoke membership log", "smoke-seeder", changeLogId);
+                    "smoke capability log", "smoke-seeder", changeLogId);
         }
     }
 
@@ -394,7 +394,7 @@ public class AdminSmokeDataSeeder {
                          pay_channel, paid_at, create_user_name, update_user_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ORDER_NO, USER_ID_10000, "membership_purchase", productId, productId,
+                    ORDER_NO, USER_ID_10000, "capability_purchase", productId, productId,
                     BigDecimal.valueOf(29.90), "CNY", 1, "wxpay",
                     timestamp(LocalDateTime.of(2026, 3, 31, 11, 0)), "smoke-seeder", "smoke-seeder");
         } else {
@@ -414,7 +414,7 @@ public class AdminSmokeDataSeeder {
                            update_user_name = ?
                      WHERE payment_order_id = ?
                     """,
-                    USER_ID_10000, "membership_purchase", productId, productId,
+                    USER_ID_10000, "capability_purchase", productId, productId,
                     BigDecimal.valueOf(29.90), "CNY", 1, "wxpay",
                     timestamp(LocalDateTime.of(2026, 3, 31, 11, 0)), "smoke-seeder", paymentOrderId);
         }
@@ -535,27 +535,31 @@ public class AdminSmokeDataSeeder {
         Long templateId = queryForLong(connection,
                 "SELECT template_id FROM card_scene_template WHERE template_code = ? LIMIT 1",
                 TEMPLATE_CODE);
-        String themeJson = "{\"background\":\"#112233\",\"primary\":\"#D8B16A\",\"accent\":\"#F4E8D2\"}";
-        String artifactJson = "{\"poster\":{\"enabled\":true,\"ratio\":\"3:4\"},\"shareCard\":{\"enabled\":true,\"ratio\":\"1:1\"}}";
+        String themeJson = """
+                {"themeColors":{"primary":"#D8B16A","accent":"#F4E8D2","background":"#112233","text":"#F8F1E8","heroText":"#FFFFFF"}}
+                """;
+        String artifactJson = """
+                {"requiredInviteCount":1,"contentFocus":["镜头表现","角色适配"],"poster":{"enabled":true,"ratio":"3:4"},"miniProgramCard":{"enabled":true,"ratio":"1:1"},"pageConfig":{"layoutPreset":"magazine","surface":"paper","density":"balanced","heroStyle":"editorial","sections":{"profile":true,"stats":true,"timeline":true,"contactCta":true},"actions":{"primary":"contact","secondary":"share"}}}
+                """;
         if (templateId == null) {
             executeInsert(connection, """
                     INSERT INTO card_scene_template
-                        (template_code, scene_key, template_name, description, layout_variant, tier, required_level,
-                         membership_required, base_theme_json, artifact_preset_json, status, sort_no, create_user_name, update_user_name)
+                        (template_code, TEMPLATE_SCENE_CODE, template_name, description, layout_variant, tier, required_level,
+                         capability_required, base_theme_json, artifact_preset_json, status, sort_no, create_user_name, update_user_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    TEMPLATE_CODE, "general", "Smoke Template", "template for admin detail smoke verification",
+                    TEMPLATE_CODE, "classic", "Smoke Template", "template for admin detail smoke verification",
                     "magazine", "paid", 1, 1, themeJson, artifactJson, 1, 1, "smoke-seeder", "smoke-seeder");
         } else {
             executeUpdate(connection, """
                     UPDATE card_scene_template
-                       SET scene_key = ?,
+                       SET TEMPLATE_SCENE_CODE = ?,
                            template_name = ?,
                            description = ?,
                            layout_variant = ?,
                            tier = ?,
                            required_level = ?,
-                           membership_required = ?,
+                           capability_required = ?,
                            base_theme_json = ?,
                            artifact_preset_json = ?,
                            status = ?,
@@ -564,7 +568,7 @@ public class AdminSmokeDataSeeder {
                            update_user_name = ?
                      WHERE template_id = ?
                     """,
-                    "general", "Smoke Template", "template for admin detail smoke verification",
+                    "classic", "Smoke Template", "template for admin detail smoke verification",
                     "magazine", "paid", 1, 1, themeJson, artifactJson, 1, 1, "smoke-seeder", templateId);
         }
         return requireId(connection,
@@ -582,7 +586,7 @@ public class AdminSmokeDataSeeder {
                  ORDER BY publish_log_id DESC
                  LIMIT 1
                 """, templateId, PUBLISH_VERSION, "publish");
-        String snapshotJson = "{\"templateCode\":\"SMOKE_TEMPLATE\",\"sceneKey\":\"general\",\"status\":1}";
+        String snapshotJson = "{\"templateCode\":\"SMOKE_TEMPLATE\",\"templateSceneCode\":\"classic\",\"status\":1}";
         String diffSummaryJson = "{\"changed\":[\"baseThemeJson\",\"artifactPresetJson\"],\"note\":\"smoke publish\"}";
         if (publishLogId == null) {
             executeInsert(connection, """
@@ -677,3 +681,4 @@ public class AdminSmokeDataSeeder {
         return Timestamp.valueOf(value);
     }
 }
+

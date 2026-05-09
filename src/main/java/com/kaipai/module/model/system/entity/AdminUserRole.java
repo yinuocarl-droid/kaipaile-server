@@ -17,3 +17,5 @@ public class AdminUserRole extends BaseEntity {
     private Long adminUserId;
     private Long adminRoleId;
 }
+
+

@@ -25,7 +25,10 @@ public class ActorController {
     @Operation(summary = "演员公开详情")
     @GetMapping("/{userId}")
     public R<ActorProfileDTO> detail(Authentication authentication, @PathVariable Long userId) {
-        return R.ok(actorProfileService.detail(userId, authentication != null && authentication.getPrincipal() != null));
+        boolean includeContact = authentication != null
+                && authentication.getPrincipal() instanceof Long currentUserId
+                && currentUserId.equals(userId);
+        return R.ok(actorProfileService.detail(userId, includeContact));
     }
 
     @Operation(summary = "演员搜索")

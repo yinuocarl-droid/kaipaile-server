@@ -3,7 +3,7 @@ package com.kaipai.module.controller.level;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
-import com.kaipai.module.server.membership.service.MembershipAccountService;
+import com.kaipai.module.server.capability.service.CapabilityAccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -18,12 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class LevelController {
 
-    private final MembershipAccountService membershipAccountService;
+    private final CapabilityAccountService capabilityAccountService;
 
     @Operation(summary = "获取当前用户等级信息")
     @GetMapping("/info")
     public R<ActorLevelInfoRespDTO> info(Authentication authentication) {
-        return R.ok(membershipAccountService.actorLevelInfo(currentUserId(authentication)));
+        return R.ok(capabilityAccountService.actorLevelInfo(currentUserId(authentication)));
     }
 
     private Long currentUserId(Authentication authentication) {

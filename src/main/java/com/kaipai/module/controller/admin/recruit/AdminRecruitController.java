@@ -33,28 +33,28 @@ public class AdminRecruitController {
 
     @Operation(summary = "剧组项目列表")
     @GetMapping("/projects")
-    @PreAuthorize("hasAnyAuthority('page.recruit.projects', 'page.system.admin-users')")
+    @PreAuthorize("hasAuthority('page.recruit.projects')")
     public R<PageResult<AdminRecruitProjectListItemDTO>> projects(@Valid AdminRecruitProjectQueryDTO query) {
         return R.ok(adminRecruitGovernanceService.projectList(query));
     }
 
     @Operation(summary = "招募角色列表")
     @GetMapping("/roles")
-    @PreAuthorize("hasAnyAuthority('page.recruit.roles', 'page.system.admin-users')")
+    @PreAuthorize("hasAuthority('page.recruit.roles')")
     public R<PageResult<AdminRecruitRoleListItemDTO>> roles(@Valid AdminRecruitRoleQueryDTO query) {
         return R.ok(adminRecruitGovernanceService.roleList(query));
     }
 
     @Operation(summary = "投递记录列表")
     @GetMapping("/applies")
-    @PreAuthorize("hasAnyAuthority('page.recruit.applies', 'page.system.admin-users')")
+    @PreAuthorize("hasAuthority('page.recruit.applies')")
     public R<PageResult<AdminRecruitApplyListItemDTO>> applies(@Valid AdminRecruitApplyQueryDTO query) {
         return R.ok(adminRecruitGovernanceService.applyList(query));
     }
 
     @Operation(summary = "校准剧组项目状态")
     @PostMapping("/projects/{id}/status")
-    @PreAuthorize("hasAnyAuthority('action.recruit.project.status', 'page.system.admin-users')")
+    @PreAuthorize("hasAuthority('action.recruit.project.status')")
     public R<Void> updateProjectStatus(@PathVariable Long id, @Valid @RequestBody AdminRecruitProjectStatusChangeDTO dto) {
         adminRecruitGovernanceService.updateProjectStatus(id, dto);
         return R.ok();
@@ -62,7 +62,7 @@ public class AdminRecruitController {
 
     @Operation(summary = "校准招募角色状态")
     @PostMapping("/roles/{id}/status")
-    @PreAuthorize("hasAnyAuthority('action.recruit.role.status', 'page.system.admin-users')")
+    @PreAuthorize("hasAuthority('action.recruit.role.status')")
     public R<Void> updateRoleStatus(@PathVariable Long id, @Valid @RequestBody AdminRecruitRoleStatusChangeDTO dto) {
         adminRecruitGovernanceService.updateRoleStatus(id, dto);
         return R.ok();

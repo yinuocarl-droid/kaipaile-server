@@ -9,12 +9,16 @@ public class TemplateItemDTO {
 
     private Long templateId;
     private String templateCode;
-    private String sceneKey;
+    private String templateSceneCode;
     private String templateName;
     private String tier;
     private Integer requiredLevel;
-    private Boolean membershipRequired;
+    private Integer requiredInviteCount;
+    private Boolean unlockRequired;
     private Integer status;
     private Integer sortNo;
     private LocalDateTime updateTime;
 }
+
+
+

@@ -11,15 +11,20 @@ public class AdminRoleRecruitGovernanceMatrixItemDTO {
     private String roleName;
     private Integer status;
     private Long boundUserCount;
-    private Boolean hasRecruitMenu;
     private Boolean hasRecruitProjectsPage;
     private Boolean hasRecruitRolesPage;
     private Boolean hasRecruitAppliesPage;
     private Boolean hasRecruitProjectStatusAction;
     private Boolean hasRecruitRoleStatusAction;
     private Boolean hasAdminUsersPage;
+    private Boolean pageReady;
+    private Boolean actionReady;
+    private Boolean pagePermissionGap;
+    private Boolean actionPermissionGap;
     private Boolean recruitReady;
-    private Boolean reliesOnFallback;
-    private String rolloutStage;
+    private Boolean recruitPermissionGap;
+    private String permissionStage;
     private List<String> missingPermissions;
 }
+
+

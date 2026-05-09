@@ -14,10 +14,7 @@ public class ActorCardConfig extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long configId;
-    private Long userId;
-    private Long actorProfileId;
-    private String sceneKey;
-    private Long templateId;
+    private Long shareCardId;
     private String layoutVariant;
     private String primaryColor;
     private String accentColor;
@@ -26,3 +23,6 @@ public class ActorCardConfig extends BaseEntity {
     private String highlightedPhotoUrls;
     private String tagOrderJson;
 }
+
+
+

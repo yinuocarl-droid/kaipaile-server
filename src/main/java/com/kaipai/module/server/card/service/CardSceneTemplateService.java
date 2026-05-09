@@ -26,6 +26,8 @@ public interface CardSceneTemplateService extends IService<CardSceneTemplate> {
 
     List<ActorSceneTemplateRespDTO> actorSceneTemplates();
 
+    String resolveSceneDisplayName(String templateSceneCode);
+
     PageResult<TemplateItemDTO> adminTemplateList(TemplateListQueryDTO dto);
 
     TemplateDetailDTO adminTemplateDetail(Long templateId);
@@ -52,3 +54,6 @@ public interface CardSceneTemplateService extends IService<CardSceneTemplate> {
 
     void updateShareArtifact(Long templateId, ShareArtifactUpdateDTO dto);
 }
+
+
+

@@ -20,7 +20,7 @@ public class RegisterReqDTO {
     private String code;
 
     @NotNull(message = "用户类型不能为空")
-    @Schema(description = "用户类型: 1=演员, 2=剧组/公司", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "用户类型: 1=演员, 2=剧组/团队", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer userType;
 
     @Schema(description = "昵称（可选，不填则自动生成）", example = "小明")

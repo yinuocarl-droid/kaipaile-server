@@ -179,8 +179,8 @@ public class RuleBasedResumePatchAdapter {
         }
     }
 
-    private String defaultText(String value, String fallback) {
-        return StringUtils.hasText(value) ? value.trim() : fallback;
+    private String defaultText(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value.trim() : defaultValue;
     }
 
     public record AdaptedResult(String reply, List<AiResumePolishRespDTO.PatchDTO> patches, List<String> warnings) {

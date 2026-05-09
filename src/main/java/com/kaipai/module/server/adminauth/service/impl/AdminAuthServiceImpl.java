@@ -39,6 +39,9 @@ public class AdminAuthServiceImpl implements AdminAuthService {
 
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {
     };
+    private static final String REMOVED_RECRUIT_MENU_PERMISSION = "menu." + "recruit";
+    private static final String REMOVED_CAPABILITY_PAGE_PERMISSION_PREFIX = "page." + "capability.";
+    private static final String REMOVED_CAPABILITY_ACTION_PERMISSION_PREFIX = "action." + "capability.";
 
     private final AdminUserMapper adminUserMapper;
     private final AdminUserRoleMapper adminUserRoleMapper;
@@ -118,9 +121,18 @@ public class AdminAuthServiceImpl implements AdminAuthService {
                 continue;
             }
             roleCodes.add(role.getRoleCode());
-            menuPermissions.addAll(parsePermissions(role.getMenuPermissionsJson()));
-            pagePermissions.addAll(parsePermissions(role.getPagePermissionsJson()));
-            actionPermissions.addAll(parsePermissions(role.getActionPermissionsJson()));
+            List<String> roleMenuPermissions = parsePermissions(role.getMenuPermissionsJson());
+            if (roleMenuPermissions.contains(REMOVED_RECRUIT_MENU_PERMISSION)) {
+                throw new BizException("后台角色菜单权限未收口");
+            }
+            menuPermissions.addAll(roleMenuPermissions);
+            List<String> rolePagePermissions = parsePermissions(role.getPagePermissionsJson());
+            List<String> roleActionPermissions = parsePermissions(role.getActionPermissionsJson());
+            if (containsRemovedCapabilityPermission(rolePagePermissions, roleActionPermissions)) {
+                throw new BizException("后台角色能力权限未收口");
+            }
+            pagePermissions.addAll(rolePagePermissions);
+            actionPermissions.addAll(roleActionPermissions);
         }
         Set<String> allPermissions = new LinkedHashSet<>();
         allPermissions.addAll(menuPermissions);
@@ -152,8 +164,13 @@ public class AdminAuthServiceImpl implements AdminAuthService {
         try {
             return objectMapper.readValue(rawJson, STRING_LIST_TYPE);
         } catch (Exception e) {
-            return Collections.emptyList();
+            throw new BizException("后台角色权限数据格式异常");
         }
+    }
+
+    private boolean containsRemovedCapabilityPermission(List<String> pagePermissions, List<String> actionPermissions) {
+        return pagePermissions.stream().anyMatch(permission -> permission.startsWith(REMOVED_CAPABILITY_PAGE_PERMISSION_PREFIX))
+                || actionPermissions.stream().anyMatch(permission -> permission.startsWith(REMOVED_CAPABILITY_ACTION_PERMISSION_PREFIX));
     }
 
     private String resolveClientIp(HttpServletRequest request) {

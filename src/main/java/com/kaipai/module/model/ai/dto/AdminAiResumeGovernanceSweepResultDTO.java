@@ -9,6 +9,12 @@ public class AdminAiResumeGovernanceSweepResultDTO {
 
     private boolean dryRun;
 
+    private String requestId;
+
+    private String triggerSource;
+
+    private String operatorName;
+
     private String evaluatedAt;
 
     private int totalCount;

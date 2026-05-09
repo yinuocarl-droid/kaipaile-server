@@ -3,11 +3,23 @@ package com.kaipai.common.exception;
 import com.kaipai.common.result.R;
 import com.kaipai.common.result.ResultCode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -37,6 +49,42 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         log.warn("参数绑定失败: {}", message);
         return R.fail(ResultCode.PARAM_ERROR.getCode(), message);
+    }
+
+    @ExceptionHandler({
+            MissingServletRequestParameterException.class,
+            MissingServletRequestPartException.class,
+            MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class,
+            HttpMediaTypeNotSupportedException.class,
+            MultipartException.class
+    })
+    public R<Void> handleRequestException(Exception e) {
+        log.warn("请求参数异常: {}", e.getMessage());
+        return R.fail(ResultCode.PARAM_ERROR.getCode(), e.getMessage());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public R<Void> handleDataIntegrityViolationException(DataIntegrityViolationException e) {
+        log.warn("数据约束校验失败: {}", e.getMostSpecificCause().getMessage());
+        return R.fail(ResultCode.PARAM_ERROR.getCode(), "数据约束校验失败");
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler({
+            NoHandlerFoundException.class,
+            NoResourceFoundException.class
+    })
+    public R<Void> handleNotFoundException(Exception e) {
+        log.warn("接口不存在: {}", e.getMessage());
+        return R.fail(404, "接口不存在");
+    }
+
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public R<Void> handleMethodNotSupportedException(HttpRequestMethodNotSupportedException e) {
+        log.warn("请求方法不支持: {}", e.getMessage());
+        return R.fail(405, "请求方法不支持");
     }
 
     @ExceptionHandler(Exception.class)

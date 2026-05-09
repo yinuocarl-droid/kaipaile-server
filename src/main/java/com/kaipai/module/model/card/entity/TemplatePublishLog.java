@@ -30,3 +30,6 @@ public class TemplatePublishLog extends BaseEntity {
     private String snapshotJson;
     private LocalDateTime publishedAt;
 }
+
+
+

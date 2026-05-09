@@ -29,3 +29,5 @@ public interface AdminRoleService extends IService<AdminRole> {
 
     AdminRoleRespDTO copyRole(AdminRoleCopyDTO dto);
 }
+
+

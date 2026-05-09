@@ -5,3 +5,6 @@ import com.kaipai.module.model.card.entity.ActorSharePreference;
 
 public interface ActorSharePreferenceService extends IService<ActorSharePreference> {
 }
+
+
+

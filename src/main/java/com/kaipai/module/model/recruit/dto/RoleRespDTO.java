@@ -1,6 +1,6 @@
 package com.kaipai.module.model.recruit.dto;
 
-import com.kaipai.module.model.company.dto.CompanyProfileRespDTO;
+import com.kaipai.module.model.crew.dto.CrewProfileRespDTO;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -37,5 +37,5 @@ public class RoleRespDTO {
 
     private ProjectRespDTO project;
 
-    private CompanyProfileRespDTO company;
+    private CrewProfileRespDTO crew;
 }

@@ -15,7 +15,7 @@ public class UserSessionRespDTO {
     @Schema(description = "手机号")
     private String phone;
 
-    @Schema(description = "用户类型: 1=演员, 2=剧组/公司")
+    @Schema(description = "用户类型: 1=演员, 2=剧组/团队")
     private Integer userType;
 
     @Schema(description = "用户状态")
@@ -51,6 +51,6 @@ public class UserSessionRespDTO {
     @Schema(description = "风险邀请数量")
     private Integer flaggedInviteCount;
 
-    @Schema(description = "会员层级: none/member/vip")
-    private String membershipTier;
+    @Schema(description = "能力层级: base/plus/pro")
+    private String capabilityTier;
 }

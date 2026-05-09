@@ -17,7 +17,7 @@ public class AdminRecruitApplyListItemDTO {
 
     private String projectTitle;
 
-    private String companyName;
+    private String crewName;
 
     private String roleName;
 

@@ -9,3 +9,6 @@ public class ShareArtifactUpdateDTO {
     @NotBlank
     private String artifactPresetJson;
 }
+
+
+

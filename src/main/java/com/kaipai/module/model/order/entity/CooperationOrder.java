@@ -19,9 +19,9 @@ public class CooperationOrder extends BaseEntity {
 
     private String orderNo;
 
-    private Long companyUserId;
+    private Long crewUserId;
 
-    private Long companyProfileId;
+    private Long crewProfileId;
 
     private Long actorUserId;
 
@@ -49,11 +49,11 @@ public class CooperationOrder extends BaseEntity {
     /** 订单状态: 1进行中, 2待确认完成, 3已完成, 4已取消, 5纠纷中 */
     private Integer orderStatus;
 
-    private Boolean companyConfirmed;
+    private Boolean crewConfirmed;
 
     private Boolean actorConfirmed;
 
-    private LocalDateTime companyConfirmTime;
+    private LocalDateTime crewConfirmTime;
 
     private LocalDateTime actorConfirmTime;
 

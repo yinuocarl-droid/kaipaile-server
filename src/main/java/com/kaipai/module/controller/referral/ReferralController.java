@@ -1,13 +1,14 @@
 package com.kaipai.module.controller.referral;
 
-import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.referral.dto.ActorInviteInfoRespDTO;
 import com.kaipai.module.model.referral.dto.ActorInviteStatsRespDTO;
 import com.kaipai.module.model.referral.dto.ActorReferralRecordRespDTO;
+import com.kaipai.module.model.referral.dto.InviteQrCodeResult;
 import com.kaipai.module.model.referral.entity.InviteCode;
 import com.kaipai.module.server.referral.service.EntitlementRuleService;
 import com.kaipai.module.server.referral.service.InviteCodeService;
+import com.kaipai.module.server.referral.service.InviteQrCodeService;
 import com.kaipai.module.server.referral.service.ReferralPolicyService;
 import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.referral.service.UserEntitlementGrantService;
@@ -23,13 +24,15 @@ import java.util.List;
 
 @Tag(name = "裂变邀请")
 @RestController
-@RequestMapping({"/referral", "/invite"})
+@RequestMapping("/referral")
 @RequiredArgsConstructor
 public class ReferralController {
 
     private final ReferralRecordService referralRecordService;
 
     private final InviteCodeService inviteCodeService;
+
+    private final InviteQrCodeService inviteQrCodeService;
 
     private final ReferralPolicyService referralPolicyService;
 
@@ -43,11 +46,16 @@ public class ReferralController {
         Long userId = currentUserId(authentication);
         ActorInviteStatsRespDTO stats = referralRecordService.actorStats(userId);
         InviteCode inviteCode = inviteCodeService.ensureActiveInviteCode(userId);
+        String inviteLink = "/pages/login/index?inviteCode=" + inviteCode.getCode();
+        InviteQrCodeResult qrCodeResult = inviteQrCodeService.buildInviteQrCode(inviteCode.getCode());
 
         ActorInviteInfoRespDTO dto = new ActorInviteInfoRespDTO();
         dto.setInviteCode(inviteCode.getCode());
-        dto.setInviteLink("/pages/login/index?inviteCode=" + inviteCode.getCode());
-        dto.setQrCodeUrl("/static/logo.png");
+        dto.setInviteLink(inviteLink);
+        dto.setQrCodeUrl(qrCodeResult.getDataUrl());
+        dto.setQrCodeType(qrCodeResult.getQrCodeType());
+        dto.setQrCodeScene(qrCodeResult.getScene());
+        dto.setQrCodePage(qrCodeResult.getPage());
         dto.setValidInviteCount(stats.getValidInviteCount());
         dto.setTotalInviteCount(stats.getTotalInviteCount());
         dto.setPendingInviteCount(stats.getPendingInviteCount());
@@ -70,13 +78,13 @@ public class ReferralController {
     @Operation(summary = "获取邀请二维码")
     @GetMapping("/qrcode")
     public R<String> inviteQrCode(Authentication authentication) {
-        inviteCodeService.ensureActiveInviteCode(currentUserId(authentication));
-        return R.ok("/static/logo.png");
+        InviteCode inviteCode = inviteCodeService.ensureActiveInviteCode(currentUserId(authentication));
+        return R.ok(inviteQrCodeService.buildInviteQrCode(inviteCode.getCode()).getDataUrl());
     }
 
     private Long currentUserId(Authentication authentication) {
         if (authentication == null || !(authentication.getPrincipal() instanceof Long userId)) {
-            throw new BizException("未登录或登录态失效");
+            throw new com.kaipai.common.exception.BizException("未登录或登录态失效");
         }
         return userId;
     }

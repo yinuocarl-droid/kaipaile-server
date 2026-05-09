@@ -11,3 +11,5 @@ public class AdminDashboardOverviewQueryDTO {
     private LocalDateTime dateTo;
     private String bizLine;
 }
+
+

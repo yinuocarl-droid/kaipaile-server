@@ -7,9 +7,11 @@ import java.util.List;
 @Data
 public class ActorCardConfigRespDTO {
 
-    private Long actorId;
+    private Long profileUserId;
 
-    private String sceneKey;
+    private Long shareCardId;
+
+    private String templateSceneCode;
 
     private String layoutVariant;
 
@@ -25,3 +27,6 @@ public class ActorCardConfigRespDTO {
 
     private List<String> tagOrder;
 }
+
+
+

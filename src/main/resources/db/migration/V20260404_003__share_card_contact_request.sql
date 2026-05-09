@@ -1,0 +1,23 @@
+CREATE TABLE `share_card_contact_request` (
+  `request_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
+  `viewer_user_id` BIGINT NOT NULL COMMENT 'request viewer user id',
+  `share_card_id` BIGINT NOT NULL COMMENT 'independent share card id',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending, approved, rejected',
+  `applicant_note` VARCHAR(255) DEFAULT NULL COMMENT 'viewer apply note',
+  `decision_note` VARCHAR(255) DEFAULT NULL COMMENT 'owner decision note',
+  `requested_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'apply time',
+  `decided_at` DATETIME DEFAULT NULL COMMENT 'decision time',
+  `version` INT NOT NULL DEFAULT 0,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  `rid` VARCHAR(64) DEFAULT NULL,
+  `create_user_id` BIGINT DEFAULT NULL,
+  `create_user_name` VARCHAR(64) DEFAULT '',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_user_id` BIGINT DEFAULT NULL,
+  `update_user_name` VARCHAR(64) DEFAULT '',
+  `last_update` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`request_id`),
+  KEY `idx_share_card_contact_request_viewer_status_decided_at` (`viewer_user_id`, `status`, `decided_at`),
+  KEY `idx_share_card_contact_request_viewer_card_requested_at` (`viewer_user_id`, `share_card_id`, `requested_at`),
+  KEY `idx_share_card_contact_request_card_status_requested_at` (`share_card_id`, `status`, `requested_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='share card contact authorization requests';

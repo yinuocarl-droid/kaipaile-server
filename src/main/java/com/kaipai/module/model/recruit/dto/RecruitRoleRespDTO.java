@@ -36,14 +36,14 @@ public class RecruitRoleRespDTO {
 
     private ProjectDTO project;
 
-    private CompanyDTO company;
+    private CrewDTO crew;
 
     @Data
     public static class ProjectDTO {
 
         private Long id;
 
-        private Long companyId;
+        private Long crewId;
 
         private String title;
 
@@ -63,13 +63,13 @@ public class RecruitRoleRespDTO {
     }
 
     @Data
-    public static class CompanyDTO {
+    public static class CrewDTO {
 
         private Long userId;
 
         private String avatar;
 
-        private String companyName;
+        private String crewName;
 
         private String contactName;
 
@@ -79,7 +79,7 @@ public class RecruitRoleRespDTO {
 
         private String location;
 
-        private String companyType;
+        private String crewType;
 
         private String teamScale;
 

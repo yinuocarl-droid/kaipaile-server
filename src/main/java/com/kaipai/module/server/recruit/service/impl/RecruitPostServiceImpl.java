@@ -6,15 +6,15 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
-import com.kaipai.module.model.company.dto.CompanyProfileExtrasDTO;
-import com.kaipai.module.model.company.entity.CompanyProfile;
+import com.kaipai.module.model.crew.dto.CrewProfileExtrasDTO;
+import com.kaipai.module.model.crew.entity.CrewProfile;
 import com.kaipai.module.model.recruit.dto.ProjectRespDTO;
 import com.kaipai.module.model.recruit.dto.RecruitRoleQueryDTO;
 import com.kaipai.module.model.recruit.dto.RecruitRoleRespDTO;
 import com.kaipai.module.model.recruit.dto.RoleExtraDTO;
 import com.kaipai.module.model.recruit.entity.RecruitPost;
 import com.kaipai.module.model.user.entity.User;
-import com.kaipai.module.server.company.mapper.CompanyProfileMapper;
+import com.kaipai.module.server.crew.mapper.CrewProfileMapper;
 import com.kaipai.module.server.recruit.mapper.RecruitPostMapper;
 import com.kaipai.module.server.recruit.service.RecruitPostService;
 import com.kaipai.module.server.user.mapper.UserMapper;
@@ -39,7 +39,7 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final CompanyProfileMapper companyProfileMapper;
+    private final CrewProfileMapper crewProfileMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
 
@@ -83,13 +83,13 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
             return PageResult.empty();
         }
 
-        Map<Long, CompanyProfile> companyMap = loadCompanyMap(result.getRecords());
-        Map<Long, CompanyProfile> latestCompanyByUserId = loadLatestCompanyMapByUserId(result.getRecords());
+        Map<Long, CrewProfile> crewMap = loadCrewMap(result.getRecords());
+        Map<Long, CrewProfile> latestCrewByUserId = loadLatestCrewMapByUserId(result.getRecords());
         Map<Long, User> ownerMap = loadOwnerMap(result.getRecords());
         List<RecruitRoleRespDTO> list = result.getRecords().stream()
                 .map(item -> {
-                    CompanyProfile company = resolveCompanyProfile(item, companyMap, latestCompanyByUserId);
-                    return toRole(item, company, ownerMap.get(item.getUserId()));
+                    CrewProfile crew = resolveCrewProfile(item, crewMap, latestCrewByUserId);
+                    return toRole(item, crew, ownerMap.get(item.getUserId()));
                 })
                 .toList();
         return new PageResult<>(result.getTotal(), list);
@@ -101,28 +101,28 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         if (post == null) {
             throw new BizException("角色不存在");
         }
-        Map<Long, CompanyProfile> companyMap = new LinkedHashMap<>();
-        if (post.getCompanyProfileId() != null) {
-            CompanyProfile company = companyProfileMapper.selectById(post.getCompanyProfileId());
-            if (company != null) {
-                companyMap.put(post.getCompanyProfileId(), company);
+        Map<Long, CrewProfile> crewMap = new LinkedHashMap<>();
+        if (post.getCrewProfileId() != null) {
+            CrewProfile crew = crewProfileMapper.selectById(post.getCrewProfileId());
+            if (crew != null) {
+                crewMap.put(post.getCrewProfileId(), crew);
             }
         }
-        CompanyProfile company = resolveCompanyProfile(post, companyMap, loadLatestCompanyMapByUserId(List.of(post)));
+        CrewProfile crew = resolveCrewProfile(post, crewMap, loadLatestCrewMapByUserId(List.of(post)));
         User owner = post.getUserId() == null ? null : userMapper.selectById(post.getUserId());
-        return toRole(post, company, owner);
+        return toRole(post, crew, owner);
     }
 
-    private Map<Long, CompanyProfile> loadCompanyMap(List<RecruitPost> posts) {
-        Set<Long> companyIds = posts.stream()
-                .map(RecruitPost::getCompanyProfileId)
+    private Map<Long, CrewProfile> loadCrewMap(List<RecruitPost> posts) {
+        Set<Long> crewIds = posts.stream()
+                .map(RecruitPost::getCrewProfileId)
                 .filter(id -> id != null && id > 0)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (companyIds.isEmpty()) {
+        if (crewIds.isEmpty()) {
             return Collections.emptyMap();
         }
-        return companyProfileMapper.selectBatchIds(companyIds).stream()
-                .collect(Collectors.toMap(CompanyProfile::getCompanyProfileId, item -> item, (left, right) -> left, LinkedHashMap::new));
+        return crewProfileMapper.selectBatchIds(crewIds).stream()
+                .collect(Collectors.toMap(CrewProfile::getCrewProfileId, item -> item, (left, right) -> left, LinkedHashMap::new));
     }
 
     private Map<Long, User> loadOwnerMap(List<RecruitPost> posts) {
@@ -137,7 +137,7 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
                 .collect(Collectors.toMap(User::getUserId, item -> item, (left, right) -> left, LinkedHashMap::new));
     }
 
-    private Map<Long, CompanyProfile> loadLatestCompanyMapByUserId(List<RecruitPost> posts) {
+    private Map<Long, CrewProfile> loadLatestCrewMapByUserId(List<RecruitPost> posts) {
         Set<Long> userIds = posts.stream()
                 .map(RecruitPost::getUserId)
                 .filter(id -> id != null && id > 0)
@@ -145,31 +145,31 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         if (userIds.isEmpty()) {
             return Collections.emptyMap();
         }
-        return companyProfileMapper.selectList(new LambdaQueryWrapper<CompanyProfile>()
-                        .in(CompanyProfile::getUserId, userIds)
-                        .orderByDesc(CompanyProfile::getLastUpdate)
-                        .orderByDesc(CompanyProfile::getCompanyProfileId))
+        return crewProfileMapper.selectList(new LambdaQueryWrapper<CrewProfile>()
+                        .in(CrewProfile::getUserId, userIds)
+                        .orderByDesc(CrewProfile::getLastUpdate)
+                        .orderByDesc(CrewProfile::getCrewProfileId))
                 .stream()
-                .collect(Collectors.toMap(CompanyProfile::getUserId, item -> item, (left, right) -> left, LinkedHashMap::new));
+                .collect(Collectors.toMap(CrewProfile::getUserId, item -> item, (left, right) -> left, LinkedHashMap::new));
     }
 
-    private CompanyProfile resolveCompanyProfile(RecruitPost post,
-                                                 Map<Long, CompanyProfile> companyMap,
-                                                 Map<Long, CompanyProfile> latestCompanyByUserId) {
+    private CrewProfile resolveCrewProfile(RecruitPost post,
+                                                 Map<Long, CrewProfile> crewMap,
+                                                 Map<Long, CrewProfile> latestCrewByUserId) {
         if (post == null) {
             return null;
         }
-        CompanyProfile company = post.getCompanyProfileId() == null ? null : companyMap.get(post.getCompanyProfileId());
-        if (company != null) {
-            return company;
+        CrewProfile crew = post.getCrewProfileId() == null ? null : crewMap.get(post.getCrewProfileId());
+        if (crew != null) {
+            return crew;
         }
-        return post.getUserId() == null ? null : latestCompanyByUserId.get(post.getUserId());
+        return post.getUserId() == null ? null : latestCrewByUserId.get(post.getUserId());
     }
 
-    private RecruitRoleRespDTO toRole(RecruitPost post, CompanyProfile company, User owner) {
+    private RecruitRoleRespDTO toRole(RecruitPost post, CrewProfile crew, User owner) {
         RoleExtraDTO roleExtra = readRoleExtra(post.getExtendedField());
-        CompanyProfileExtrasDTO companyExtras = readCompanyExtras(company == null ? null : company.getExtendedField());
-        ProjectRespDTO project = findProject(companyExtras, roleExtra.getProjectId());
+        CrewProfileExtrasDTO crewExtras = readCrewExtras(crew == null ? null : crew.getExtendedField());
+        ProjectRespDTO project = findProject(crewExtras, roleExtra.getProjectId());
 
         RecruitRoleRespDTO dto = new RecruitRoleRespDTO();
         dto.setId(post.getRecruitPostId());
@@ -178,7 +178,7 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         dto.setGender(toGenderText(post.getRequireGender()));
         dto.setMinAge(defaultInt(post.getRequireAgeMin(), 18));
         dto.setMaxAge(defaultInt(post.getRequireAgeMax(), 35));
-        dto.setRequirement(firstNonBlank(post.getRoleDesc(), post.getTitle(), "角色要求待补充"));
+        dto.setRequirement(requireFirstText("角色要求缺失", post.getRoleDesc(), post.getTitle()));
         dto.setFee(resolveSalary(post));
         dto.setDeadline(formatDate(post.getApplyDeadline()));
         dto.setStatus(resolveRoleStatus(post.getPostStatus()));
@@ -186,24 +186,24 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         dto.setPublishTime(formatDateTime(post.getLastUpdate() != null ? post.getLastUpdate() : post.getCreateTime()));
         dto.setCoverImage(firstNonBlank(roleExtra.getCoverImage(),
                 project == null ? null : project.getCoverImage(),
-                company == null ? null : company.getCoverUrl(),
-                company == null ? null : company.getLogoUrl(),
+                crew == null ? null : crew.getCoverUrl(),
+                crew == null ? null : crew.getLogoUrl(),
                 null));
-        dto.setProject(buildProject(post, company, owner, project));
-        dto.setCompany(buildCompany(post, company, owner, companyExtras));
+        dto.setProject(buildProject(post, crew, owner, project));
+        dto.setCrew(buildCrew(post, crew, owner, crewExtras));
         return dto;
     }
 
-    private RecruitRoleRespDTO.ProjectDTO buildProject(RecruitPost post, CompanyProfile company, User owner, ProjectRespDTO projectSource) {
+    private RecruitRoleRespDTO.ProjectDTO buildProject(RecruitPost post, CrewProfile crew, User owner, ProjectRespDTO projectSource) {
         RecruitRoleRespDTO.ProjectDTO project = new RecruitRoleRespDTO.ProjectDTO();
         project.setId(projectSource == null || projectSource.getId() == null ? post.getRecruitPostId() : projectSource.getId());
-        project.setCompanyId(projectSource == null || projectSource.getCompanyId() == null
-                ? (company != null && company.getUserId() != null ? company.getUserId() : post.getUserId())
-                : projectSource.getCompanyId());
-        project.setTitle(firstNonBlank(projectSource == null ? null : projectSource.getTitle(), post.getDramaName(), post.getTitle(), "待补充项目名称"));
+        project.setCrewId(projectSource == null || projectSource.getCrewId() == null
+                ? (crew != null && crew.getUserId() != null ? crew.getUserId() : post.getUserId())
+                : projectSource.getCrewId());
+        project.setTitle(requireFirstText("项目名称缺失", projectSource == null ? null : projectSource.getTitle(), post.getDramaName(), post.getTitle()));
         project.setDescription(firstNonBlank(projectSource == null ? null : projectSource.getDescription(),
                 post.getTitle(),
-                company == null ? null : company.getIntro(),
+                crew == null ? null : crew.getIntro(),
                 post.getRoleDesc()));
         project.setLocation(firstNonBlank(projectSource == null ? null : projectSource.getLocation(),
                 resolveLocation(post.getShootProvince(), post.getShootCity(), post.getShootAddress()),
@@ -219,33 +219,33 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
                 ? projectSource.getRoleCount()
                 : 1);
         project.setCoverImage(firstNonBlank(projectSource == null ? null : projectSource.getCoverImage(),
-                company == null ? null : company.getCoverUrl(),
-                company == null ? null : company.getLogoUrl(),
+                crew == null ? null : crew.getCoverUrl(),
+                crew == null ? null : crew.getLogoUrl(),
                 owner == null ? null : owner.getAvatarUrl()));
         return project;
     }
 
-    private RecruitRoleRespDTO.CompanyDTO buildCompany(RecruitPost post,
-                                                       CompanyProfile company,
+    private RecruitRoleRespDTO.CrewDTO buildCrew(RecruitPost post,
+                                                       CrewProfile crew,
                                                        User owner,
-                                                       CompanyProfileExtrasDTO extras) {
-        RecruitRoleRespDTO.CompanyDTO dto = new RecruitRoleRespDTO.CompanyDTO();
-        dto.setUserId(company != null && company.getUserId() != null ? company.getUserId() : post.getUserId());
-        dto.setAvatar(firstNonBlank(company == null ? null : company.getLogoUrl(), owner == null ? null : owner.getAvatarUrl(), null));
-        dto.setCompanyName(firstNonBlank(company == null ? null : company.getCompanyName(), owner == null ? null : owner.getUserName(), "精选剧组"));
-        dto.setContactName(firstNonBlank(post.getContactName(), company == null ? null : company.getContactName(), null));
-        dto.setContactPhone(firstNonBlank(post.getContactPhone(), company == null ? null : company.getContactPhone(), owner == null ? null : owner.getPhone()));
-        dto.setRemark(firstNonBlank(company == null ? null : company.getIntro(),
+                                                       CrewProfileExtrasDTO extras) {
+        RecruitRoleRespDTO.CrewDTO dto = new RecruitRoleRespDTO.CrewDTO();
+        dto.setUserId(crew != null && crew.getUserId() != null ? crew.getUserId() : post.getUserId());
+        dto.setAvatar(firstNonBlank(crew == null ? null : crew.getLogoUrl(), owner == null ? null : owner.getAvatarUrl(), null));
+        dto.setCrewName(firstNonBlank(crew == null ? null : crew.getCrewName(), owner == null ? null : owner.getUserName(), "精选剧组"));
+        dto.setContactName(firstNonBlank(post.getContactName(), crew == null ? null : crew.getContactName(), null));
+        dto.setContactPhone(firstNonBlank(post.getContactPhone(), crew == null ? null : crew.getContactPhone(), owner == null ? null : owner.getPhone()));
+        dto.setRemark(firstNonBlank(crew == null ? null : crew.getIntro(),
                 extras == null ? null : extras.getFocusDirection(),
-                company == null ? null : company.getBusinessScope(),
+                crew == null ? null : crew.getBusinessScope(),
                 "专注影视与内容项目合作。"));
-        dto.setLocation(resolveLocation(company == null ? null : company.getLocationProvince(), company == null ? null : company.getLocationCity(), company == null ? null : company.getAddress()));
-        dto.setCompanyType(firstNonBlank(extras == null ? null : extras.getCompanyType(), resolveCompanyType(company == null ? null : company.getCompanyType()), null));
+        dto.setLocation(resolveLocation(crew == null ? null : crew.getLocationProvince(), crew == null ? null : crew.getLocationCity(), crew == null ? null : crew.getAddress()));
+        dto.setCrewType(firstNonBlank(extras == null ? null : extras.getCrewType(), resolveCrewType(crew == null ? null : crew.getCrewType()), null));
         dto.setTeamScale(extras == null ? null : extras.getTeamScale());
-        dto.setFocusDirection(firstNonBlank(extras == null ? null : extras.getFocusDirection(), company == null ? null : company.getBusinessScope(), null));
+        dto.setFocusDirection(firstNonBlank(extras == null ? null : extras.getFocusDirection(), crew == null ? null : crew.getBusinessScope(), null));
         dto.setRepresentativeWorks(extras == null ? null : extras.getRepresentativeWorks());
-        dto.setCooperationNeed(firstNonBlank(extras == null ? null : extras.getCooperationNeed(), company == null ? null : company.getCooperationTag(), null));
-        dto.setOfficeAddress(firstNonBlank(extras == null ? null : extras.getOfficeAddress(), company == null ? null : company.getAddress(), null));
+        dto.setCooperationNeed(firstNonBlank(extras == null ? null : extras.getCooperationNeed(), crew == null ? null : crew.getCooperationTag(), null));
+        dto.setOfficeAddress(firstNonBlank(extras == null ? null : extras.getOfficeAddress(), crew == null ? null : crew.getAddress(), null));
         return dto;
     }
 
@@ -338,37 +338,37 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         return (start != null ? start : end).format(DATE_FORMATTER);
     }
 
-    private String resolveCompanyType(Integer companyType) {
-        if (companyType != null && companyType == 1) {
-            return "影视制作公司";
+    private String resolveCrewType(Integer crewType) {
+        if (crewType != null && crewType == 1) {
+            return "影视制作团队";
         }
-        if (companyType != null && companyType == 2) {
+        if (crewType != null && crewType == 2) {
             return "短剧厂牌";
         }
-        if (companyType != null && companyType == 3) {
+        if (crewType != null && crewType == 3) {
             return "广告内容团队";
         }
-        if (companyType != null && companyType == 4) {
+        if (crewType != null && crewType == 4) {
             return "MCN内容团队";
         }
-        if (companyType != null && companyType == 5) {
+        if (crewType != null && crewType == 5) {
             return "品牌影像团队";
         }
         return null;
     }
 
-    private CompanyProfileExtrasDTO readCompanyExtras(String raw) {
+    private CrewProfileExtrasDTO readCrewExtras(String raw) {
         if (!StringUtils.hasText(raw)) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
         try {
-            CompanyProfileExtrasDTO extras = objectMapper.readValue(raw, CompanyProfileExtrasDTO.class);
+            CrewProfileExtrasDTO extras = objectMapper.readValue(raw, CrewProfileExtrasDTO.class);
             if (extras.getProjects() == null) {
                 extras.setProjects(new java.util.ArrayList<>());
             }
             return extras;
         } catch (Exception ignored) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
     }
 
@@ -387,7 +387,7 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         }
     }
 
-    private ProjectRespDTO findProject(CompanyProfileExtrasDTO extras, Long projectId) {
+    private ProjectRespDTO findProject(CrewProfileExtrasDTO extras, Long projectId) {
         if (extras == null || extras.getProjects() == null || projectId == null) {
             return null;
         }
@@ -405,7 +405,7 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
             return target;
         }
         target.setId(source.getId());
-        target.setCompanyId(source.getCompanyId());
+        target.setCrewId(source.getCrewId());
         target.setTitle(source.getTitle());
         target.setDescription(source.getDescription());
         target.setLocation(source.getLocation());
@@ -425,8 +425,8 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
         return value == null ? "" : value.format(DATE_TIME_FORMATTER);
     }
 
-    private int defaultInt(Integer value, int fallback) {
-        return value == null || value <= 0 ? fallback : value;
+    private int defaultInt(Integer value, int defaultValue) {
+        return value == null || value <= 0 ? defaultValue : value;
     }
 
     private String defaultText(String value) {
@@ -443,5 +443,13 @@ public class RecruitPostServiceImpl extends ServiceImpl<RecruitPostMapper, Recru
             return null;
         }
         return values[values.length - 1];
+    }
+
+    private String requireFirstText(String errorMessage, String... values) {
+        String value = firstNonBlank(values);
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(errorMessage);
+        }
+        return value;
     }
 }

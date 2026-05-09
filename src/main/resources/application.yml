@@ -33,6 +33,41 @@ jwt:
   secret: kaipai-secret-key-2024-must-be-at-least-32-characters-long
   expire: 7
 
+wechat:
+  miniapp:
+    app-id: ${WECHAT_MINIAPP_APP_ID:}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
+    env-version: ${WECHAT_MINIAPP_ENV_VERSION:develop}
+
+kaipai:
+  cors:
+    allowed-origins:
+      - https://kplyyk.com
+      - https://api.kplyyk.com
+      - http://127.0.0.1:5100
+      - http://localhost:5100
+  ai:
+    resume:
+      notification:
+        enabled: false
+        provider-code: manual
+        callback-header: ${AI_RESUME_NOTIFICATION_CALLBACK_HEADER:X-Kaipai-Ai-Notification-Token}
+        callback-token: ${AI_RESUME_NOTIFICATION_CALLBACK_TOKEN:}
+        callback-url: ${AI_RESUME_NOTIFICATION_CALLBACK_URL:}
+        http:
+          endpoint: ${AI_RESUME_NOTIFICATION_HTTP_ENDPOINT:}
+          auth-header: ${AI_RESUME_NOTIFICATION_HTTP_AUTH_HEADER:Authorization}
+          auth-token: ${AI_RESUME_NOTIFICATION_HTTP_AUTH_TOKEN:}
+          connect-timeout-ms: ${AI_RESUME_NOTIFICATION_HTTP_CONNECT_TIMEOUT_MS:5000}
+          read-timeout-ms: ${AI_RESUME_NOTIFICATION_HTTP_READ_TIMEOUT_MS:10000}
+      governance-scheduler:
+        enabled: false
+        initial-delay: 2m
+        fixed-delay: 15m
+        limit: 20
+        lock-ttl: 14m
+        reason: AI治理定时sweep
+
 # Knife4j API 文档配置
 knife4j:
   enable: true

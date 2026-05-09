@@ -7,8 +7,8 @@ import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.module.model.actor.entity.ActorProfile;
-import com.kaipai.module.model.company.dto.CompanyProfileExtrasDTO;
-import com.kaipai.module.model.company.entity.CompanyProfile;
+import com.kaipai.module.model.crew.dto.CrewProfileExtrasDTO;
+import com.kaipai.module.model.crew.entity.CrewProfile;
 import com.kaipai.module.model.recruit.dto.AdminRecruitApplyListItemDTO;
 import com.kaipai.module.model.recruit.dto.AdminRecruitApplyQueryDTO;
 import com.kaipai.module.model.recruit.dto.AdminRecruitProjectListItemDTO;
@@ -23,7 +23,7 @@ import com.kaipai.module.model.recruit.entity.RecruitApply;
 import com.kaipai.module.model.recruit.entity.RecruitPost;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
-import com.kaipai.module.server.company.mapper.CompanyProfileMapper;
+import com.kaipai.module.server.crew.mapper.CrewProfileMapper;
 import com.kaipai.module.server.recruit.mapper.RecruitApplyMapper;
 import com.kaipai.module.server.recruit.mapper.RecruitPostMapper;
 import com.kaipai.module.server.recruit.service.AdminRecruitGovernanceService;
@@ -55,7 +55,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-    private final CompanyProfileMapper companyProfileMapper;
+    private final CrewProfileMapper crewProfileMapper;
     private final RecruitPostMapper recruitPostMapper;
     private final RecruitApplyMapper recruitApplyMapper;
     private final UserMapper userMapper;
@@ -65,20 +65,20 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
 
     @Override
     public PageResult<AdminRecruitProjectListItemDTO> projectList(AdminRecruitProjectQueryDTO query) {
-        List<CompanyProfile> profiles = companyProfileMapper.selectList(new LambdaQueryWrapper<CompanyProfile>()
-                .orderByDesc(CompanyProfile::getLastUpdate)
-                .orderByDesc(CompanyProfile::getCompanyProfileId));
+        List<CrewProfile> profiles = crewProfileMapper.selectList(new LambdaQueryWrapper<CrewProfile>()
+                .orderByDesc(CrewProfile::getLastUpdate)
+                .orderByDesc(CrewProfile::getCrewProfileId));
         if (profiles.isEmpty()) {
             return PageResult.empty();
         }
 
         Map<Long, User> crewUserMap = loadUserMap(profiles.stream()
-                .map(CompanyProfile::getUserId)
+                .map(CrewProfile::getUserId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new)));
 
         List<AdminRecruitProjectListItemDTO> rows = profiles.stream()
-                .flatMap(profile -> safeProjects(readCompanyExtras(profile.getExtendedField())).stream()
+                .flatMap(profile -> safeProjects(readCrewExtras(profile.getExtendedField())).stream()
                         .map(project -> toProjectItem(profile, crewUserMap.get(profile.getUserId()), project)))
                 .filter(item -> matchesProject(item, query))
                 .sorted(Comparator.comparing(AdminRecruitProjectListItemDTO::getSourceUpdatedAt,
@@ -121,20 +121,20 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
             return PageResult.empty();
         }
 
-        Map<Long, CompanyProfile> companyProfileMap = loadCompanyProfileMap(posts.stream()
-                .map(RecruitPost::getCompanyProfileId)
+        Map<Long, CrewProfile> crewProfileMap = loadCrewProfileMap(posts.stream()
+                .map(RecruitPost::getCrewProfileId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new)));
         Map<Long, User> crewUserMap = loadUserMap(posts.stream()
                 .map(RecruitPost::getUserId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new)));
-        Map<Long, Map<Long, ProjectRespDTO>> projectMapByCrewUserId = buildProjectMapByCrewUserId(companyProfileMap.values());
+        Map<Long, Map<Long, ProjectRespDTO>> projectMapByCrewUserId = buildProjectMapByCrewUserId(crewProfileMap.values());
 
         List<AdminRecruitRoleListItemDTO> rows = posts.stream()
                 .map(post -> toRoleItem(
                         post,
-                        companyProfileMap.get(post.getCompanyProfileId()),
+                        crewProfileMap.get(post.getCrewProfileId()),
                         crewUserMap.get(post.getUserId()),
                         projectMapByCrewUserId.getOrDefault(post.getUserId(), Collections.emptyMap())))
                 .filter(item -> matchesRole(item, query))
@@ -172,8 +172,8 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
                 .map(RecruitApply::getRecruitPostId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new)));
-        Map<Long, CompanyProfile> companyProfileMap = loadCompanyProfileMap(roleMap.values().stream()
-                .map(RecruitPost::getCompanyProfileId)
+        Map<Long, CrewProfile> crewProfileMap = loadCrewProfileMap(roleMap.values().stream()
+                .map(RecruitPost::getCrewProfileId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new)));
         Set<Long> crewUserIds = roleMap.values().stream()
@@ -189,13 +189,13 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
 
         Map<Long, User> userMap = loadUserMap(userIds);
         Map<Long, ActorProfile> actorProfileMap = loadActorProfileMap(actorUserIds);
-        Map<Long, Map<Long, ProjectRespDTO>> projectMapByCrewUserId = buildProjectMapByCrewUserId(companyProfileMap.values());
+        Map<Long, Map<Long, ProjectRespDTO>> projectMapByCrewUserId = buildProjectMapByCrewUserId(crewProfileMap.values());
 
         List<AdminRecruitApplyListItemDTO> rows = applies.stream()
                 .map(apply -> toApplyItem(
                         apply,
                         roleMap.get(apply.getRecruitPostId()),
-                        companyProfileMap,
+                        crewProfileMap,
                         userMap,
                         actorProfileMap,
                         projectMapByCrewUserId))
@@ -229,11 +229,11 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         List<Long> affectedRoleIds = targetStatus == 2 ? closeProjectRoles(context.profile(), projectId) : Collections.emptyList();
 
         context.project().setStatus(targetStatus);
-        saveCompanyExtras(context.profile(), context.extras());
+        saveCrewExtras(context.profile(), context.extras());
 
         ProjectRespDTO afterProject = copyProject(context.project());
         Map<String, Object> extraContext = new LinkedHashMap<>();
-        extraContext.put("company_profile_id", context.profile().getCompanyProfileId());
+        extraContext.put("crew_profile_id", context.profile().getCrewProfileId());
         extraContext.put("crew_user_id", context.profile().getUserId());
         extraContext.put("from_status", beforeProject.getStatus());
         extraContext.put("to_status", afterProject.getStatus());
@@ -270,7 +270,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         }
 
         RoleExtraDTO roleExtra = readRoleExtra(post.getExtendedField());
-        CompanyProfile profile = resolveCompanyProfile(post);
+        CrewProfile profile = resolveCrewProfile(post);
         ProjectRespDTO project = findProjectByRole(profile, post.getUserId(), roleExtra);
         if (targetStatus == 1 && project != null && project.getStatus() != null && project.getStatus() != 1) {
             throw new BizException("关联项目已结束，不能恢复招募");
@@ -283,7 +283,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         Map<String, Object> afterSnapshot = snapshotRole(post, roleExtra, project);
         Map<String, Object> extraContext = new LinkedHashMap<>();
         extraContext.put("crew_user_id", post.getUserId());
-        extraContext.put("company_profile_id", post.getCompanyProfileId());
+        extraContext.put("crew_profile_id", post.getCrewProfileId());
         extraContext.put("project_id", roleExtra.getProjectId());
         extraContext.put("project_status", project == null ? null : project.getStatus());
         extraContext.put("reason", trimToNull(dto == null ? null : dto.getReason()));
@@ -300,12 +300,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
                 .build());
     }
 
-    private AdminRecruitProjectListItemDTO toProjectItem(CompanyProfile profile, User crewUser, ProjectRespDTO project) {
+    private AdminRecruitProjectListItemDTO toProjectItem(CrewProfile profile, User crewUser, ProjectRespDTO project) {
         AdminRecruitProjectListItemDTO item = new AdminRecruitProjectListItemDTO();
         item.setProjectId(project.getId());
         item.setCrewUserId(profile.getUserId());
-        item.setCompanyProfileId(profile.getCompanyProfileId());
-        item.setCompanyName(firstNonBlank(profile.getCompanyName(), crewUser == null ? null : crewUser.getUserName(), "未命名剧组"));
+        item.setCrewProfileId(profile.getCrewProfileId());
+        item.setCrewName(firstNonBlank(profile.getCrewName(), crewUser == null ? null : crewUser.getUserName(), null));
         item.setContactName(firstNonBlank(profile.getContactName(), null, ""));
         item.setContactPhone(firstNonBlank(profile.getContactPhone(), crewUser == null ? null : crewUser.getPhone(), ""));
         item.setTitle(defaultText(project.getTitle()));
@@ -322,7 +322,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
     }
 
     private AdminRecruitRoleListItemDTO toRoleItem(RecruitPost post,
-                                                   CompanyProfile profile,
+                                                   CrewProfile profile,
                                                    User crewUser,
                                                    Map<Long, ProjectRespDTO> projectMap) {
         RoleExtraDTO roleExtra = readRoleExtra(post.getExtendedField());
@@ -331,12 +331,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         AdminRecruitRoleListItemDTO item = new AdminRecruitRoleListItemDTO();
         item.setRoleId(post.getRecruitPostId());
         item.setCrewUserId(post.getUserId());
-        item.setCompanyProfileId(post.getCompanyProfileId());
+        item.setCrewProfileId(post.getCrewProfileId());
         item.setProjectId(project != null ? project.getId() : roleExtra.getProjectId());
         item.setProjectTitle(firstNonBlank(project == null ? null : project.getTitle(), post.getDramaName(), "未关联项目"));
-        item.setCompanyName(firstNonBlank(profile == null ? null : profile.getCompanyName(),
-                crewUser == null ? null : crewUser.getUserName(), "未命名剧组"));
-        item.setRoleName(firstNonBlank(post.getRoleName(), post.getTitle(), "未命名角色"));
+        item.setCrewName(firstNonBlank(profile == null ? null : profile.getCrewName(),
+                crewUser == null ? null : crewUser.getUserName(), null));
+        item.setRoleName(firstNonBlank(post.getRoleName(), post.getTitle(), null));
         item.setGender(toGenderText(post.getRequireGender()));
         item.setMinAge(post.getRequireAgeMin());
         item.setMaxAge(post.getRequireAgeMax());
@@ -362,7 +362,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
 
     private AdminRecruitApplyListItemDTO toApplyItem(RecruitApply apply,
                                                      RecruitPost post,
-                                                     Map<Long, CompanyProfile> companyProfileMap,
+                                                     Map<Long, CrewProfile> crewProfileMap,
                                                      Map<Long, User> userMap,
                                                      Map<Long, ActorProfile> actorProfileMap,
                                                      Map<Long, Map<Long, ProjectRespDTO>> projectMapByCrewUserId) {
@@ -373,7 +373,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         RoleExtraDTO roleExtra = readRoleExtra(post.getExtendedField());
         Map<Long, ProjectRespDTO> projectMap = projectMapByCrewUserId.getOrDefault(post.getUserId(), Collections.emptyMap());
         ProjectRespDTO project = roleExtra.getProjectId() == null ? null : projectMap.get(roleExtra.getProjectId());
-        CompanyProfile profile = companyProfileMap.get(post.getCompanyProfileId());
+        CrewProfile profile = crewProfileMap.get(post.getCrewProfileId());
         User crewUser = userMap.get(post.getUserId());
         User actorUser = userMap.get(apply.getActorUserId());
         ActorProfile actorProfile = actorProfileMap.get(apply.getActorUserId());
@@ -385,12 +385,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         item.setCrewUserId(post.getUserId());
         item.setProjectId(project != null ? project.getId() : roleExtra.getProjectId());
         item.setProjectTitle(firstNonBlank(project == null ? null : project.getTitle(), post.getDramaName(), "未关联项目"));
-        item.setCompanyName(firstNonBlank(profile == null ? null : profile.getCompanyName(),
-                crewUser == null ? null : crewUser.getUserName(), "未命名剧组"));
-        item.setRoleName(firstNonBlank(post.getRoleName(), post.getTitle(), "未命名角色"));
+        item.setCrewName(firstNonBlank(profile == null ? null : profile.getCrewName(),
+                crewUser == null ? null : crewUser.getUserName(), null));
+        item.setRoleName(firstNonBlank(post.getRoleName(), post.getTitle(), null));
         item.setRoleStatus(resolveRoleStatus(post.getPostStatus()));
         item.setActorName(firstNonBlank(actorProfile == null ? null : actorProfile.getNickName(),
-                actorUser == null ? null : actorUser.getUserName(), "未命名演员"));
+                actorUser == null ? null : actorUser.getUserName(), null));
         item.setActorPhone(firstNonBlank(actorProfile == null ? null : actorProfile.getPhone(),
                 actorUser == null ? null : actorUser.getPhone(), ""));
         item.setActorAvatar(firstNonBlank(actorProfile == null ? null : actorProfile.getAvatarUrl(),
@@ -420,7 +420,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         if (StringUtils.hasText(query.getKeyword())) {
             return containsText(item.getTitle(), query.getKeyword())
                     || containsText(item.getDescription(), query.getKeyword())
-                    || containsText(item.getCompanyName(), query.getKeyword())
+                    || containsText(item.getCrewName(), query.getKeyword())
                     || containsText(item.getContactName(), query.getKeyword());
         }
         return true;
@@ -445,7 +445,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         if (StringUtils.hasText(query.getKeyword())) {
             return containsText(item.getRoleName(), query.getKeyword())
                     || containsText(item.getProjectTitle(), query.getKeyword())
-                    || containsText(item.getCompanyName(), query.getKeyword())
+                    || containsText(item.getCrewName(), query.getKeyword())
                     || containsText(item.getRequirement(), query.getKeyword());
         }
         return true;
@@ -474,18 +474,18 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
             return containsText(item.getActorName(), query.getKeyword())
                     || containsText(item.getRoleName(), query.getKeyword())
                     || containsText(item.getProjectTitle(), query.getKeyword())
-                    || containsText(item.getCompanyName(), query.getKeyword());
+                    || containsText(item.getCrewName(), query.getKeyword());
         }
         return true;
     }
 
-    private Map<Long, Map<Long, ProjectRespDTO>> buildProjectMapByCrewUserId(Collection<CompanyProfile> profiles) {
+    private Map<Long, Map<Long, ProjectRespDTO>> buildProjectMapByCrewUserId(Collection<CrewProfile> profiles) {
         Map<Long, Map<Long, ProjectRespDTO>> result = new LinkedHashMap<>();
-        for (CompanyProfile profile : profiles) {
+        for (CrewProfile profile : profiles) {
             if (profile == null || profile.getUserId() == null) {
                 continue;
             }
-            Map<Long, ProjectRespDTO> projectMap = safeProjects(readCompanyExtras(profile.getExtendedField())).stream()
+            Map<Long, ProjectRespDTO> projectMap = safeProjects(readCrewExtras(profile.getExtendedField())).stream()
                     .filter(project -> project.getId() != null)
                     .collect(Collectors.toMap(ProjectRespDTO::getId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
             result.put(profile.getUserId(), projectMap);
@@ -493,12 +493,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         return result;
     }
 
-    private Map<Long, CompanyProfile> loadCompanyProfileMap(Set<Long> profileIds) {
+    private Map<Long, CrewProfile> loadCrewProfileMap(Set<Long> profileIds) {
         if (profileIds == null || profileIds.isEmpty()) {
             return Collections.emptyMap();
         }
-        return companyProfileMapper.selectBatchIds(profileIds).stream()
-                .collect(Collectors.toMap(CompanyProfile::getCompanyProfileId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        return crewProfileMapper.selectBatchIds(profileIds).stream()
+                .collect(Collectors.toMap(CrewProfile::getCrewProfileId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
     }
 
     private Map<Long, User> loadUserMap(Set<Long> userIds) {
@@ -530,11 +530,11 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
     }
 
     private ProjectMutationContext requireProjectContext(Long projectId) {
-        List<CompanyProfile> profiles = companyProfileMapper.selectList(new LambdaQueryWrapper<CompanyProfile>()
-                .orderByDesc(CompanyProfile::getLastUpdate)
-                .orderByDesc(CompanyProfile::getCompanyProfileId));
-        for (CompanyProfile profile : profiles) {
-            CompanyProfileExtrasDTO extras = readCompanyExtras(profile.getExtendedField());
+        List<CrewProfile> profiles = crewProfileMapper.selectList(new LambdaQueryWrapper<CrewProfile>()
+                .orderByDesc(CrewProfile::getLastUpdate)
+                .orderByDesc(CrewProfile::getCrewProfileId));
+        for (CrewProfile profile : profiles) {
+            CrewProfileExtrasDTO extras = readCrewExtras(profile.getExtendedField());
             for (ProjectRespDTO project : safeProjectRefs(extras)) {
                 if (Objects.equals(project.getId(), projectId)) {
                     return new ProjectMutationContext(profile, extras, project);
@@ -544,29 +544,29 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         throw new BizException("项目不存在");
     }
 
-    private CompanyProfileExtrasDTO readCompanyExtras(String raw) {
+    private CrewProfileExtrasDTO readCrewExtras(String raw) {
         if (!StringUtils.hasText(raw)) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
         try {
-            CompanyProfileExtrasDTO extras = objectMapper.readValue(raw, CompanyProfileExtrasDTO.class);
+            CrewProfileExtrasDTO extras = objectMapper.readValue(raw, CrewProfileExtrasDTO.class);
             if (extras.getProjects() == null) {
                 extras.setProjects(new ArrayList<>());
             }
             return extras;
         } catch (Exception ignored) {
-            return new CompanyProfileExtrasDTO();
+            return new CrewProfileExtrasDTO();
         }
     }
 
-    private void saveCompanyExtras(CompanyProfile profile, CompanyProfileExtrasDTO extras) {
-        profile.setExtendedField(writeCompanyExtras(extras));
-        companyProfileMapper.updateById(profile);
+    private void saveCrewExtras(CrewProfile profile, CrewProfileExtrasDTO extras) {
+        profile.setExtendedField(writeCrewExtras(extras));
+        crewProfileMapper.updateById(profile);
     }
 
-    private String writeCompanyExtras(CompanyProfileExtrasDTO extras) {
+    private String writeCrewExtras(CrewProfileExtrasDTO extras) {
         try {
-            return objectMapper.writeValueAsString(extras == null ? new CompanyProfileExtrasDTO() : extras);
+            return objectMapper.writeValueAsString(extras == null ? new CrewProfileExtrasDTO() : extras);
         } catch (Exception e) {
             throw new BizException("项目数据序列化失败");
         }
@@ -587,7 +587,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         }
     }
 
-    private List<ProjectRespDTO> safeProjects(CompanyProfileExtrasDTO extras) {
+    private List<ProjectRespDTO> safeProjects(CrewProfileExtrasDTO extras) {
         if (extras == null || extras.getProjects() == null) {
             return Collections.emptyList();
         }
@@ -596,7 +596,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
                 .toList();
     }
 
-    private List<ProjectRespDTO> safeProjectRefs(CompanyProfileExtrasDTO extras) {
+    private List<ProjectRespDTO> safeProjectRefs(CrewProfileExtrasDTO extras) {
         if (extras == null || extras.getProjects() == null) {
             return Collections.emptyList();
         }
@@ -611,7 +611,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
             return target;
         }
         target.setId(source.getId());
-        target.setCompanyId(source.getCompanyId());
+        target.setCrewId(source.getCrewId());
         target.setTitle(source.getTitle());
         target.setDescription(source.getDescription());
         target.setLocation(source.getLocation());
@@ -623,7 +623,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         return target;
     }
 
-    private List<Long> closeProjectRoles(CompanyProfile profile, Long projectId) {
+    private List<Long> closeProjectRoles(CrewProfile profile, Long projectId) {
         if (profile == null || profile.getUserId() == null || projectId == null) {
             return Collections.emptyList();
         }
@@ -646,12 +646,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         return affectedRoleIds;
     }
 
-    private ProjectRespDTO findProjectByRole(CompanyProfile profile, Long crewUserId, RoleExtraDTO roleExtra) {
+    private ProjectRespDTO findProjectByRole(CrewProfile profile, Long crewUserId, RoleExtraDTO roleExtra) {
         if (roleExtra == null || roleExtra.getProjectId() == null) {
             return null;
         }
         if (profile != null) {
-            ProjectRespDTO project = safeProjects(readCompanyExtras(profile.getExtendedField())).stream()
+            ProjectRespDTO project = safeProjects(readCrewExtras(profile.getExtendedField())).stream()
                     .filter(item -> Objects.equals(item.getId(), roleExtra.getProjectId()))
                     .findFirst()
                     .orElse(null);
@@ -662,25 +662,25 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         if (crewUserId == null) {
             return null;
         }
-        return companyProfileMapper.selectList(new LambdaQueryWrapper<CompanyProfile>()
-                        .eq(CompanyProfile::getUserId, crewUserId)
-                        .orderByDesc(CompanyProfile::getLastUpdate)
-                        .orderByDesc(CompanyProfile::getCompanyProfileId))
+        return crewProfileMapper.selectList(new LambdaQueryWrapper<CrewProfile>()
+                        .eq(CrewProfile::getUserId, crewUserId)
+                        .orderByDesc(CrewProfile::getLastUpdate)
+                        .orderByDesc(CrewProfile::getCrewProfileId))
                 .stream()
-                .map(CompanyProfile::getExtendedField)
-                .map(this::readCompanyExtras)
+                .map(CrewProfile::getExtendedField)
+                .map(this::readCrewExtras)
                 .flatMap(extras -> safeProjects(extras).stream())
                 .filter(project -> Objects.equals(project.getId(), roleExtra.getProjectId()))
                 .findFirst()
                 .orElse(null);
     }
 
-    private CompanyProfile resolveCompanyProfile(RecruitPost post) {
+    private CrewProfile resolveCrewProfile(RecruitPost post) {
         if (post == null) {
             return null;
         }
-        if (post.getCompanyProfileId() != null) {
-            CompanyProfile profile = companyProfileMapper.selectById(post.getCompanyProfileId());
+        if (post.getCrewProfileId() != null) {
+            CrewProfile profile = crewProfileMapper.selectById(post.getCrewProfileId());
             if (profile != null) {
                 return profile;
             }
@@ -688,10 +688,10 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         if (post.getUserId() == null) {
             return null;
         }
-        return companyProfileMapper.selectOne(new LambdaQueryWrapper<CompanyProfile>()
-                .eq(CompanyProfile::getUserId, post.getUserId())
-                .orderByDesc(CompanyProfile::getLastUpdate)
-                .orderByDesc(CompanyProfile::getCompanyProfileId)
+        return crewProfileMapper.selectOne(new LambdaQueryWrapper<CrewProfile>()
+                .eq(CrewProfile::getUserId, post.getUserId())
+                .orderByDesc(CrewProfile::getLastUpdate)
+                .orderByDesc(CrewProfile::getCrewProfileId)
                 .last("limit 1"));
     }
 
@@ -759,12 +759,12 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         return "paused";
     }
 
-    private Map<String, Object> snapshotProject(CompanyProfile profile, ProjectRespDTO project) {
+    private Map<String, Object> snapshotProject(CrewProfile profile, ProjectRespDTO project) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("projectId", project == null ? null : project.getId());
-        snapshot.put("companyProfileId", profile == null ? null : profile.getCompanyProfileId());
+        snapshot.put("crewProfileId", profile == null ? null : profile.getCrewProfileId());
         snapshot.put("crewUserId", profile == null ? null : profile.getUserId());
-        snapshot.put("companyName", profile == null ? null : profile.getCompanyName());
+        snapshot.put("crewName", profile == null ? null : profile.getCrewName());
         snapshot.put("title", project == null ? null : project.getTitle());
         snapshot.put("status", project == null ? null : project.getStatus());
         snapshot.put("location", project == null ? null : project.getLocation());
@@ -777,7 +777,7 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("roleId", post.getRecruitPostId());
         snapshot.put("crewUserId", post.getUserId());
-        snapshot.put("companyProfileId", post.getCompanyProfileId());
+        snapshot.put("crewProfileId", post.getCrewProfileId());
         snapshot.put("projectId", roleExtra == null ? null : roleExtra.getProjectId());
         snapshot.put("projectStatus", project == null ? null : project.getStatus());
         snapshot.put("projectTitle", project == null ? null : project.getTitle());
@@ -890,6 +890,6 @@ public class AdminRecruitGovernanceServiceImpl implements AdminRecruitGovernance
         return value.trim();
     }
 
-    private record ProjectMutationContext(CompanyProfile profile, CompanyProfileExtrasDTO extras, ProjectRespDTO project) {
+    private record ProjectMutationContext(CrewProfile profile, CrewProfileExtrasDTO extras, ProjectRespDTO project) {
     }
 }

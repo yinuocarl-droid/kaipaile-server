@@ -18,7 +18,5 @@ public class ActorShareCapabilityRespDTO {
 
     private Boolean canUseCustomInviteCard;
 
-    private Boolean canApplyFortuneTheme;
-
     private List<String> reasonCodes = new ArrayList<>();
 }

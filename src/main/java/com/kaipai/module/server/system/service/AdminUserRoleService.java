@@ -9,3 +9,5 @@ public interface AdminUserRoleService extends IService<AdminUserRole> {
 
     void replaceRoles(Long adminUserId, Collection<Long> roleIds);
 }
+
+

@@ -9,9 +9,12 @@ public class ThemeTokenItemDTO {
 
     private Long templateId;
     private String templateCode;
-    private String sceneKey;
+    private String templateSceneCode;
     private String templateName;
     private Integer status;
     private String baseThemeJson;
     private LocalDateTime updateTime;
 }
+
+
+

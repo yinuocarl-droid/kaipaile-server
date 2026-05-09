@@ -11,5 +11,5 @@ public class AdminAiResumeFailureEscalationRoleOptionDTO {
 
     private String roleName;
 
-    private String rolloutStage;
+    private String permissionStage;
 }

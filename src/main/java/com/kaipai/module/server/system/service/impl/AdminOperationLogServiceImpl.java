@@ -22,7 +22,22 @@ public class AdminOperationLogServiceImpl extends ServiceImpl<AdminOperationLogM
     @Override
     public PageResult<AdminOperationLogListItemDTO> adminOperationLogList(AdminOperationLogQueryDTO query) {
         Page<AdminOperationLog> page = new Page<>(query.getPageNo(), query.getPageSize());
-        LambdaQueryWrapper<AdminOperationLog> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<AdminOperationLog> wrapper = new LambdaQueryWrapper<AdminOperationLog>()
+                .select(
+                        AdminOperationLog::getOperationLogId,
+                        AdminOperationLog::getAdminUserId,
+                        AdminOperationLog::getAdminUserName,
+                        AdminOperationLog::getModuleCode,
+                        AdminOperationLog::getOperationCode,
+                        AdminOperationLog::getTargetType,
+                        AdminOperationLog::getTargetId,
+                        AdminOperationLog::getRequestId,
+                        AdminOperationLog::getOperationResult,
+                        AdminOperationLog::getFailReason,
+                        AdminOperationLog::getClientIp,
+                        AdminOperationLog::getConfirmedAt,
+                        AdminOperationLog::getCreateTime
+                );
         if (query.getAdminUserId() != null) {
             wrapper.eq(AdminOperationLog::getAdminUserId, query.getAdminUserId());
         }
@@ -70,3 +85,5 @@ public class AdminOperationLogServiceImpl extends ServiceImpl<AdminOperationLogM
         return dto;
     }
 }
+
+

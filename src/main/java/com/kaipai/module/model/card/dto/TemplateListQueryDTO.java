@@ -6,7 +6,7 @@ import lombok.Data;
 @Data
 public class TemplateListQueryDTO {
 
-    private String sceneKey;
+    private String templateSceneCode;
     private Integer status;
     private String tier;
 
@@ -16,3 +16,6 @@ public class TemplateListQueryDTO {
     @Min(1)
     private long pageSize = 20;
 }
+
+
+

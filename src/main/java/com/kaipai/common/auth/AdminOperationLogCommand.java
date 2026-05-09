@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 @Builder
 public class AdminOperationLogCommand {
 
+    String requestId;
     String moduleCode;
     String operationCode;
     String targetType;

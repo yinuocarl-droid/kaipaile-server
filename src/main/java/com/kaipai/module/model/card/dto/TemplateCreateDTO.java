@@ -10,7 +10,7 @@ public class TemplateCreateDTO {
     private String templateCode;
 
     @NotBlank
-    private String sceneKey;
+    private String templateSceneCode;
 
     @NotBlank
     private String templateName;
@@ -23,9 +23,14 @@ public class TemplateCreateDTO {
 
     private Integer requiredLevel;
 
-    private Boolean membershipRequired;
+    private Integer requiredInviteCount;
+
+    private Boolean unlockRequired;
 
     private String baseThemeJson;
 
     private String artifactPresetJson;
 }
+
+
+

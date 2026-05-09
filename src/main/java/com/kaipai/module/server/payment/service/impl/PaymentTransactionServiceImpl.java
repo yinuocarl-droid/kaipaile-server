@@ -5,13 +5,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
-import com.kaipai.module.model.membership.entity.MembershipProduct;
+import com.kaipai.module.model.capability.entity.CapabilityProduct;
 import com.kaipai.module.model.payment.dto.AdminPaymentTransactionDetailDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentTransactionListItemDTO;
 import com.kaipai.module.model.payment.dto.AdminPaymentTransactionQueryDTO;
 import com.kaipai.module.model.payment.entity.PaymentOrder;
 import com.kaipai.module.model.payment.entity.PaymentTransaction;
-import com.kaipai.module.server.membership.mapper.MembershipProductMapper;
+import com.kaipai.module.server.capability.mapper.CapabilityProductMapper;
 import com.kaipai.module.server.payment.mapper.PaymentOrderMapper;
 import com.kaipai.module.server.payment.mapper.PaymentTransactionMapper;
 import com.kaipai.module.server.payment.service.PaymentTransactionService;
@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactionMapper, PaymentTransaction> implements PaymentTransactionService {
 
     private final PaymentOrderMapper paymentOrderMapper;
-    private final MembershipProductMapper membershipProductMapper;
+    private final CapabilityProductMapper capabilityProductMapper;
 
     @Override
     public PageResult<AdminPaymentTransactionListItemDTO> adminTransactionList(AdminPaymentTransactionQueryDTO query) {
@@ -57,9 +57,9 @@ public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactio
             throw new BizException("支付流水不存在");
         }
         PaymentOrder order = transaction.getPaymentOrderId() == null ? null : paymentOrderMapper.selectById(transaction.getPaymentOrderId());
-        MembershipProduct product = order == null || order.getProductId() == null
+        CapabilityProduct product = order == null || order.getProductId() == null
                 ? null
-                : membershipProductMapper.selectById(order.getProductId());
+                : capabilityProductMapper.selectById(order.getProductId());
         AdminPaymentTransactionDetailDTO dto = new AdminPaymentTransactionDetailDTO();
         dto.setTransactionInfo(toTransactionInfo(transaction, order, product));
         dto.setCallbackPayloadSummary(toCallbackPayloadSummary(transaction));
@@ -130,7 +130,7 @@ public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactio
 
     private AdminPaymentTransactionDetailDTO.TransactionInfo toTransactionInfo(PaymentTransaction transaction,
                                                                                PaymentOrder order,
-                                                                               MembershipProduct product) {
+                                                                               CapabilityProduct product) {
         AdminPaymentTransactionDetailDTO.TransactionInfo info = new AdminPaymentTransactionDetailDTO.TransactionInfo();
         info.setTransactionId(transaction.getTransactionId());
         info.setPaymentOrderId(transaction.getPaymentOrderId());
@@ -179,7 +179,7 @@ public class PaymentTransactionServiceImpl extends ServiceImpl<PaymentTransactio
         return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
     }
 
-    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime fallback) {
-        return primary != null ? primary : fallback;
+    private LocalDateTime firstNonNull(LocalDateTime primary, LocalDateTime secondary) {
+        return primary != null ? primary : secondary;
     }
 }

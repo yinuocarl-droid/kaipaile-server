@@ -50,11 +50,25 @@ public class AiResumeFailureRecordDTO {
 
     private String notificationStatus;
 
+    private Long notificationDeliveryId;
+
+    private String notificationSourceType;
+
+    private String notificationChannelCode;
+
+    private String notificationRecipient;
+
+    private String notificationProviderCode;
+
+    private String notificationProviderMessageId;
+
     private String notificationSentAt;
 
     private String notificationFailureReason;
 
     private String notificationReceiptStatus;
+
+    private String notificationReceiptSourceType;
 
     private String notificationReceiptAt;
 

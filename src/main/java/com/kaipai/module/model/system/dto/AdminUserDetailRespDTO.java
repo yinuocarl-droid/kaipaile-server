@@ -21,3 +21,5 @@ public class AdminUserDetailRespDTO {
     private LocalDateTime lastUpdate;
     private List<AdminRoleBriefDTO> roles;
 }
+
+

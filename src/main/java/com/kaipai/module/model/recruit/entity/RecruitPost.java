@@ -19,7 +19,7 @@ public class RecruitPost extends BaseEntity {
 
     private Long userId;
 
-    private Long companyProfileId;
+    private Long crewProfileId;
 
     private String postNo;
 
@@ -73,7 +73,7 @@ public class RecruitPost extends BaseEntity {
     /** 帖子类型: 1普通, 2紧急置顶 */
     private Integer postType;
 
-    /** 帖子状态: 1招募中, 2已结束, 3已关闭 */
+    /** 帖子状态: 1招募中, 2已结束, 3已暂停 */
     private Integer postStatus;
 
     private Integer viewCount;

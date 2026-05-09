@@ -16,7 +16,9 @@ public class AdminRoleAiGovernanceMatrixItemDTO {
     private Boolean hasAiReviewAction;
     private Boolean hasAiResolveAction;
     private Boolean aiReady;
-    private Boolean reliesOnFallback;
-    private String rolloutStage;
+    private Boolean operationLogsPermissionGap;
+    private String permissionStage;
     private List<String> missingPermissions;
 }
+
+

@@ -57,7 +57,7 @@ public class AdminReferralController {
     }
 
     @Operation(summary = "邀请记录详情")
-    @GetMapping({"/records/{id}", "/{id}"})
+    @GetMapping("/records/{id}")
     @PreAuthorize("hasAuthority('page.referral.records')")
     public R<AdminReferralRecordDetailDTO> recordDetail(@PathVariable Long id) {
         return R.ok(referralRecordService.adminRecordDetail(id));

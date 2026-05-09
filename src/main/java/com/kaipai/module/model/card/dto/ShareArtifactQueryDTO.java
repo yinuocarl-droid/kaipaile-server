@@ -14,6 +14,9 @@ public class ShareArtifactQueryDTO {
 
     private Long templateId;
     private String templateCode;
-    private String sceneKey;
+    private String templateSceneCode;
     private Integer status;
 }
+
+
+

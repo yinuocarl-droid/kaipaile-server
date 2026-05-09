@@ -5,71 +5,87 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
-import com.kaipai.module.model.actor.entity.ActorProfile;
 import com.kaipai.module.model.card.dto.ActorCardConfigRespDTO;
 import com.kaipai.module.model.card.dto.ActorCardConfigSaveDTO;
+import com.kaipai.module.model.card.dto.ActorMyShareCardItemDTO;
+import com.kaipai.module.model.card.dto.ActorMyShareCardsRespDTO;
 import com.kaipai.module.model.card.dto.ActorSceneTemplateRespDTO;
 import com.kaipai.module.model.card.entity.ActorCardConfig;
-import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
+import com.kaipai.module.model.card.entity.ActorSharePreference;
+import com.kaipai.module.model.card.entity.UserShareCard;
 import com.kaipai.module.server.card.mapper.ActorCardConfigMapper;
 import com.kaipai.module.server.card.service.ActorCardConfigService;
+import com.kaipai.module.server.card.service.ActorSharePreferenceService;
 import com.kaipai.module.server.card.service.CardSceneTemplateService;
+import com.kaipai.module.server.card.service.UserShareCardService;
+import com.kaipai.module.server.card.support.CurrentPhaseShareArtifactSupport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMapper, ActorCardConfig> implements ActorCardConfigService {
 
     private final CardSceneTemplateService templateService;
-    private final ActorProfileMapper actorProfileMapper;
+    private final ActorSharePreferenceService actorSharePreferenceService;
+    private final UserShareCardService userShareCardService;
     private final ObjectMapper objectMapper;
 
     @Override
-    public ActorCardConfigRespDTO actorConfig(Long actorId, String sceneKey) {
-        String normalizedSceneKey = normalizeSceneKey(sceneKey);
-        ActorCardConfig config = getOne(new LambdaQueryWrapper<ActorCardConfig>()
-                .eq(ActorCardConfig::getUserId, actorId)
-                .eq(ActorCardConfig::getSceneKey, normalizedSceneKey)
-                .orderByDesc(ActorCardConfig::getLastUpdate)
-                .orderByDesc(ActorCardConfig::getConfigId)
-                .last("limit 1"), false);
-        return config == null
-                ? buildDefaultConfig(actorId, normalizedSceneKey)
-                : toResp(config);
+    public ActorCardConfigRespDTO actorConfig(Long shareCardId) {
+        UserShareCard shareCard = requireActiveShareCard(shareCardId);
+        ActorSceneTemplateRespDTO template = requireTemplate(shareCard);
+        ActorCardConfig config = requireConfig(shareCard);
+        return toResp(config, shareCard, template);
     }
 
     @Override
-    public ActorCardConfigRespDTO saveActorConfig(Long currentUserId, ActorCardConfigSaveDTO dto) {
-        if (dto.getActorId() == null || !dto.getActorId().equals(currentUserId)) {
-            throw new BizException("只能保存自己的名片配置");
+    public ActorMyShareCardsRespDTO myCards(Long profileUserId) {
+        List<ActorSceneTemplateRespDTO> templates = templateService.actorSceneTemplates();
+        Map<Long, Integer> templateOrder = new LinkedHashMap<>();
+        for (int i = 0; i < templates.size(); i++) {
+            templateOrder.put(templates.get(i).getTemplateId(), i);
         }
 
-        String normalizedSceneKey = normalizeSceneKey(dto.getSceneKey());
-        ActorCardConfig config = getOne(new LambdaQueryWrapper<ActorCardConfig>()
-                .eq(ActorCardConfig::getUserId, currentUserId)
-                .eq(ActorCardConfig::getSceneKey, normalizedSceneKey)
-                .orderByDesc(ActorCardConfig::getLastUpdate)
-                .orderByDesc(ActorCardConfig::getConfigId)
-                .last("limit 1"), false);
+        List<ActorMyShareCardItemDTO> cards = userShareCardService.listOwnedCards(profileUserId).stream()
+                .sorted((left, right) -> Integer.compare(
+                        templateOrder.getOrDefault(left.getTemplateId(), Integer.MAX_VALUE),
+                        templateOrder.getOrDefault(right.getTemplateId(), Integer.MAX_VALUE)))
+                .map(this::toMyCardItem)
+                .collect(Collectors.toList());
+
+        ActorMyShareCardsRespDTO response = new ActorMyShareCardsRespDTO();
+        response.setCards(cards);
+        response.setTemplates(templates);
+        return response;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ActorCardConfigRespDTO saveActorConfig(Long currentUserId, ActorCardConfigSaveDTO dto) {
+        if (dto.getShareCardId() == null) {
+            throw new BizException("shareCardId 不能为空");
+        }
+        UserShareCard shareCard = requireOwnedActiveShareCard(currentUserId, dto.getShareCardId());
+        ActorSceneTemplateRespDTO template = requireTemplate(shareCard);
+        ActorCardConfig config = findConfig(shareCard);
         if (config == null) {
             config = new ActorCardConfig();
-            config.setUserId(currentUserId);
+            config.setShareCardId(shareCard.getShareCardId());
         }
 
-        ActorProfile profile = actorProfileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
-                .eq(ActorProfile::getUserId, currentUserId)
-                .last("limit 1"));
-        config.setActorProfileId(profile == null ? null : profile.getActorProfileId());
-        config.setSceneKey(normalizedSceneKey);
-        config.setLayoutVariant(StringUtils.hasText(dto.getLayoutVariant()) ? dto.getLayoutVariant() : buildDefaultConfig(currentUserId, normalizedSceneKey).getLayoutVariant());
-        config.setPrimaryColor(trimToNull(dto.getPrimaryColor()));
-        config.setAccentColor(trimToNull(dto.getAccentColor()));
-        config.setBackgroundColor(trimToNull(dto.getBackgroundColor()));
+        config.setLayoutVariant(requireText(dto.getLayoutVariant(), "layoutVariant 不能为空"));
+        config.setPrimaryColor(requireText(dto.getPrimaryColor(), "primaryColor 不能为空"));
+        config.setAccentColor(requireText(dto.getAccentColor(), "accentColor 不能为空"));
+        config.setBackgroundColor(requireText(dto.getBackgroundColor(), "backgroundColor 不能为空"));
         config.setHighlightedExperienceIds(writeJson(dto.getHighlightedExperiences()));
         config.setHighlightedPhotoUrls(writeJson(dto.getHighlightedPhotos()));
         config.setTagOrderJson(writeJson(dto.getTagOrder()));
@@ -79,50 +95,15 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
         } else {
             updateById(config);
         }
-        return toResp(config);
+        saveSharePreference(shareCard, dto);
+        return toResp(config, shareCard, template);
     }
 
-    @Override
-    public ActorCardConfigRespDTO applyLuckyColor(Long currentUserId, String sceneKey, String luckyColor) {
-        if (!StringUtils.hasText(luckyColor)) {
-            throw new BizException("幸运色数据缺失");
-        }
-        String normalizedSceneKey = normalizeSceneKey(sceneKey);
-        ActorCardConfig config = getOne(new LambdaQueryWrapper<ActorCardConfig>()
-                .eq(ActorCardConfig::getUserId, currentUserId)
-                .eq(ActorCardConfig::getSceneKey, normalizedSceneKey)
-                .orderByDesc(ActorCardConfig::getLastUpdate)
-                .orderByDesc(ActorCardConfig::getConfigId)
-                .last("limit 1"), false);
-        if (config == null) {
-            ActorCardConfigRespDTO defaults = buildDefaultConfig(currentUserId, normalizedSceneKey);
-            config = new ActorCardConfig();
-            config.setUserId(currentUserId);
-            config.setSceneKey(normalizedSceneKey);
-            config.setLayoutVariant(defaults.getLayoutVariant());
-            config.setAccentColor(defaults.getAccentColor());
-            config.setBackgroundColor(defaults.getBackgroundColor());
-            config.setHighlightedExperienceIds(writeJson(defaults.getHighlightedExperiences()));
-            config.setHighlightedPhotoUrls(writeJson(defaults.getHighlightedPhotos()));
-            config.setTagOrderJson(writeJson(defaults.getTagOrder()));
-        }
-        ActorProfile profile = actorProfileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
-                .eq(ActorProfile::getUserId, currentUserId)
-                .last("limit 1"));
-        config.setActorProfileId(profile == null ? null : profile.getActorProfileId());
-        config.setPrimaryColor(luckyColor.trim());
-        if (config.getConfigId() == null) {
-            save(config);
-        } else {
-            updateById(config);
-        }
-        return toResp(config);
-    }
-
-    private ActorCardConfigRespDTO toResp(ActorCardConfig config) {
+    private ActorCardConfigRespDTO toResp(ActorCardConfig config, UserShareCard shareCard, ActorSceneTemplateRespDTO template) {
         ActorCardConfigRespDTO dto = new ActorCardConfigRespDTO();
-        dto.setActorId(config.getUserId());
-        dto.setSceneKey(normalizeSceneKey(config.getSceneKey()));
+        dto.setProfileUserId(shareCard.getUserId());
+        dto.setShareCardId(shareCard.getShareCardId());
+        dto.setTemplateSceneCode(template.getTemplateSceneCode());
         dto.setLayoutVariant(config.getLayoutVariant());
         dto.setPrimaryColor(config.getPrimaryColor());
         dto.setAccentColor(config.getAccentColor());
@@ -130,56 +111,106 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
         dto.setHighlightedExperiences(readLongList(config.getHighlightedExperienceIds()));
         dto.setHighlightedPhotos(readStringList(config.getHighlightedPhotoUrls()));
         dto.setTagOrder(readStringList(config.getTagOrderJson()));
-        return mergeWithDefault(dto);
+        return dto;
     }
 
-    private ActorCardConfigRespDTO buildDefaultConfig(Long actorId, String sceneKey) {
-        ActorSceneTemplateRespDTO template = templateService.actorSceneTemplates().stream()
-                .filter(item -> normalizeSceneKey(item.getSceneKey()).equals(sceneKey))
+    private ActorMyShareCardItemDTO toMyCardItem(UserShareCard card) {
+        ActorSceneTemplateRespDTO template = requireTemplate(card);
+        ActorCardConfig config = requireConfig(card);
+        ActorMyShareCardItemDTO dto = new ActorMyShareCardItemDTO();
+        dto.setCardId(card.getShareCardId());
+        dto.setConfigId(config.getConfigId());
+        dto.setProfileUserId(card.getUserId());
+        dto.setTemplateId(card.getTemplateId());
+        dto.setTemplateSceneCode(template.getTemplateSceneCode());
+        dto.setLayoutVariant(config.getLayoutVariant());
+        dto.setPrimaryColor(config.getPrimaryColor());
+        dto.setAccentColor(config.getAccentColor());
+        dto.setBackgroundColor(config.getBackgroundColor());
+        dto.setDefaultCard(Boolean.TRUE.equals(card.getDefaultCard()));
+        dto.setCreateTime(card.getCreateTime());
+        dto.setUpdateTime(card.getLastUpdate());
+        return dto;
+    }
+
+    private UserShareCard requireActiveShareCard(Long shareCardId) {
+        UserShareCard shareCard = userShareCardService.findActiveCardById(shareCardId);
+        if (shareCard == null) {
+            throw new BizException("分享卡片不存在");
+        }
+        return shareCard;
+    }
+
+    private UserShareCard requireOwnedActiveShareCard(Long currentUserId, Long shareCardId) {
+        UserShareCard shareCard = requireActiveShareCard(shareCardId);
+        if (!currentUserId.equals(shareCard.getUserId())) {
+            throw new BizException("分享卡片不存在");
+        }
+        return shareCard;
+    }
+
+    private ActorSceneTemplateRespDTO requireTemplate(UserShareCard shareCard) {
+        if (shareCard.getTemplateId() == null || shareCard.getTemplateId() <= 0) {
+            throw new BizException("分享卡片模板未绑定");
+        }
+        return templateService.actorSceneTemplates().stream()
+                .filter(item -> shareCard.getTemplateId().equals(item.getTemplateId()))
                 .findFirst()
-                .orElseGet(() -> templateService.actorSceneTemplates().stream().findFirst().orElse(null));
-
-        ActorCardConfigRespDTO dto = new ActorCardConfigRespDTO();
-        dto.setActorId(actorId);
-        dto.setSceneKey(sceneKey);
-        dto.setLayoutVariant(template == null ? "compact" : template.getLayoutVariant());
-        dto.setPrimaryColor(template == null || template.getThemeColors() == null ? "#ff7a45" : template.getThemeColors().getPrimary());
-        dto.setAccentColor(template == null || template.getThemeColors() == null ? "#ffb178" : template.getThemeColors().getAccent());
-        dto.setBackgroundColor(template == null || template.getThemeColors() == null ? "#fff7f0" : template.getThemeColors().getBackground());
-        dto.setHighlightedExperiences(Collections.emptyList());
-        dto.setHighlightedPhotos(Collections.emptyList());
-        dto.setTagOrder(Collections.emptyList());
-        return dto;
+                .orElseThrow(() -> new BizException("分享卡片模板不存在或未启用"));
     }
 
-    private ActorCardConfigRespDTO mergeWithDefault(ActorCardConfigRespDTO dto) {
-        ActorCardConfigRespDTO defaults = buildDefaultConfig(dto.getActorId(), dto.getSceneKey());
-        if (!StringUtils.hasText(dto.getLayoutVariant())) {
-            dto.setLayoutVariant(defaults.getLayoutVariant());
+    private ActorCardConfig requireConfig(UserShareCard shareCard) {
+        ActorCardConfig config = findConfig(shareCard);
+        if (config == null) {
+            throw new BizException("分享卡片配置未绑定");
         }
-        if (!StringUtils.hasText(dto.getPrimaryColor())) {
-            dto.setPrimaryColor(defaults.getPrimaryColor());
-        }
-        if (!StringUtils.hasText(dto.getAccentColor())) {
-            dto.setAccentColor(defaults.getAccentColor());
-        }
-        if (!StringUtils.hasText(dto.getBackgroundColor())) {
-            dto.setBackgroundColor(defaults.getBackgroundColor());
-        }
-        if (dto.getHighlightedExperiences() == null) {
-            dto.setHighlightedExperiences(defaults.getHighlightedExperiences());
-        }
-        if (dto.getHighlightedPhotos() == null) {
-            dto.setHighlightedPhotos(defaults.getHighlightedPhotos());
-        }
-        if (dto.getTagOrder() == null) {
-            dto.setTagOrder(defaults.getTagOrder());
-        }
-        return dto;
+        return config;
     }
 
-    private String normalizeSceneKey(String sceneKey) {
-        return StringUtils.hasText(sceneKey) ? sceneKey.trim() : "general";
+    private ActorCardConfig findConfig(UserShareCard shareCard) {
+        return getOne(new LambdaQueryWrapper<ActorCardConfig>()
+                .eq(ActorCardConfig::getShareCardId, shareCard.getShareCardId())
+                .orderByDesc(ActorCardConfig::getLastUpdate)
+                .orderByDesc(ActorCardConfig::getConfigId)
+                .last("limit 1"), false);
+    }
+
+    private void saveSharePreference(UserShareCard shareCard, ActorCardConfigSaveDTO dto) {
+        boolean hasExplicitPreference = StringUtils.hasText(dto.getPreferredArtifact());
+        if (!hasExplicitPreference) {
+            return;
+        }
+
+        ActorSharePreference preference = resolveSharePreference(shareCard.getShareCardId());
+        if (preference == null) {
+            preference = new ActorSharePreference();
+        }
+        preference.setShareCardId(shareCard.getShareCardId());
+        preference.setPreferredArtifact(resolvePreferredArtifact(dto, preference));
+
+        if (preference.getPreferenceId() == null) {
+            actorSharePreferenceService.save(preference);
+        } else {
+            actorSharePreferenceService.updateById(preference);
+        }
+    }
+
+    private String resolvePreferredArtifact(ActorCardConfigSaveDTO dto, ActorSharePreference existingPreference) {
+        if (StringUtils.hasText(dto.getPreferredArtifact())) {
+            return CurrentPhaseShareArtifactSupport.requirePreferredArtifact(dto.getPreferredArtifact());
+        }
+        if (existingPreference != null && StringUtils.hasText(existingPreference.getPreferredArtifact())) {
+            return CurrentPhaseShareArtifactSupport.requirePreferredArtifact(existingPreference.getPreferredArtifact());
+        }
+        throw new BizException("preferredArtifact 缺失");
+    }
+
+    private ActorSharePreference resolveSharePreference(Long shareCardId) {
+        return actorSharePreferenceService.getOne(new LambdaQueryWrapper<ActorSharePreference>()
+                .eq(ActorSharePreference::getShareCardId, shareCardId)
+                .orderByDesc(ActorSharePreference::getLastUpdate)
+                .orderByDesc(ActorSharePreference::getPreferenceId)
+                .last("limit 1"), false);
     }
 
     private List<Long> readLongList(String raw) {
@@ -188,8 +219,8 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
         }
         try {
             return objectMapper.readValue(raw, new TypeReference<List<Long>>() {});
-        } catch (Exception ignore) {
-            return Collections.emptyList();
+        } catch (Exception error) {
+            throw new BizException("名片配置 highlightedExperiences JSON 无效");
         }
     }
 
@@ -199,8 +230,8 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
         }
         try {
             return objectMapper.readValue(raw, new TypeReference<List<String>>() {});
-        } catch (Exception ignore) {
-            return Collections.emptyList();
+        } catch (Exception error) {
+            throw new BizException("名片配置列表 JSON 无效");
         }
     }
 
@@ -215,4 +246,15 @@ public class ActorCardConfigServiceImpl extends ServiceImpl<ActorCardConfigMappe
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
+
+    private String requireText(String value, String message) {
+        String normalized = trimToNull(value);
+        if (!StringUtils.hasText(normalized)) {
+            throw new BizException(message);
+        }
+        return normalized;
+    }
 }
+
+
+

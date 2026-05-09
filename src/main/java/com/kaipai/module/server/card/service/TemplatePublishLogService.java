@@ -16,3 +16,6 @@ public interface TemplatePublishLogService extends IService<TemplatePublishLog> 
 
     PageResult<TemplatePublishLogItemDTO> adminPublishLogList(TemplatePublishLogQueryDTO queryDTO);
 }
+
+
+

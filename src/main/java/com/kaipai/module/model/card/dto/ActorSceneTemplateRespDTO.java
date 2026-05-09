@@ -7,7 +7,9 @@ import java.util.List;
 @Data
 public class ActorSceneTemplateRespDTO {
 
-    private String sceneKey;
+    private Long templateId;
+
+    private String templateSceneCode;
 
     private String name;
 
@@ -27,6 +29,10 @@ public class ActorSceneTemplateRespDTO {
 
     private Integer requiredLevel;
 
+    private Integer requiredInviteCount;
+
+    private PageConfig pageConfig = new PageConfig();
+
     @Data
     public static class ThemeColors {
 
@@ -40,4 +46,43 @@ public class ActorSceneTemplateRespDTO {
 
         private String heroText;
     }
+
+    @Data
+    public static class PageConfig {
+
+        private String layoutPreset;
+
+        private String surface;
+
+        private String density;
+
+        private String heroStyle;
+
+        private Sections sections = new Sections();
+
+        private Actions actions = new Actions();
+    }
+
+    @Data
+    public static class Sections {
+
+        private Boolean profile;
+
+        private Boolean stats;
+
+        private Boolean timeline;
+
+        private Boolean contactCta;
+    }
+
+    @Data
+    public static class Actions {
+
+        private String primary;
+
+        private String secondary;
+    }
 }
+
+
+

@@ -26,3 +26,5 @@ public class AdminOperationLogDetailRespDTO {
     private String createUserName;
     private LocalDateTime createTime;
 }
+
+

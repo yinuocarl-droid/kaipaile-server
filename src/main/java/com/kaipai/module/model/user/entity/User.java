@@ -31,7 +31,7 @@ public class User extends BaseEntity {
 
     private String avatarUrl;
 
-    /** 用户类型: 1演员, 2公司/剧组, 3平台管理员 */
+    /** 用户类型: 1演员, 2团队/剧组, 3平台管理员 */
     private Integer userType;
 
     /** 注册来源: 1手机, 2邮箱, 3微信小程序 */

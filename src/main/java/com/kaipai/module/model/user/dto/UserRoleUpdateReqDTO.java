@@ -13,6 +13,6 @@ public class UserRoleUpdateReqDTO {
     @NotNull
     @Min(1)
     @Max(2)
-    @Schema(description = "用户类型: 1=演员, 2=剧组/公司", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "用户类型: 1=演员, 2=剧组/团队", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer userType;
 }

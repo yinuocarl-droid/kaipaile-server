@@ -1,6 +1,6 @@
 package com.kaipai.module.model.card.dto;
 
-import com.kaipai.module.model.fortune.dto.FortuneReportRespDTO;
+import com.kaipai.module.model.actor.dto.ActorProfileDTO;
 import com.kaipai.module.model.level.dto.ActorLevelInfoRespDTO;
 import com.kaipai.module.model.level.dto.ActorShareCapabilityRespDTO;
 import lombok.Data;
@@ -19,18 +19,22 @@ public class ActorPersonalizationRespDTO {
 
     private ActorShareCapabilityRespDTO capability;
 
+    private ActorProfileDTO actorSnapshot;
+
     private List<ShareArtifact> artifacts = new ArrayList<>();
 
     @Data
     public static class PersonalizationProfile {
 
-        private Long actorId;
+        private Long profileUserId;
+
+        private Long shareCardId;
 
         private ActorLevelInfoRespDTO levelInfo;
 
-        private String membershipTier;
+        private String capabilityTier;
 
-        private String sceneKey;
+        private String templateSceneCode;
 
         private ActorSceneTemplateRespDTO template;
 
@@ -38,23 +42,7 @@ public class ActorPersonalizationRespDTO {
 
         private ActorCardConfigRespDTO customConfig;
 
-        private FortuneProfile fortuneProfile = new FortuneProfile();
-
         private SharePreferences sharePreferences = new SharePreferences();
-    }
-
-    @Data
-    public static class FortuneProfile {
-
-        private FortuneReportRespDTO report;
-
-        private String luckyColor;
-
-        private List<String> keywords = new ArrayList<>();
-
-        private String tone;
-
-        private List<String> visualTags = new ArrayList<>();
     }
 
     @Data
@@ -62,15 +50,12 @@ public class ActorPersonalizationRespDTO {
 
         private String preferredArtifact;
 
-        private Boolean enableFortuneTheme;
-
-        private String preferredTone;
     }
 
     @Data
     public static class ThemeTokenSet {
 
-        private String themeId;
+        private String tokenKey;
 
         private String primary;
 
@@ -121,3 +106,6 @@ public class ActorPersonalizationRespDTO {
         private ActorShareCapabilityRespDTO capability;
     }
 }
+
+
+

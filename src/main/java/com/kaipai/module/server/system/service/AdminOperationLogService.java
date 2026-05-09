@@ -13,3 +13,5 @@ public interface AdminOperationLogService extends IService<AdminOperationLog> {
 
     AdminOperationLogDetailRespDTO adminOperationLogDetail(Long operationLogId);
 }
+
+

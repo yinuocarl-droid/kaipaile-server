@@ -33,3 +33,5 @@ public class AdminOperationLog extends BaseEntity {
     private String confirmToken;
     private LocalDateTime confirmedAt;
 }
+
+

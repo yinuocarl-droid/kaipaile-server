@@ -12,8 +12,11 @@ public class ThemeTokenQueryDTO {
     @Min(1)
     private long pageSize = 20;
 
-    private String sceneKey;
+    private String templateSceneCode;
     private Integer status;
     private Long templateId;
     private String templateCode;
 }
+
+
+

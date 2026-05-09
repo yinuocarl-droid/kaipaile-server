@@ -14,4 +14,6 @@ public class AdminAiResumeGovernanceSweepRequestDTO {
     private String evaluateAt;
 
     private String reason;
+
+    private String requestId;
 }

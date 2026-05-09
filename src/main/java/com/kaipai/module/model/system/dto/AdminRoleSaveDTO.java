@@ -19,3 +19,5 @@ public class AdminRoleSaveDTO {
     private List<String> pagePermissions;
     private List<String> actionPermissions;
 }
+
+

@@ -15,7 +15,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,12 +42,8 @@ public class AiController {
     @Operation(summary = "生成 AI 简历润色 patch")
     @PostMapping("/polish-resume")
     public R<?> polishResume(Authentication authentication,
-                             @RequestBody(required = false) AiResumePolishReqDTO dto) {
-        Long userId = currentUserId(authentication);
-        if (isLegacyConsumeRequest(dto)) {
-            return R.ok(aiQuotaService.consumeResumePolishQuota(userId));
-        }
-        return R.ok(aiResumeService.polishResume(userId, dto));
+                             @RequestBody AiResumePolishReqDTO dto) {
+        return R.ok(aiResumeService.polishResume(currentUserId(authentication), dto));
     }
 
     @Operation(summary = "获取 AI 简历润色历史")
@@ -74,9 +69,4 @@ public class AiController {
         return userId;
     }
 
-    private boolean isLegacyConsumeRequest(AiResumePolishReqDTO dto) {
-        return dto == null
-                || (!StringUtils.hasText(dto.getInstruction())
-                && (dto.getContext() == null || dto.getContext().getEditableFields() == null || dto.getContext().getEditableFields().isEmpty()));
-    }
 }

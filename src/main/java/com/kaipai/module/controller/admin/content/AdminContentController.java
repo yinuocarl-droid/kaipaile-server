@@ -1,5 +1,6 @@
 package com.kaipai.module.controller.admin.content;
 
+import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.PageResult;
 import com.kaipai.common.result.R;
 import com.kaipai.module.model.card.dto.TemplateCreateDTO;
@@ -13,14 +14,23 @@ import com.kaipai.module.model.card.dto.TemplateRollbackDTO;
 import com.kaipai.module.model.card.dto.TemplateSortDTO;
 import com.kaipai.module.model.card.dto.TemplateStatusChangeDTO;
 import com.kaipai.module.model.card.dto.TemplateUpdateDTO;
+import com.kaipai.module.model.card.dto.ContactRequestDecisionDTO;
 import com.kaipai.module.model.card.dto.ThemeTokenItemDTO;
 import com.kaipai.module.model.card.dto.ThemeTokenQueryDTO;
 import com.kaipai.module.model.card.dto.ThemeTokenUpdateDTO;
 import com.kaipai.module.model.card.dto.ShareArtifactItemDTO;
 import com.kaipai.module.model.card.dto.ShareArtifactQueryDTO;
 import com.kaipai.module.model.card.dto.ShareArtifactUpdateDTO;
+import com.kaipai.module.model.card.dto.AdminContactRequestDetailDTO;
+import com.kaipai.module.model.card.dto.AdminContactRequestItemDTO;
+import com.kaipai.module.model.card.dto.AdminContactRequestQueryDTO;
+import com.kaipai.module.model.card.dto.AdminShareCardGovernanceDetailDTO;
+import com.kaipai.module.model.card.dto.AdminShareCardGovernanceItemDTO;
+import com.kaipai.module.model.card.dto.AdminShareCardGovernanceQueryDTO;
 import com.kaipai.module.server.card.service.CardSceneTemplateService;
+import com.kaipai.module.server.card.service.ShareCardContactRequestService;
 import com.kaipai.module.server.card.service.TemplatePublishLogService;
+import com.kaipai.module.server.card.service.UserShareCardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -42,6 +52,8 @@ public class AdminContentController {
 
     private final CardSceneTemplateService templateService;
     private final TemplatePublishLogService templatePublishLogService;
+    private final ShareCardContactRequestService shareCardContactRequestService;
+    private final UserShareCardService userShareCardService;
 
     @Operation(summary = "模板列表")
     @GetMapping("/templates")
@@ -69,6 +81,7 @@ public class AdminContentController {
     @PutMapping("/templates/{id}")
     @PreAuthorize("hasAuthority('action.content.template.edit')")
     public R<Void> update(@PathVariable Long id, @Valid @RequestBody TemplateUpdateDTO dto) {
+        assertPathId(dto.getTemplateId(), id);
         dto.setTemplateId(id);
         templateService.updateTemplate(dto);
         return R.ok();
@@ -102,6 +115,7 @@ public class AdminContentController {
     @PostMapping("/templates/{id}/publish")
     @PreAuthorize("hasAuthority('action.content.template.publish')")
     public R<Void> publish(@PathVariable Long id, @Valid @RequestBody TemplatePublishDTO dto) {
+        assertPathId(dto.getTemplateId(), id);
         dto.setTemplateId(id);
         templateService.publishTemplate(dto);
         return R.ok();
@@ -111,9 +125,16 @@ public class AdminContentController {
     @PostMapping("/templates/{id}/rollback")
     @PreAuthorize("hasAuthority('action.content.template.rollback')")
     public R<Void> rollback(@PathVariable Long id, @Valid @RequestBody TemplateRollbackDTO dto) {
+        assertPathId(dto.getTemplateId(), id);
         dto.setTemplateId(id);
         templateService.rollbackTemplate(dto);
         return R.ok();
+    }
+
+    private void assertPathId(Long bodyTemplateId, Long pathTemplateId) {
+        if (bodyTemplateId != null && !bodyTemplateId.equals(pathTemplateId)) {
+            throw new BizException("templateId 与路径 id 不一致");
+        }
     }
 
     @Operation(summary = "发布记录列表")
@@ -152,4 +173,51 @@ public class AdminContentController {
         templateService.updateShareArtifact(templateId, dto);
         return R.ok();
     }
+
+    @Operation(summary = "联系方式申请记录列表")
+    @GetMapping("/contact-requests")
+    @PreAuthorize("hasAuthority('page.content.contact-requests')")
+    public R<PageResult<AdminContactRequestItemDTO>> contactRequests(@Valid AdminContactRequestQueryDTO queryDTO) {
+        return R.ok(shareCardContactRequestService.adminContactRequestList(queryDTO));
+    }
+
+    @Operation(summary = "联系方式申请记录详情")
+    @GetMapping("/contact-requests/{requestId}")
+    @PreAuthorize("hasAuthority('page.content.contact-requests')")
+    public R<AdminContactRequestDetailDTO> contactRequestDetail(@PathVariable Long requestId) {
+        return R.ok(shareCardContactRequestService.adminContactRequestDetail(requestId));
+    }
+
+    @Operation(summary = "后台同意联系方式申请")
+    @PostMapping("/contact-requests/{requestId}/approve")
+    @PreAuthorize("hasAuthority('action.content.contact-request.approve')")
+    public R<Void> approveContactRequest(@PathVariable Long requestId,
+                                          @RequestBody(required = false) ContactRequestDecisionDTO dto) {
+        shareCardContactRequestService.adminApprove(requestId, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "后台拒绝联系方式申请")
+    @PostMapping("/contact-requests/{requestId}/reject")
+    @PreAuthorize("hasAuthority('action.content.contact-request.reject')")
+    public R<Void> rejectContactRequest(@PathVariable Long requestId,
+                                         @RequestBody(required = false) ContactRequestDecisionDTO dto) {
+        shareCardContactRequestService.adminReject(requestId, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "分享卡治理列表")
+    @GetMapping("/share-cards")
+    @PreAuthorize("hasAuthority('page.content.share-cards')")
+    public R<PageResult<AdminShareCardGovernanceItemDTO>> shareCards(@Valid AdminShareCardGovernanceQueryDTO queryDTO) {
+        return R.ok(userShareCardService.adminShareCardList(queryDTO));
+    }
+
+    @Operation(summary = "分享卡治理详情")
+    @GetMapping("/share-cards/{shareCardId}")
+    @PreAuthorize("hasAuthority('page.content.share-cards')")
+    public R<AdminShareCardGovernanceDetailDTO> shareCardDetail(@PathVariable Long shareCardId) {
+        return R.ok(userShareCardService.adminShareCardDetail(shareCardId));
+    }
 }
+

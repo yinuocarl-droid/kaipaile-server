@@ -10,13 +10,14 @@ public class TemplateDetailDTO {
 
     private Long templateId;
     private String templateCode;
-    private String sceneKey;
+    private String templateSceneCode;
     private String templateName;
     private String description;
     private String layoutVariant;
     private String tier;
     private Integer requiredLevel;
-    private Boolean membershipRequired;
+    private Integer requiredInviteCount;
+    private Boolean unlockRequired;
     private String baseThemeJson;
     private String artifactPresetJson;
     private Integer status;
@@ -27,3 +28,6 @@ public class TemplateDetailDTO {
     private LocalDateTime lastUpdate;
     private List<TemplatePublishLogItemDTO> publishLogs;
 }
+
+
+

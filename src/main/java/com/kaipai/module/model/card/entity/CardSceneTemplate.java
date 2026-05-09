@@ -18,15 +18,18 @@ public class CardSceneTemplate extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long templateId;
     private String templateCode;
-    private String sceneKey;
+    private String templateSceneCode;
     private String templateName;
     private String description;
     private String layoutVariant;
     private String tier;
     private Integer requiredLevel;
-    private Boolean membershipRequired;
+    private Boolean unlockRequired;
     private String baseThemeJson;
     private String artifactPresetJson;
     private Integer status;
     private Integer sortNo;
 }
+
+
+

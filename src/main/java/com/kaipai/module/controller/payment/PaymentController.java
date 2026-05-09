@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "会员支付")
+@Tag(name = "支付管理")
 @RestController
 @RequestMapping("/payment")
 @RequiredArgsConstructor

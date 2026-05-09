@@ -21,3 +21,6 @@ public class TemplatePublishLogQueryDTO {
     private LocalDateTime publishedAtFrom;
     private LocalDateTime publishedAtTo;
 }
+
+
+

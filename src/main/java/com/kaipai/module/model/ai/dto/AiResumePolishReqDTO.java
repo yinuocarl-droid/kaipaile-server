@@ -21,7 +21,7 @@ public class AiResumePolishReqDTO {
     @Data
     public static class ContextDTO {
 
-        private Long actorId;
+        private Long profileUserId;
 
         private String certificationStatus;
 
@@ -76,3 +76,5 @@ public class AiResumePolishReqDTO {
         private String content;
     }
 }
+
+
