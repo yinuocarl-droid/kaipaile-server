@@ -29,14 +29,14 @@ public class AiProfileCardPromptAgent {
         brief.put("modelCode", modelCode);
         brief.put("styleCode", templateSceneCode);
         brief.put("canvas", Map.of(
-                "ratio", "2:3 vertical",
-                "targetSize", "1024x1536",
+                "ratio", "9:16 vertical",
+                "targetSize", "2160x3840",
                 "renderIntent", "premium actor profile share image"
         ));
         brief.put("fixedLayout", Map.of(
                 "primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions",
-                "subjectBox", "right side, x=560-930, y=160-1320; face center near x=725,y=430; upper body or full body must stay inside this box",
-                "safeArea", "left side, x=80-470, y=180-1260 must remain visually clean for app-rendered profile text; do not generate text",
+                "subjectBox", "right side, x=1180-1980, y=400-3380; face center near x=1530,y=1080; upper body or full body must stay inside this box",
+                "safeArea", "left side, x=160-1020, y=430-3200 must remain visually clean for app-rendered profile text; do not generate text",
                 "background", "full bleed scenic background; depth behind subject; no readable signage"
         ));
         brief.put("profileSignals", buildProfileSignals(profile));
@@ -87,9 +87,9 @@ public class AiProfileCardPromptAgent {
                 Preserve the actor's recognizable face, age impression, hairstyle direction, body proportion and natural skin texture.
 
                 Fixed composition:
-                - Canvas: 2:3 vertical poster, target 1024x1536.
-                - Place the actor on the right side only: x=560-930, y=160-1320, face center near x=725,y=430.
-                - Keep the left side x=80-470, y=180-1260 as a clean text-safe area for the app UI overlay.
+                - Canvas: 9:16 vertical poster, target 2160x3840.
+                - Place the actor on the right side only: x=1180-1980, y=400-3380, face center near x=1530,y=1080.
+                - Keep the left side x=160-1020, y=430-3200 as a clean text-safe area for the app UI overlay.
                 - Do not render any words, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
 
                 Visual style:

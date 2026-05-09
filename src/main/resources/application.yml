@@ -47,6 +47,22 @@ kaipai:
       - http://127.0.0.1:5100
       - http://localhost:5100
   ai:
+    profile-card:
+      provider-code: ${AI_PROFILE_CARD_PROVIDER_CODE:mock}
+      generation-mode: image_to_image
+      estimated-ready-minutes: 10
+      kplyyk:
+        endpoint: ${AI_PROFILE_CARD_KPLYYK_ENDPOINT:http://kplyyk.com/v0/management/image-generation/test}
+        auth-header: ${AI_PROFILE_CARD_KPLYYK_AUTH_HEADER:Authorization}
+        auth-token: ${AI_PROFILE_CARD_KPLYYK_AUTH_TOKEN:}
+        model: gpt-image-2
+        size: 2160x3840
+        quality: high
+        count: 1
+        connect-timeout-ms: ${AI_PROFILE_CARD_KPLYYK_CONNECT_TIMEOUT_MS:10000}
+        read-timeout-ms: ${AI_PROFILE_CARD_KPLYYK_READ_TIMEOUT_MS:120000}
+        poll-interval-ms: ${AI_PROFILE_CARD_KPLYYK_POLL_INTERVAL_MS:1500}
+        max-poll-attempts: ${AI_PROFILE_CARD_KPLYYK_MAX_POLL_ATTEMPTS:400}
     resume:
       notification:
         enabled: false

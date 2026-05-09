@@ -19,6 +19,8 @@ public class AiProfileCardProperties {
 
     private HttpProvider http = new HttpProvider();
 
+    private KplyykProvider kplyyk = new KplyykProvider();
+
     private Executor executor = new Executor();
 
     @Data
@@ -41,6 +43,21 @@ public class AiProfileCardProperties {
         private String model = "profile-card-image";
         private int connectTimeoutMs = 10000;
         private int readTimeoutMs = 120000;
+    }
+
+    @Data
+    public static class KplyykProvider {
+        private String endpoint = "http://kplyyk.com/v0/management/image-generation/test";
+        private String authHeader = "Authorization";
+        private String authToken;
+        private String model = "gpt-image-2";
+        private String size = "2160x3840";
+        private String quality = "high";
+        private int count = 1;
+        private int connectTimeoutMs = 10000;
+        private int readTimeoutMs = 120000;
+        private int pollIntervalMs = 1500;
+        private int maxPollAttempts = 400;
     }
 
     @Data
