@@ -2,6 +2,7 @@ package com.kaipai.module.controller.ai;
 
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
+import com.kaipai.module.model.ai.dto.AiProfileCardArtifactRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
@@ -40,6 +41,18 @@ public class AiProfileCardController {
     @GetMapping("/tasks")
     public R<List<AiProfileCardTaskRespDTO>> tasks(Authentication authentication) {
         return R.ok(aiProfileCardService.tasks(currentUserId(authentication)));
+    }
+
+    @Operation(summary = "查询我的 AI 分享图作品列表")
+    @GetMapping("/artifacts")
+    public R<List<AiProfileCardArtifactRespDTO>> artifacts(Authentication authentication) {
+        return R.ok(aiProfileCardService.artifacts(currentUserId(authentication)));
+    }
+
+    @Operation(summary = "查询 AI 分享图公开作品")
+    @GetMapping("/artifacts/{artifactId}")
+    public R<AiProfileCardArtifactRespDTO> artifact(@PathVariable String artifactId) {
+        return R.ok(aiProfileCardService.artifact(artifactId));
     }
 
     @Operation(summary = "查询 AI 分享图生成任务")

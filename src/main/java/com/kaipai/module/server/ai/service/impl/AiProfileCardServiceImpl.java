@@ -7,6 +7,7 @@ import com.kaipai.module.model.actor.dto.ActorPhotoCategoriesDTO;
 import com.kaipai.module.model.actor.dto.ActorProfileDTO;
 import com.kaipai.module.model.actor.dto.ActorWorkExperienceDTO;
 import com.kaipai.module.model.actor.entity.ActorProfile;
+import com.kaipai.module.model.ai.dto.AiProfileCardArtifactRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
@@ -119,6 +120,31 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 .stream()
                 .map(this::toTaskResp)
                 .toList();
+    }
+
+    @Override
+    public List<AiProfileCardArtifactRespDTO> artifacts(Long currentUserId) {
+        return list(successArtifactQuery()
+                .eq(ActorAiProfileCardTask::getUserId, currentUserId)
+                .orderByDesc(ActorAiProfileCardTask::getCreateTime)
+                .last("limit 50"))
+                .stream()
+                .map(this::toArtifactResp)
+                .toList();
+    }
+
+    @Override
+    public AiProfileCardArtifactRespDTO artifact(String artifactId) {
+        if (!StringUtils.hasText(artifactId)) {
+            throw new BizException("artifactId 不能为空");
+        }
+        ActorAiProfileCardTask task = getOne(successArtifactQuery()
+                .eq(ActorAiProfileCardTask::getTaskId, artifactId.trim())
+                .last("limit 1"), false);
+        if (task == null) {
+            throw new BizException("AI 分享图作品不存在");
+        }
+        return toArtifactResp(task);
     }
 
     private void runGeneration(String taskId) {
@@ -312,6 +338,27 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
         return dto;
+    }
+
+    private AiProfileCardArtifactRespDTO toArtifactResp(ActorAiProfileCardTask task) {
+        AiProfileCardArtifactRespDTO dto = new AiProfileCardArtifactRespDTO();
+        dto.setArtifactId(task.getTaskId());
+        dto.setTaskId(task.getTaskId());
+        dto.setStatus(task.getStatus());
+        dto.setTemplateSceneCode(task.getTemplateSceneCode());
+        dto.setStyleCode(task.getStyleCode());
+        dto.setShareCardId(task.getShareCardId());
+        dto.setGeneratedImageUrl(task.getGeneratedImageUrl());
+        dto.setCreateTime(task.getCreateTime());
+        dto.setLastUpdate(task.getLastUpdate());
+        return dto;
+    }
+
+    private LambdaQueryWrapper<ActorAiProfileCardTask> successArtifactQuery() {
+        return new LambdaQueryWrapper<ActorAiProfileCardTask>()
+                .eq(ActorAiProfileCardTask::getStatus, STATUS_SUCCESS)
+                .isNotNull(ActorAiProfileCardTask::getShareCardId)
+                .isNotNull(ActorAiProfileCardTask::getGeneratedImageUrl);
     }
 
     private String truncateFailure(String value) {

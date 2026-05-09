@@ -76,7 +76,9 @@ public class SecurityConfig {
                                 "/card/personalization",
                                 "/api/card/personalization",
                                 "/card/config",
-                                "/api/card/config").permitAll()
+                                "/api/card/config",
+                                "/ai/profile-card/artifacts/*",
+                                "/api/ai/profile-card/artifacts/*").permitAll()
                         .requestMatchers(WHITE_LIST).permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
