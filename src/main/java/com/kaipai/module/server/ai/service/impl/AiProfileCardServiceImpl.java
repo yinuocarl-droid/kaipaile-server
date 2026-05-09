@@ -94,7 +94,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         response.setTaskId(task.getTaskId());
         response.setStatus(task.getStatus());
         response.setEstimatedReadyMinutes(properties.getEstimatedReadyMinutes());
-        response.setMessage("图片生成中，请在10分钟后到「我的作品集」的「已创建分享」中查看。");
+        response.setMessage("图片生成中，请在10分钟后到「我的作品集」的「已创建分享」中查看 AI 图详情页。");
         return response;
     }
 
@@ -108,6 +108,17 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             throw new BizException("AI 分享图任务不存在");
         }
         return toTaskResp(task);
+    }
+
+    @Override
+    public List<AiProfileCardTaskRespDTO> tasks(Long currentUserId) {
+        return list(new LambdaQueryWrapper<ActorAiProfileCardTask>()
+                .eq(ActorAiProfileCardTask::getUserId, currentUserId)
+                .orderByDesc(ActorAiProfileCardTask::getCreateTime)
+                .last("limit 50"))
+                .stream()
+                .map(this::toTaskResp)
+                .toList();
     }
 
     private void runGeneration(String taskId) {

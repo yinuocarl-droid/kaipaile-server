@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @Tag(name = "AI 分享图")
 @RestController
 @RequestMapping("/ai/profile-card")
@@ -32,6 +34,12 @@ public class AiProfileCardController {
     public R<AiProfileCardGenerateRespDTO> generate(Authentication authentication,
                                                     @Valid @RequestBody AiProfileCardGenerateReqDTO dto) {
         return R.ok(aiProfileCardService.generate(currentUserId(authentication), dto));
+    }
+
+    @Operation(summary = "查询我的 AI 分享图生成任务列表")
+    @GetMapping("/tasks")
+    public R<List<AiProfileCardTaskRespDTO>> tasks(Authentication authentication) {
+        return R.ok(aiProfileCardService.tasks(currentUserId(authentication)));
     }
 
     @Operation(summary = "查询 AI 分享图生成任务")
