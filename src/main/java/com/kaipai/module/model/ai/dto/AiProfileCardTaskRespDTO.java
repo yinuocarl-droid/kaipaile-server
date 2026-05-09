@@ -15,6 +15,10 @@ public class AiProfileCardTaskRespDTO {
 
     private String styleCode;
 
+    private String providerCode;
+
+    private String modelCode;
+
     private Long shareCardId;
 
     private String sourceImageUrl;

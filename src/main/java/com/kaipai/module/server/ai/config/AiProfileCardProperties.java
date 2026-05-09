@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "kaipai.ai.profile-card")
 public class AiProfileCardProperties {
 
-    private String providerCode = "mock";
+    private String providerCode = "kplyyk";
 
     private String generationMode = "image_to_image";
 

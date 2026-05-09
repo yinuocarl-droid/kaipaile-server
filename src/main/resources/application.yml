@@ -48,7 +48,7 @@ kaipai:
       - http://localhost:5100
   ai:
     profile-card:
-      provider-code: ${AI_PROFILE_CARD_PROVIDER_CODE:mock}
+      provider-code: ${AI_PROFILE_CARD_PROVIDER_CODE:kplyyk}
       generation-mode: image_to_image
       estimated-ready-minutes: 10
       kplyyk:

@@ -21,12 +21,11 @@ import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardProviderDescriptor;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
-import com.kaipai.module.server.ai.provider.AiProfileImageProvider;
-import com.kaipai.module.server.ai.provider.AiProfileImageProviderRegistry;
 import com.kaipai.module.server.ai.service.AiProfileCardService;
 import com.kaipai.module.server.card.service.ActorCardConfigService;
 import com.kaipai.module.server.card.service.UserShareCardService;
@@ -60,7 +59,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final ActorProfileMapper actorProfileMapper;
     private final AiProfileCardProperties properties;
     private final AiProfileCardPromptAgent promptAgent;
-    private final AiProfileImageProviderRegistry providerRegistry;
     private final UserShareCardService userShareCardService;
     private final ActorCardConfigService actorCardConfigService;
     private final AiGeneratedImageStorage generatedImageStorage;
@@ -75,7 +73,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         ActorProfileDTO profile = actorProfileService.mine(currentUserId);
         ActorProfile profileEntity = requireProfileEntity(currentUserId);
         String sourceImageUrl = resolveSourceImage(profile, dto.getSourceImageUrl());
-        AiProfileImageProvider provider = providerRegistry.resolve(properties.getProviderCode());
+        AiProfileCardProviderDescriptor provider = promptAgent.resolveProvider(properties.getProviderCode());
 
         ActorAiProfileCardTask task = new ActorAiProfileCardTask();
         task.setTaskId("aipf_" + UUID.randomUUID().toString().replace("-", ""));
@@ -130,6 +128,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 .orderByDesc(ActorAiProfileCardTask::getCreateTime)
                 .last("limit 50"))
                 .stream()
+                .filter(this::isRealGeneratedImageTask)
                 .map(this::toArtifactResp)
                 .toList();
     }
@@ -142,7 +141,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         ActorAiProfileCardTask task = getOne(successArtifactQuery()
                 .eq(ActorAiProfileCardTask::getTaskId, artifactId.trim())
                 .last("limit 1"), false);
-        if (task == null) {
+        if (task == null || !isRealGeneratedImageTask(task)) {
             throw new BizException("AI 分享图作品不存在");
         }
         return toArtifactResp(task);
@@ -157,24 +156,15 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         markRunning(taskId);
         try {
             ActorProfileDTO profile = actorProfileService.mine(task.getUserId());
-            AiProfileImageProvider provider = providerRegistry.resolve(task.getProviderCode());
-            AiProfileCardPrompt prompt = promptAgent.build(
+            AiProfileCardGeneration generation = promptAgent.generate(
                     profile,
-                    task.getTemplateSceneCode(),
-                    task.getSourceImageUrl(),
-                    provider.modelCode());
-            savePrompt(taskId, prompt);
-
-            AiProfileImageGenerationResult generationResult = provider.generate(new AiProfileImageGenerationRequest(
                     taskId,
-                    provider.modelCode(),
+                    task.getProviderCode(),
                     task.getTemplateSceneCode(),
-                    task.getSourceImageUrl(),
-                    prompt.promptText(),
-                    prompt.negativePrompt(),
-                    prompt.promptJson()
-            ));
-            String generatedImageUrl = resolveGeneratedImageUrl(generationResult);
+                    task.getSourceImageUrl());
+            savePrompt(taskId, generation.prompt());
+
+            String generatedImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
             Long shareCardId = saveGeneratedShareCard(task, profile, generatedImageUrl);
             markSuccess(taskId, shareCardId, generatedImageUrl);
         } catch (Exception error) {
@@ -204,12 +194,16 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         return card.getCardId();
     }
 
-    private String resolveGeneratedImageUrl(AiProfileImageGenerationResult result) {
+    private String resolveGeneratedImageUrl(AiProfileImageGenerationResult result, String sourceImageUrl) {
         if (result == null) {
             throw new BizException("AI 图片生成结果为空");
         }
         if (StringUtils.hasText(result.imageUrl())) {
-            return generatedImageStorage.uploadFromUrl(result.imageUrl().trim(), "ai-profile-card");
+            String imageUrl = result.imageUrl().trim();
+            if (sameMediaUrl(imageUrl, sourceImageUrl)) {
+                throw new BizException("AI 图片生成结果不能直接返回原始参考图");
+            }
+            return generatedImageStorage.uploadFromUrl(imageUrl, "ai-profile-card");
         }
         if (result.imageBytes() != null && result.imageBytes().length > 0) {
             return generatedImageStorage.upload(
@@ -333,9 +327,11 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setStatus(task.getStatus());
         dto.setTemplateSceneCode(task.getTemplateSceneCode());
         dto.setStyleCode(task.getStyleCode());
+        dto.setProviderCode(task.getProviderCode());
+        dto.setModelCode(task.getModelCode());
         dto.setShareCardId(task.getShareCardId());
         dto.setSourceImageUrl(task.getSourceImageUrl());
-        dto.setGeneratedImageUrl(task.getGeneratedImageUrl());
+        dto.setGeneratedImageUrl(isRealGeneratedImageTask(task) ? task.getGeneratedImageUrl() : null);
         dto.setFailureReason(task.getFailureReason());
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
@@ -350,17 +346,44 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setStatus(task.getStatus());
         dto.setTemplateSceneCode(task.getTemplateSceneCode());
         dto.setStyleCode(task.getStyleCode());
+        dto.setProviderCode(task.getProviderCode());
+        dto.setModelCode(task.getModelCode());
         dto.setShareCardId(task.getShareCardId());
+        dto.setSourceImageUrl(task.getSourceImageUrl());
         dto.setGeneratedImageUrl(task.getGeneratedImageUrl());
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
         return dto;
     }
 
+    private boolean isRealGeneratedImageTask(ActorAiProfileCardTask task) {
+        return task != null
+                && STATUS_SUCCESS.equals(task.getStatus())
+                && StringUtils.hasText(task.getGeneratedImageUrl())
+                && !"mock".equalsIgnoreCase(defaultText(task.getProviderCode(), ""))
+                && !sameMediaUrl(task.getGeneratedImageUrl(), task.getSourceImageUrl());
+    }
+
+    private boolean sameMediaUrl(String left, String right) {
+        String normalizedLeft = normalizeMediaUrl(left);
+        String normalizedRight = normalizeMediaUrl(right);
+        return StringUtils.hasText(normalizedLeft)
+                && StringUtils.hasText(normalizedRight)
+                && normalizedLeft.equals(normalizedRight);
+    }
+
+    private String normalizeMediaUrl(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim().split("\\?", 2)[0];
+    }
+
     private ActorAiProfileCardTask ensurePersistedGeneratedImage(ActorAiProfileCardTask task) {
         if (task == null
                 || !STATUS_SUCCESS.equals(task.getStatus())
                 || !StringUtils.hasText(task.getGeneratedImageUrl())
+                || !isRealGeneratedImageTask(task)
                 || generatedImageStorage.isManagedUrl(task.getGeneratedImageUrl())) {
             return task;
         }

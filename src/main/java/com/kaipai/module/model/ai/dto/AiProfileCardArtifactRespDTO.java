@@ -17,7 +17,13 @@ public class AiProfileCardArtifactRespDTO {
 
     private String styleCode;
 
+    private String providerCode;
+
+    private String modelCode;
+
     private Long shareCardId;
+
+    private String sourceImageUrl;
 
     private String generatedImageUrl;
 

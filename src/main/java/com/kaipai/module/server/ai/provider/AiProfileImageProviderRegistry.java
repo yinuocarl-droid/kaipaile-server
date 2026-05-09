@@ -14,7 +14,10 @@ public class AiProfileImageProviderRegistry {
     private final List<AiProfileImageProvider> providers;
 
     public AiProfileImageProvider resolve(String providerCode) {
-        String normalized = StringUtils.hasText(providerCode) ? providerCode.trim() : "mock";
+        String normalized = StringUtils.hasText(providerCode) ? providerCode.trim() : "kplyyk";
+        if ("mock".equalsIgnoreCase(normalized)) {
+            throw new BizException("AI 分享图禁止使用 mock provider，请配置真实生图 provider");
+        }
         return providers.stream()
                 .filter(provider -> normalized.equalsIgnoreCase(provider.providerCode()))
                 .findFirst()

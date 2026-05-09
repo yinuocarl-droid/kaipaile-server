@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.module.model.actor.dto.ActorPhotoCategoriesDTO;
 import com.kaipai.module.model.actor.dto.ActorProfileDTO;
 import com.kaipai.module.model.actor.dto.ActorWorkExperienceDTO;
+import com.kaipai.module.server.ai.provider.AiProfileImageProvider;
+import com.kaipai.module.server.ai.provider.AiProfileImageProviderRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -18,11 +20,36 @@ import java.util.Map;
 public class AiProfileCardPromptAgent {
 
     private final ObjectMapper objectMapper;
+    private final AiProfileImageProviderRegistry providerRegistry;
 
-    public AiProfileCardPrompt build(ActorProfileDTO profile,
-                                     String templateSceneCode,
-                                     String sourceImageUrl,
-                                     String modelCode) {
+    public AiProfileCardProviderDescriptor resolveProvider(String providerCode) {
+        AiProfileImageProvider provider = providerRegistry.resolve(providerCode);
+        return new AiProfileCardProviderDescriptor(provider.providerCode(), provider.modelCode());
+    }
+
+    public AiProfileCardGeneration generate(ActorProfileDTO profile,
+                                            String taskId,
+                                            String providerCode,
+                                            String templateSceneCode,
+                                            String sourceImageUrl) {
+        AiProfileImageProvider provider = providerRegistry.resolve(providerCode);
+        AiProfileCardPrompt prompt = build(profile, templateSceneCode, sourceImageUrl, provider.modelCode());
+        AiProfileImageGenerationResult imageResult = provider.generate(new AiProfileImageGenerationRequest(
+                taskId,
+                provider.modelCode(),
+                templateSceneCode,
+                sourceImageUrl,
+                prompt.promptText(),
+                prompt.negativePrompt(),
+                prompt.promptJson()
+        ));
+        return new AiProfileCardGeneration(provider.providerCode(), provider.modelCode(), prompt, imageResult);
+    }
+
+    private AiProfileCardPrompt build(ActorProfileDTO profile,
+                                      String templateSceneCode,
+                                      String sourceImageUrl,
+                                      String modelCode) {
         StyleBrief style = resolveStyle(templateSceneCode);
         Map<String, Object> brief = new LinkedHashMap<>();
         brief.put("task", "image_to_image_actor_share_poster");
