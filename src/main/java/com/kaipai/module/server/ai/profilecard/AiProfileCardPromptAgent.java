@@ -31,13 +31,15 @@ public class AiProfileCardPromptAgent {
                                             String taskId,
                                             String providerCode,
                                             String templateSceneCode,
+                                            String styleCode,
                                             String sourceImageUrl) {
         AiProfileImageProvider provider = providerRegistry.resolve(providerCode);
-        AiProfileCardPrompt prompt = build(profile, templateSceneCode, sourceImageUrl, provider.modelCode());
+        AiProfileCardPrompt prompt = build(profile, templateSceneCode, styleCode, sourceImageUrl, provider.modelCode());
         AiProfileImageGenerationResult imageResult = provider.generate(new AiProfileImageGenerationRequest(
                 taskId,
                 provider.modelCode(),
                 templateSceneCode,
+                styleCode,
                 sourceImageUrl,
                 prompt.promptText(),
                 prompt.negativePrompt(),
@@ -48,23 +50,31 @@ public class AiProfileCardPromptAgent {
 
     private AiProfileCardPrompt build(ActorProfileDTO profile,
                                       String templateSceneCode,
+                                      String styleCode,
                                       String sourceImageUrl,
                                       String modelCode) {
-        StyleBrief style = resolveStyle(templateSceneCode);
+        String resolvedStyleCode = StringUtils.hasText(styleCode) ? styleCode.trim() : templateSceneCode;
+        StyleBrief style = resolveStyle(templateSceneCode, resolvedStyleCode);
         Map<String, Object> brief = new LinkedHashMap<>();
-        brief.put("task", "image_to_image_actor_share_poster");
+        brief.put("task", "image_to_image_actor_profile_card_background");
         brief.put("modelCode", modelCode);
-        brief.put("styleCode", templateSceneCode);
+        brief.put("templateSceneCode", templateSceneCode);
+        brief.put("styleCode", resolvedStyleCode);
         brief.put("canvas", Map.of(
                 "ratio", "9:16 vertical",
                 "targetSize", "2160x3840",
-                "renderIntent", "premium actor profile share image"
+                "renderIntent", "background and actor portrait layer for deterministic profile card rendering"
         ));
         brief.put("fixedLayout", Map.of(
                 "primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions",
-                "subjectBox", "right side, x=1180-1980, y=400-3380; face center near x=1530,y=1080; upper body or full body must stay inside this box",
-                "safeArea", "left side, x=160-1020, y=430-3200 must remain visually clean for app-rendered profile text; do not generate text",
-                "background", "full bleed scenic background; depth behind subject; no readable signage"
+                "subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box",
+                "heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean for backend-rendered name and facts",
+                "skillsRegion", "x=120-970, y=1450-2210 must remain light and readable for backend-rendered skills",
+                "worksRegion", "x=1080-2010, y=1450-2210 must remain light and readable for backend-rendered works",
+                "photoStripRegion", "x=120-2040, y=2340-2700 must remain clean for backend-rendered photo thumbnails",
+                "aboutRegion", "x=120-2040, y=2860-3440 must remain clean for backend-rendered intro and stats",
+                "footerRegion", "x=0-2160, y=3540-3840 should be a darker calm footer background without text",
+                "background", "full bleed scenic background, document-like parchment or studio surface in lower regions, no readable signage"
         ));
         brief.put("profileSignals", buildProfileSignals(profile));
         brief.put("style", Map.of(
@@ -78,12 +88,13 @@ public class AiProfileCardPromptAgent {
                 "portrait identity is consistent with source image",
                 "hands, eyes, hairline, clothing edges are clean",
                 "no readable words, phone numbers, QR codes, logos or watermarks",
-                "left safe area remains open for deterministic frontend text overlay",
-                "subject remains in the fixed right-side position"
+                "all fixed layout regions remain open for deterministic backend rendering",
+                "subject remains in the fixed hero-right position",
+                "lower profile-card sections stay calm, low contrast, and readable"
         ));
 
         String promptJson = writeJson(brief);
-        String promptText = buildPromptText(profile, style, sourceImageUrl, promptJson);
+        String promptText = buildPromptText(profile, style, templateSceneCode, resolvedStyleCode, sourceImageUrl, promptJson);
         String negativePrompt = String.join(", ",
                 "readable text",
                 "Chinese characters",
@@ -98,37 +109,50 @@ public class AiProfileCardPromptAgent {
                 "low resolution",
                 "over-smoothed plastic skin",
                 "cropped head",
-                "subject outside right-side layout box",
-                "busy left-side safe area"
+                "subject outside hero-right layout box",
+                "busy profile-card text regions",
+                "dark blocks behind text regions",
+                "fake UI labels",
+                "fake QR code"
         );
         return new AiProfileCardPrompt(promptJson, promptText, negativePrompt);
     }
 
     private String buildPromptText(ActorProfileDTO profile,
                                    StyleBrief style,
+                                   String templateSceneCode,
+                                   String styleCode,
                                    String sourceImageUrl,
                                    String promptJson) {
         return """
-                Create a high-end vertical actor share image using image-to-image generation.
+                Create a high-end vertical actor profile-card background layer using image-to-image generation.
                 Use reference image #1 as the actor identity source: %s
                 Preserve the actor's recognizable face, age impression, hairstyle direction, body proportion and natural skin texture.
 
                 Fixed composition:
                 - Canvas: 9:16 vertical poster, target 2160x3840.
-                - Place the actor on the right side only: x=1180-1980, y=400-3380, face center near x=1530,y=1080.
-                - Keep the left side x=160-1020, y=430-3200 as a clean text-safe area for the app UI overlay.
+                - This is only the visual background layer. Backend code will render all final text, photos, QR code and contact UI later.
+                - Place the actor in the hero right area only: x=1120-2050, y=120-1420, face center near x=1580,y=520.
+                - Keep hero left x=120-1080, y=120-1320 clean for backend-rendered name and profile facts.
+                - Keep lower document regions calm and readable:
+                  skills x=120-970 y=1450-2210, works x=1080-2010 y=1450-2210,
+                  photos x=120-2040 y=2340-2700, about/stats x=120-2040 y=2860-3440,
+                  footer x=0-2160 y=3540-3840.
                 - Do not render any words, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
 
                 Visual style:
+                templateSceneCode=%s, styleCode=%s
                 %s
 
-                Actor profile signals to guide mood only, not as rendered text:
+                Actor profile signals to guide styling, wardrobe and mood only, not as rendered text:
                 %s
 
                 Model-independent brief:
                 %s
                 """.formatted(
                 sourceImageUrl,
+                templateSceneCode,
+                styleCode,
                 style.visualDirection(),
                 buildReadableProfileSignals(profile),
                 promptJson
@@ -196,48 +220,57 @@ public class AiProfileCardPromptAgent {
         }
     }
 
-    private StyleBrief resolveStyle(String templateSceneCode) {
+    private StyleBrief resolveStyle(String templateSceneCode, String styleCode) {
+        if ("costume_actor_profile_full_card".equals(styleCode)) {
+            return new StyleBrief(
+                    "古风演员资料长图",
+                    "Chinese period-drama actor profile-card background, elegant palace garden and ink-wash scenery, warm ivory parchment document lower half, antique gold ornamentation, refined Han/Tang costume texture, premium realistic portrait, calm readable layout surfaces",
+                    "warm ivory, ink black, antique gold, muted cinnabar, jade green footer",
+                    "soft cinematic daylight, gentle rim light on hair and robe, low contrast in document regions",
+                    "period-drama robe silhouette, layered fabric, understated embroidery, elegant hair ornament if natural"
+            );
+        }
         return switch (templateSceneCode) {
             case "costume" -> new StyleBrief(
-                    "古风",
-                    "cinematic Chinese period-drama actor portrait, elegant Han/Tang inspired wardrobe, refined fabric texture, ink-wash atmospheric depth, palace corridor or misty garden background, premium gpt-image style, editorial lighting, realistic face, no fantasy exaggeration",
-                    "warm ivory, dark ink, muted cinnabar, antique gold",
-                    "soft directional key light, gentle rim light on hair and shoulders",
+                    "古风演员资料长图",
+                    "cinematic Chinese period-drama actor profile-card background, elegant Han/Tang inspired wardrobe, refined fabric texture, ink-wash atmospheric depth, palace corridor or misty garden background, premium realistic portrait, parchment lower document sections, no fantasy exaggeration",
+                    "warm ivory, dark ink, muted cinnabar, antique gold, jade green",
+                    "soft directional key light, gentle rim light on hair and shoulders, calm lower-section lighting",
                     "period-drama robe silhouette, layered fabric, understated embroidery"
             );
             case "urban" -> new StyleBrief(
-                    "都市",
-                    "modern cinematic actor portrait, quiet city night or studio backdrop, polished fashion editorial tone, confident but natural expression, realistic face detail, shallow depth of field",
-                    "charcoal, steel blue, porcelain white, restrained neon accent",
-                    "large softbox key light with cool rim light",
+                    "都市演员资料长图",
+                    "modern cinematic actor profile-card background, quiet city or studio hero scene, polished fashion editorial tone, confident natural expression, realistic face detail, clean document panels in lower regions",
+                    "charcoal, steel blue, porcelain white, restrained neon accent, soft grey",
+                    "large softbox key light with cool rim light, readable lower panels",
                     "modern fitted coat or clean fashion styling"
             );
             case "classic" -> new StyleBrief(
-                    "经典",
-                    "timeless film-still actor portrait, warm studio backdrop, analog cinema texture, elegant facial lighting, professional casting profile atmosphere",
-                    "warm grey, sepia brown, ivory, muted black",
-                    "classic three-point portrait lighting, soft falloff",
+                    "经典演员资料长图",
+                    "timeless film-still actor profile-card background, warm studio hero backdrop, analog cinema texture, elegant facial lighting, professional casting profile atmosphere, clean lower document sections",
+                    "warm grey, sepia brown, ivory, muted black, champagne",
+                    "classic three-point portrait lighting, soft falloff, readable document lighting",
                     "simple tailored neutral wardrobe"
             );
             case "commercial" -> new StyleBrief(
-                    "商业",
-                    "clean commercial actor portrait, bright premium studio scene, approachable expression, polished skin texture, advertising-ready composition",
-                    "white, graphite, muted champagne, soft blue",
-                    "bright clean softbox lighting",
+                    "商业演员资料长图",
+                    "clean commercial actor profile-card background, bright premium studio hero scene, approachable expression, polished natural skin texture, advertising-ready composition, lower regions clean and minimal",
+                    "white, graphite, muted champagne, soft blue, silver",
+                    "bright clean softbox lighting, low-contrast lower panels",
                     "minimal contemporary wardrobe"
             );
             case "artistic" -> new StyleBrief(
-                    "艺术",
-                    "art-house actor portrait, cinematic shadow, expressive but realistic mood, textured backdrop, restrained gallery poster feeling",
-                    "off-white, ink black, olive grey, muted rust",
-                    "controlled dramatic side light",
+                    "艺术演员资料长图",
+                    "art-house actor profile-card background, cinematic shadow in hero area, expressive but realistic mood, textured backdrop, restrained gallery poster feeling, calm lower document surfaces",
+                    "off-white, ink black, olive grey, muted rust, stone grey",
+                    "controlled dramatic side light, readable lower-panel falloff",
                     "minimal expressive wardrobe with texture"
             );
             default -> new StyleBrief(
-                    "演员分享图",
-                    "premium cinematic actor portrait, realistic face, professional share poster composition",
-                    "neutral warm palette",
-                    "soft professional portrait lighting",
+                    "演员资料长图",
+                    "premium cinematic actor profile-card background, realistic face, professional share poster composition, clean lower document regions",
+                    "neutral warm palette, ivory, graphite",
+                    "soft professional portrait lighting with readable lower regions",
                     "clean actor wardrobe"
             );
         };

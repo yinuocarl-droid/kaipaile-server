@@ -33,6 +33,7 @@ class AiProfileCardPromptAgentTest {
                 "aipf_test",
                 "kplyyk",
                 "classic",
+                "costume_actor_profile_full_card",
                 "https://cdn.kplyyk.com/source.png");
 
         assertEquals("kplyyk", generation.providerCode());
@@ -40,7 +41,8 @@ class AiProfileCardPromptAgentTest {
         assertEquals("https://cdn.kplyyk.com/generated.png", generation.imageResult().imageUrl());
         assertNotNull(generation.prompt());
         assertTrue(generation.prompt().promptText().contains("target 2160x3840"));
-        assertTrue(generation.prompt().promptText().contains("left side x=160-1020"));
+        assertTrue(generation.prompt().promptText().contains("hero right area"));
+        assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
@@ -48,8 +50,10 @@ class AiProfileCardPromptAgentTest {
         assertEquals("aipf_test", request.taskId());
         assertEquals("gpt-image-2", request.modelCode());
         assertEquals("classic", request.templateSceneCode());
+        assertEquals("costume_actor_profile_full_card", request.styleCode());
         assertEquals("https://cdn.kplyyk.com/source.png", request.sourceImageUrl());
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
+        assertTrue(request.promptJson().contains("\"photoStripRegion\""));
     }
 
     private static final class CapturingProvider implements AiProfileImageProvider {

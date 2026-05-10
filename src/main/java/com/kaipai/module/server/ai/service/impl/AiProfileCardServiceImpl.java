@@ -21,6 +21,7 @@ import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardFinalImageRenderer;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
@@ -62,6 +63,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final UserShareCardService userShareCardService;
     private final ActorCardConfigService actorCardConfigService;
     private final AiGeneratedImageStorage generatedImageStorage;
+    private final AiProfileCardFinalImageRenderer finalImageRenderer;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor aiProfileCardTaskExecutor;
@@ -161,25 +163,37 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                     taskId,
                     task.getProviderCode(),
                     task.getTemplateSceneCode(),
+                    task.getStyleCode(),
                     task.getSourceImageUrl());
             savePrompt(taskId, generation.prompt());
 
-            String generatedImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
-            Long shareCardId = saveGeneratedShareCard(task, profile, generatedImageUrl);
-            markSuccess(taskId, shareCardId, generatedImageUrl);
+            String backgroundImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
+            ActorMyShareCardItemDTO card = createOrGetGeneratedShareCard(task);
+            String finalImageUrl = finalImageRenderer.renderAndUpload(
+                    backgroundImageUrl,
+                    profile,
+                    task.getTemplateSceneCode(),
+                    task.getStyleCode(),
+                    task.getTaskId(),
+                    card.getCardId());
+            saveGeneratedShareCardConfig(task, profile, card, finalImageUrl);
+            markSuccess(taskId, card.getCardId(), finalImageUrl);
         } catch (Exception error) {
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
             markFailed(taskId, error.getMessage());
         }
     }
 
-    private Long saveGeneratedShareCard(ActorAiProfileCardTask task,
-                                        ActorProfileDTO profile,
-                                        String generatedImageUrl) {
+    private ActorMyShareCardItemDTO createOrGetGeneratedShareCard(ActorAiProfileCardTask task) {
         CreateShareCardDTO createDto = new CreateShareCardDTO();
         createDto.setTemplateSceneCode(task.getTemplateSceneCode());
-        ActorMyShareCardItemDTO card = userShareCardService.createCard(task.getUserId(), createDto);
+        return userShareCardService.createCard(task.getUserId(), createDto);
+    }
 
+    private void saveGeneratedShareCardConfig(ActorAiProfileCardTask task,
+                                              ActorProfileDTO profile,
+                                              ActorMyShareCardItemDTO card,
+                                              String generatedImageUrl) {
         ActorCardConfigSaveDTO config = new ActorCardConfigSaveDTO();
         config.setShareCardId(card.getCardId());
         config.setLayoutVariant(defaultText(card.getLayoutVariant(), defaultLayoutVariant(task.getTemplateSceneCode())));
@@ -191,7 +205,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         config.setTagOrder(buildTagOrder(profile));
         config.setPreferredArtifact(CurrentPhaseShareArtifactSupport.POSTER);
         actorCardConfigService.saveActorConfig(task.getUserId(), config);
-        return card.getCardId();
     }
 
     private String resolveGeneratedImageUrl(AiProfileImageGenerationResult result, String sourceImageUrl) {
