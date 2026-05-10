@@ -43,6 +43,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("target 2160x3840"));
         assertTrue(generation.prompt().promptText().contains("hero right area"));
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
+        assertTrue(generation.prompt().promptText().contains("Mini program native components"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();

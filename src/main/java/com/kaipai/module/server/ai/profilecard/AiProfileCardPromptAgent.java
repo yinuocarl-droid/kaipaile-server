@@ -63,16 +63,16 @@ public class AiProfileCardPromptAgent {
         brief.put("canvas", Map.of(
                 "ratio", "9:16 vertical",
                 "targetSize", "2160x3840",
-                "renderIntent", "background and actor portrait layer for deterministic profile card rendering"
+                "renderIntent", "visual background asset for mini program native actor detail rendering"
         ));
         brief.put("fixedLayout", Map.of(
                 "primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions",
                 "subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box",
-                "heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean for backend-rendered name and facts",
-                "skillsRegion", "x=120-970, y=1450-2210 must remain light and readable for backend-rendered skills",
-                "worksRegion", "x=1080-2010, y=1450-2210 must remain light and readable for backend-rendered works",
-                "photoStripRegion", "x=120-2040, y=2340-2700 must remain clean for backend-rendered photo thumbnails",
-                "aboutRegion", "x=120-2040, y=2860-3440 must remain clean for backend-rendered intro and stats",
+                "heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean for mini-program-rendered name and facts",
+                "skillsRegion", "x=120-970, y=1450-2210 must remain light and readable for mini-program-rendered skills",
+                "worksRegion", "x=1080-2010, y=1450-2210 must remain light and readable for mini-program-rendered works",
+                "photoStripRegion", "x=120-2040, y=2340-2700 must remain clean for mini-program-rendered photo thumbnails",
+                "aboutRegion", "x=120-2040, y=2860-3440 must remain clean for mini-program-rendered intro and stats",
                 "footerRegion", "x=0-2160, y=3540-3840 should be a darker calm footer background without text",
                 "background", "full bleed scenic background, document-like parchment or studio surface in lower regions, no readable signage"
         ));
@@ -88,7 +88,7 @@ public class AiProfileCardPromptAgent {
                 "portrait identity is consistent with source image",
                 "hands, eyes, hairline, clothing edges are clean",
                 "no readable words, phone numbers, QR codes, logos or watermarks",
-                "all fixed layout regions remain open for deterministic backend rendering",
+                "all fixed layout regions remain open for deterministic mini-program component rendering",
                 "subject remains in the fixed hero-right position",
                 "lower profile-card sections stay calm, low contrast, and readable"
         ));
@@ -131,9 +131,9 @@ public class AiProfileCardPromptAgent {
 
                 Fixed composition:
                 - Canvas: 9:16 vertical poster, target 2160x3840.
-                - This is only the visual background layer. Backend code will render all final text, photos, QR code and contact UI later.
+                - This is only the visual background layer. Mini program native components will render all final text, photos, QR code and contact UI later.
                 - Place the actor in the hero right area only: x=1120-2050, y=120-1420, face center near x=1580,y=520.
-                - Keep hero left x=120-1080, y=120-1320 clean for backend-rendered name and profile facts.
+                - Keep hero left x=120-1080, y=120-1320 clean for mini-program-rendered name and profile facts.
                 - Keep lower document regions calm and readable:
                   skills x=120-970 y=1450-2210, works x=1080-2010 y=1450-2210,
                   photos x=120-2040 y=2340-2700, about/stats x=120-2040 y=2860-3440,

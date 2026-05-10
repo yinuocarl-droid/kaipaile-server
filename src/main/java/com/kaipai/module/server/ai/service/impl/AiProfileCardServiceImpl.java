@@ -21,7 +21,6 @@ import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
-import com.kaipai.module.server.ai.profilecard.AiProfileCardFinalImageRenderer;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
@@ -63,7 +62,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final UserShareCardService userShareCardService;
     private final ActorCardConfigService actorCardConfigService;
     private final AiGeneratedImageStorage generatedImageStorage;
-    private final AiProfileCardFinalImageRenderer finalImageRenderer;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor aiProfileCardTaskExecutor;
@@ -167,17 +165,10 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                     task.getSourceImageUrl());
             savePrompt(taskId, generation.prompt());
 
-            String backgroundImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
+            String generatedImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
             ActorMyShareCardItemDTO card = createOrGetGeneratedShareCard(task);
-            String finalImageUrl = finalImageRenderer.renderAndUpload(
-                    backgroundImageUrl,
-                    profile,
-                    task.getTemplateSceneCode(),
-                    task.getStyleCode(),
-                    task.getTaskId(),
-                    card.getCardId());
-            saveGeneratedShareCardConfig(task, profile, card, finalImageUrl);
-            markSuccess(taskId, card.getCardId(), finalImageUrl);
+            saveGeneratedShareCardConfig(task, profile, card, generatedImageUrl);
+            markSuccess(taskId, card.getCardId(), generatedImageUrl);
         } catch (Exception error) {
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
             markFailed(taskId, error.getMessage());
