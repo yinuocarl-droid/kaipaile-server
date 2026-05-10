@@ -45,13 +45,14 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().promptText().contains("Mini program native components"));
         assertTrue(generation.prompt().promptText().contains("high-quality Chinese period actor profile sheet"));
-        assertTrue(generation.prompt().promptText().contains("antique-gold double-line borders"));
-        assertTrue(generation.prompt().promptText().contains("portrait thumbnail strip"));
-        assertTrue(generation.prompt().promptText().contains("visible empty frame/panel"));
+        assertTrue(generation.prompt().promptText().contains("calm render-safe background surfaces"));
+        assertTrue(generation.prompt().promptText().contains("Do not draw hard information cards"));
+        assertTrue(generation.prompt().promptText().contains("foreground components"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
         assertTrue(generation.prompt().negativePrompt().contains("random readable calligraphy"));
         assertTrue(generation.prompt().negativePrompt().contains("filled profile text"));
-        assertTrue(generation.prompt().negativePrompt().contains("unframed information regions"));
+        assertTrue(generation.prompt().negativePrompt().contains("hard information card frames"));
+        assertTrue(generation.prompt().negativePrompt().contains("drawn video player"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
         assertNotNull(request);
@@ -63,11 +64,11 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
         assertTrue(request.promptJson().contains("\"layoutCompliance\""));
-        assertTrue(request.promptJson().contains("premium Chinese period actor profile sheet"));
-        assertTrue(request.promptJson().contains("visible blank frames are mandatory in every style"));
+        assertTrue(request.promptJson().contains("premium vertical actor profile background"));
+        assertTrue(request.promptJson().contains("quiet render-safe zones are mandatory in every style"));
         assertTrue(request.promptJson().contains("\"profilePanelRegion\""));
         assertTrue(request.promptJson().contains("\"statsRegion\""));
-        assertTrue(request.promptJson().contains("six clean rounded portrait thumbnail frames"));
+        assertTrue(request.promptJson().contains("do not draw thumbnail frames"));
         assertTrue(request.promptJson().contains("\"photoStripRegion\""));
     }
 
