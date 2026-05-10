@@ -19,6 +19,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AiProfileCardPromptAgent {
 
+    private static final int DESIGN_CANVAS_WIDTH = 750;
+    private static final int DESIGN_CANVAS_HEIGHT = 1334;
+    private static final int PROVIDER_CANVAS_WIDTH = 2160;
+    private static final int PROVIDER_CANVAS_HEIGHT = 3840;
+
     private final ObjectMapper objectMapper;
     private final AiProfileImageProviderRegistry providerRegistry;
 
@@ -63,6 +68,9 @@ public class AiProfileCardPromptAgent {
         brief.put("canvas", Map.of(
                 "ratio", "9:16 vertical",
                 "targetSize", "2160x3840",
+                "designCanvas", designCanvas(),
+                "providerCanvas", providerCanvas(),
+                "coordinatePolicy", "750x1334 is the authoritative mini-program design coordinate system; scale every fixed region proportionally to 2160x3840 provider pixels",
                 "renderIntent", "visual background asset for mini program native actor detail rendering",
                 "layoutPreset", style.layoutPreset()
         ));
@@ -143,6 +151,7 @@ public class AiProfileCardPromptAgent {
 
                 Fixed composition:
                 - Canvas: 9:16 vertical poster, target 2160x3840.
+                - Authoritative layout coordinate system: mini-program design canvas 750x1334. All safe zones below are designed in that coordinate system and scaled to the 2160x3840 provider output.
                 - This is only the visual background layer. Mini program native components will render all final text, photos, QR code and contact UI later.
                 - layoutPreset=%s, textTheme=%s, panelTheme=%s.
                 - Place the actor in the style-specific hero subject area only: %s.
@@ -185,6 +194,9 @@ public class AiProfileCardPromptAgent {
         fixedLayout.put("layoutPreset", style.layoutPreset());
         fixedLayout.put("textTheme", style.textTheme());
         fixedLayout.put("panelTheme", style.panelTheme());
+        fixedLayout.put("designCanvas", designCanvas());
+        fixedLayout.put("providerCanvas", providerCanvas());
+        fixedLayout.put("coordinatePolicy", "design coordinates are the single source of truth; provider coordinates are scaled descriptions only");
         fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
         fixedLayout.put("subjectBox", style.subjectBox());
         fixedLayout.put("identitySafeArea", style.identitySafeArea());
@@ -466,58 +478,108 @@ public class AiProfileCardPromptAgent {
 
     private Map<String, String> layoutRegions(String layoutPreset) {
         if (layoutPreset.startsWith("urban")) {
-            return Map.of(
-                    "identity", "x=214-974 y=584-1419; low-detail dark text-safe hero area",
-                    "facts", "x=216-1066 y=1688-2218; quiet dark safe surface, no fake labels",
-                    "skills", "x=1164-1944 y=1688-2218; quiet dark safe surface, no fake chips",
-                    "works", "x=216-1944 y=2328-2654; quiet dark wide surface, no rows",
-                    "photos", "x=216-1944 y=2700-3034; quiet dark strip, no thumbnail frames",
-                    "intro", "x=216-1046 y=3124-3554; quiet dark intro surface",
-                    "video", "x=1196-1944 y=3124-3554; quiet dark video surface, no video-player UI"
-            );
+            return formatLayoutRegions(Map.of(
+                    "identity", new LayoutRegion(74, 203, 264, 290, "low-detail dark text-safe hero area"),
+                    "facts", new LayoutRegion(75, 586, 295, 184, "quiet dark safe surface, no fake labels"),
+                    "skills", new LayoutRegion(404, 586, 271, 184, "quiet dark safe surface, no fake chips"),
+                    "works", new LayoutRegion(75, 809, 600, 113, "quiet dark wide surface, no rows"),
+                    "photos", new LayoutRegion(75, 938, 600, 116, "quiet dark strip, no thumbnail frames"),
+                    "intro", new LayoutRegion(75, 1085, 288, 149, "quiet dark intro surface"),
+                    "video", new LayoutRegion(415, 1085, 260, 149, "quiet dark video surface, no video-player UI")
+            ));
         }
         if (layoutPreset.startsWith("commercial")) {
-            return Map.of(
-                    "identity", "x=214-954 y=584-1384; clean light text-safe hero area",
-                    "facts", "x=216-1068 y=1640-2160; quiet light studio surface, no fake labels",
-                    "skills", "x=1160-1944 y=1640-2160; quiet light studio surface, no fake chips",
-                    "works", "x=216-1944 y=2266-2592; quiet light wide surface, no rows",
-                    "photos", "x=216-1944 y=2636-2978; quiet light strip, no thumbnail frames",
-                    "intro", "x=216-1058 y=3074-3520; quiet light intro surface",
-                    "video", "x=1190-1944 y=3074-3520; quiet light video surface, no video-player UI"
-            );
+            return formatLayoutRegions(Map.of(
+                    "identity", new LayoutRegion(74, 203, 257, 278, "clean light text-safe hero area"),
+                    "facts", new LayoutRegion(75, 570, 296, 181, "quiet light studio surface, no fake labels"),
+                    "skills", new LayoutRegion(403, 570, 272, 181, "quiet light studio surface, no fake chips"),
+                    "works", new LayoutRegion(75, 787, 600, 113, "quiet light wide surface, no rows"),
+                    "photos", new LayoutRegion(75, 916, 600, 119, "quiet light strip, no thumbnail frames"),
+                    "intro", new LayoutRegion(75, 1068, 292, 155, "quiet light intro surface"),
+                    "video", new LayoutRegion(413, 1068, 262, 155, "quiet light video surface, no video-player UI")
+            ));
         }
         if (layoutPreset.startsWith("artistic")) {
-            return Map.of(
-                    "identity", "x=214-974 y=584-1419; low-detail gallery text-safe hero area",
-                    "facts", "x=236-1056 y=1708-2228; quiet gallery safe surface, no fake labels",
-                    "skills", "x=1186-1944 y=1708-2228; quiet gallery safe surface, no fake chips",
-                    "works", "x=236-1924 y=2338-2664; quiet gallery wide surface, no rows",
-                    "photos", "x=236-1924 y=2710-3044; quiet gallery strip, no thumbnail frames",
-                    "intro", "x=236-1056 y=3134-3564; quiet gallery intro surface",
-                    "video", "x=1186-1924 y=3134-3564; quiet gallery video surface, no video-player UI"
-            );
+            return formatLayoutRegions(Map.of(
+                    "identity", new LayoutRegion(74, 203, 264, 290, "low-detail gallery text-safe hero area"),
+                    "facts", new LayoutRegion(82, 593, 285, 181, "quiet gallery safe surface, no fake labels"),
+                    "skills", new LayoutRegion(412, 593, 263, 181, "quiet gallery safe surface, no fake chips"),
+                    "works", new LayoutRegion(82, 812, 586, 113, "quiet gallery wide surface, no rows"),
+                    "photos", new LayoutRegion(82, 941, 586, 116, "quiet gallery strip, no thumbnail frames"),
+                    "intro", new LayoutRegion(82, 1089, 285, 149, "quiet gallery intro surface"),
+                    "video", new LayoutRegion(412, 1089, 256, 149, "quiet gallery video surface, no video-player UI")
+            ));
         }
         if (layoutPreset.startsWith("costume")) {
-            return Map.of(
-                    "identity", "x=233-923 y=584-1421; warm paper text-safe hero area",
-                    "facts", "x=238-1059 y=1667-2197; quiet parchment surface, no fake labels",
-                    "skills", "x=1210-1944 y=1667-2197; quiet parchment surface, no fake chips",
-                    "works", "x=242-1918 y=2308-2631; quiet parchment wide surface, no rows",
-                    "photos", "x=229-1931 y=2673-3007; quiet parchment strip, no thumbnail frames",
-                    "intro", "x=233-1041 y=3099-3556; quiet parchment intro surface",
-                    "video", "x=1197-1953 y=3099-3556; quiet parchment video surface, no video-player UI"
-            );
+            return formatLayoutRegions(Map.of(
+                    "identity", new LayoutRegion(81, 203, 240, 291, "warm paper text-safe hero area"),
+                    "facts", new LayoutRegion(83, 579, 285, 184, "quiet parchment surface, no fake labels"),
+                    "skills", new LayoutRegion(420, 579, 255, 184, "quiet parchment surface, no fake chips"),
+                    "works", new LayoutRegion(84, 802, 582, 112, "quiet parchment wide surface, no rows"),
+                    "photos", new LayoutRegion(80, 929, 591, 116, "quiet parchment strip, no thumbnail frames"),
+                    "intro", new LayoutRegion(81, 1077, 281, 159, "quiet parchment intro surface"),
+                    "video", new LayoutRegion(416, 1077, 263, 159, "quiet parchment video surface, no video-player UI")
+            ));
         }
+        return formatLayoutRegions(Map.of(
+                "identity", new LayoutRegion(81, 203, 233, 291, "warm studio/document text-safe hero area"),
+                "facts", new LayoutRegion(83, 579, 285, 184, "quiet light surface, no fake labels"),
+                "skills", new LayoutRegion(420, 579, 255, 184, "quiet light surface, no fake chips"),
+                "works", new LayoutRegion(84, 802, 582, 112, "quiet light wide surface, no rows"),
+                "photos", new LayoutRegion(80, 929, 591, 116, "quiet light strip, no thumbnail frames"),
+                "intro", new LayoutRegion(81, 1077, 281, 159, "quiet light intro surface"),
+                "video", new LayoutRegion(416, 1077, 263, 159, "quiet light video surface, no video-player UI")
+        ));
+    }
+
+    private Map<String, Object> designCanvas() {
         return Map.of(
-                "identity", "x=233-903 y=584-1421; warm studio/document text-safe hero area",
-                "facts", "x=238-1059 y=1667-2197; quiet light surface, no fake labels",
-                "skills", "x=1210-1944 y=1667-2197; quiet light surface, no fake chips",
-                "works", "x=242-1918 y=2308-2631; quiet light wide surface, no rows",
-                "photos", "x=229-1931 y=2673-3007; quiet light strip, no thumbnail frames",
-                "intro", "x=233-1041 y=3099-3556; quiet light intro surface",
-                "video", "x=1197-1953 y=3099-3556; quiet light video surface, no video-player UI"
+                "width", DESIGN_CANVAS_WIDTH,
+                "height", DESIGN_CANVAS_HEIGHT,
+                "unit", "mini-program rpx logical design coordinate"
         );
+    }
+
+    private Map<String, Object> providerCanvas() {
+        return Map.of(
+                "width", PROVIDER_CANVAS_WIDTH,
+                "height", PROVIDER_CANVAS_HEIGHT,
+                "unit", "provider output pixels"
+        );
+    }
+
+    private Map<String, String> formatLayoutRegions(Map<String, LayoutRegion> regions) {
+        Map<String, String> formatted = new LinkedHashMap<>();
+        regions.forEach((key, region) -> formatted.put(key, formatLayoutRegion(region)));
+        return formatted;
+    }
+
+    private String formatLayoutRegion(LayoutRegion region) {
+        int designRight = region.x() + region.w();
+        int designBottom = region.y() + region.h();
+        int providerLeft = scaleProviderX(region.x());
+        int providerRight = scaleProviderX(designRight);
+        int providerTop = scaleProviderY(region.y());
+        int providerBottom = scaleProviderY(designBottom);
+        return "design x=%d-%d y=%d-%d on 750x1334; provider x=%d-%d y=%d-%d on 2160x3840; %s".formatted(
+                region.x(),
+                designRight,
+                region.y(),
+                designBottom,
+                providerLeft,
+                providerRight,
+                providerTop,
+                providerBottom,
+                region.note()
+        );
+    }
+
+    private int scaleProviderX(int designX) {
+        return Math.round(designX * PROVIDER_CANVAS_WIDTH / (float) DESIGN_CANVAS_WIDTH);
+    }
+
+    private int scaleProviderY(int designY) {
+        return Math.round(designY * PROVIDER_CANVAS_HEIGHT / (float) DESIGN_CANVAS_HEIGHT);
     }
 
     private String writeJson(Object value) {
@@ -553,6 +615,15 @@ public class AiProfileCardPromptAgent {
             String backgroundMaterial,
             Map<String, String> layoutRegions,
             List<String> moduleAesthetics
+    ) {
+    }
+
+    private record LayoutRegion(
+            int x,
+            int y,
+            int w,
+            int h,
+            String note
     ) {
     }
 }

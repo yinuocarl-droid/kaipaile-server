@@ -42,6 +42,7 @@ class AiProfileCardPromptAgentTest {
         assertEquals("https://cdn.kplyyk.com/generated.png", generation.imageResult().imageUrl());
         assertNotNull(generation.prompt());
         assertTrue(generation.prompt().promptText().contains("target 2160x3840"));
+        assertTrue(generation.prompt().promptText().contains("mini-program design canvas 750x1334"));
         assertTrue(generation.prompt().promptText().contains("style-specific hero subject area"));
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().promptText().contains("Mini program native components"));
@@ -62,6 +63,10 @@ class AiProfileCardPromptAgentTest {
         assertEquals("classic", request.templateSceneCode());
         assertEquals("costume_actor_profile_full_card", request.styleCode());
         assertEquals("https://cdn.kplyyk.com/source.png", request.sourceImageUrl());
+        assertTrue(request.promptJson().contains("\"designCanvas\""));
+        assertTrue(request.promptJson().contains("\"providerCanvas\""));
+        assertTrue(request.promptJson().contains("\"coordinatePolicy\""));
+        assertTrue(request.promptJson().contains("\"unit\":\"mini-program rpx logical design coordinate\""));
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
         assertTrue(request.promptJson().contains("\"layoutCompliance\""));
@@ -71,6 +76,8 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"facts\""));
         assertTrue(request.promptJson().contains("\"video\""));
         assertTrue(request.promptJson().contains("no thumbnail frames"));
+        assertTrue(request.promptJson().contains("design x="));
+        assertTrue(request.promptJson().contains("provider x="));
     }
 
     @Test
@@ -112,9 +119,12 @@ class AiProfileCardPromptAgentTest {
         assertNotNull(request);
         assertEquals(scene, request.templateSceneCode());
         assertTrue(request.promptText().contains("layoutPreset=" + layoutPreset));
+        assertTrue(request.promptText().contains("mini-program design canvas 750x1334"));
         assertTrue(request.promptText().contains(expectedPromptSignal));
         assertTrue(request.promptJson().contains("\"layoutPreset\":\"" + layoutPreset + "\""));
         assertTrue(request.promptJson().contains("\"panelTheme\":\"" + panelTheme + "\""));
+        assertTrue(request.promptJson().contains("\"designCanvas\""));
+        assertTrue(request.promptJson().contains("\"providerCanvas\""));
         assertTrue(request.promptJson().contains("\"identity\""));
         assertTrue(request.promptJson().contains("\"intro\""));
         assertTrue(request.promptJson().contains("\"video\""));
