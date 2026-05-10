@@ -47,13 +47,16 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().promptText().contains("Mini program native components"));
         assertTrue(generation.prompt().promptText().contains("layoutPreset=costume_profile_v3"));
-        assertTrue(generation.prompt().promptText().contains("warm low-detail parchment"));
+        assertTrue(generation.prompt().promptText().contains("full-bleed edge-to-edge background layer only"));
+        assertTrue(generation.prompt().promptText().contains("warm low-detail ink-wash matte"));
         assertTrue(generation.prompt().promptText().contains("Do not draw hard information cards"));
         assertTrue(generation.prompt().promptText().contains("foreground components"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
         assertTrue(generation.prompt().negativePrompt().contains("random readable calligraphy"));
         assertTrue(generation.prompt().negativePrompt().contains("filled profile text"));
         assertTrue(generation.prompt().negativePrompt().contains("hard information card frames"));
+        assertTrue(generation.prompt().negativePrompt().contains("paper sheet edge"));
+        assertTrue(generation.prompt().negativePrompt().contains("corner ornament"));
         assertTrue(generation.prompt().negativePrompt().contains("drawn video player"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
@@ -70,8 +73,10 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
         assertTrue(request.promptJson().contains("\"layoutCompliance\""));
+        assertTrue(request.promptJson().contains("\"backgroundFramePolicy\""));
         assertTrue(request.promptJson().contains("\"layoutPreset\":\"costume_profile_v3\""));
         assertTrue(request.promptJson().contains("\"panelTheme\":\"period-paper\""));
+        assertTrue(request.promptJson().contains("full-bleed edge-to-edge background layer only"));
         assertTrue(request.promptJson().contains("quiet render-safe zones are mandatory in every style"));
         assertTrue(request.promptJson().contains("\"facts\""));
         assertTrue(request.promptJson().contains("\"video\""));
@@ -94,7 +99,7 @@ class AiProfileCardPromptAgentTest {
         profile.setSkillTypes(List.of("影视表演", "短剧"));
 
         assertSceneContract(agent, provider, profile, "classic", "classic_profile_v3", "paper", "warm studio");
-        assertSceneContract(agent, provider, profile, "costume", "costume_profile_v3", "period-paper", "warm paper");
+        assertSceneContract(agent, provider, profile, "costume", "costume_profile_v3", "period-paper", "warm ink-wash");
         assertSceneContract(agent, provider, profile, "urban", "urban_profile_v3", "cinema-glass", "no parchment");
         assertSceneContract(agent, provider, profile, "commercial", "commercial_profile_v3", "studio-light", "clean studio");
         assertSceneContract(agent, provider, profile, "artistic", "artistic_profile_v3", "gallery-glass", "gallery");
@@ -120,9 +125,12 @@ class AiProfileCardPromptAgentTest {
         assertEquals(scene, request.templateSceneCode());
         assertTrue(request.promptText().contains("layoutPreset=" + layoutPreset));
         assertTrue(request.promptText().contains("mini-program design canvas 750x1334"));
+        assertTrue(request.promptText().contains("Background boundary policy"));
+        assertTrue(request.promptText().contains("full-bleed edge-to-edge background layer only"));
         assertTrue(request.promptText().contains(expectedPromptSignal));
         assertTrue(request.promptJson().contains("\"layoutPreset\":\"" + layoutPreset + "\""));
         assertTrue(request.promptJson().contains("\"panelTheme\":\"" + panelTheme + "\""));
+        assertTrue(request.promptJson().contains("\"backgroundFramePolicy\""));
         assertTrue(request.promptJson().contains("\"designCanvas\""));
         assertTrue(request.promptJson().contains("\"providerCanvas\""));
         assertTrue(request.promptJson().contains("\"identity\""));
@@ -132,6 +140,11 @@ class AiProfileCardPromptAgentTest {
             assertTrue(request.promptJson().contains("\"textTheme\":\"cinema-light\""));
             assertFalse(request.promptText().contains("pale parchment"));
             assertFalse(request.promptText().contains("Chinese period actor profile sheet"));
+        }
+        if ("classic".equals(scene) || "costume".equals(scene)) {
+            assertFalse(request.promptText().contains("dossier"));
+            assertFalse(request.promptText().contains("profile sheet"));
+            assertFalse(request.promptText().contains("document cards"));
         }
     }
 
