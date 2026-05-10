@@ -47,9 +47,11 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("high-quality Chinese period actor profile sheet"));
         assertTrue(generation.prompt().promptText().contains("antique-gold double-line borders"));
         assertTrue(generation.prompt().promptText().contains("portrait thumbnail strip"));
+        assertTrue(generation.prompt().promptText().contains("visible empty frame/panel"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
         assertTrue(generation.prompt().negativePrompt().contains("random readable calligraphy"));
         assertTrue(generation.prompt().negativePrompt().contains("filled profile text"));
+        assertTrue(generation.prompt().negativePrompt().contains("unframed information regions"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
         assertNotNull(request);
@@ -60,7 +62,9 @@ class AiProfileCardPromptAgentTest {
         assertEquals("https://cdn.kplyyk.com/source.png", request.sourceImageUrl());
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
+        assertTrue(request.promptJson().contains("\"layoutCompliance\""));
         assertTrue(request.promptJson().contains("premium Chinese period actor profile sheet"));
+        assertTrue(request.promptJson().contains("visible blank frames are mandatory in every style"));
         assertTrue(request.promptJson().contains("\"profilePanelRegion\""));
         assertTrue(request.promptJson().contains("\"statsRegion\""));
         assertTrue(request.promptJson().contains("six clean rounded portrait thumbnail frames"));

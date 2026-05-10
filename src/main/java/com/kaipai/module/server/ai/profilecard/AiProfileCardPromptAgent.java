@@ -68,18 +68,19 @@ public class AiProfileCardPromptAgent {
         brief.put("referenceQuality", Map.of(
                 "benchmark", "premium Chinese period actor profile sheet with parchment texture, ink-wash landscape, refined ornamental frames, right-side actor portrait, and modular information panels",
                 "qualityBar", "commercial casting-book finish, crisp facial realism, restrained antique-gold decoration, visible paper grain, elegant negative space, no cheap poster effects",
-                "importantConstraint", "match the reference quality and structure, but leave every text-bearing area blank because the mini program will render accurate native text"
+                "importantConstraint", "match the reference quality and structure, but leave every text-bearing area blank because the mini program will render accurate native text",
+                "layoutCompliance", "visible blank frames are mandatory in every style; never return a plain full-bleed portrait background without the fixed profile, skills, works, about, photo and video/contact slots"
         ));
         Map<String, Object> fixedLayout = new LinkedHashMap<>();
         fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
         fixedLayout.put("subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box; costume silhouette may overlap softly into the center but never cover left text-safe area");
         fixedLayout.put("heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean parchment/ink-wash negative space for mini-program-rendered title, actor name and selling points");
-        fixedLayout.put("profilePanelRegion", "x=120-1020, y=1450-2210 should look like an empty antique bordered information card with subtle icons or divider hints only; no readable text");
-        fixedLayout.put("skillsRegion", "x=1140-2040, y=1450-2210 should look like an empty antique bordered skill card with line rhythm and light ornamentation only; no readable text");
-        fixedLayout.put("worksRegion", "x=120-2040, y=2250-2580 should look like an empty long bordered works list card with soft row guides only; no readable text");
-        fixedLayout.put("photoStripRegion", "x=120-2040, y=2700-3110 should reserve six clean rounded portrait thumbnail frames or quiet slots for mini-program-rendered photos");
-        fixedLayout.put("aboutRegion", "x=120-1020, y=3230-3520 should remain a clean bordered about card background");
-        fixedLayout.put("statsRegion", "x=1140-2040, y=3230-3520 should remain a clean bordered stats card background with four subtle columns");
+        fixedLayout.put("profilePanelRegion", "x=120-1020, y=1450-2210 must be a clearly visible empty bordered information card with subtle icons or divider hints only; no readable text");
+        fixedLayout.put("skillsRegion", "x=1140-2040, y=1450-2210 must be a clearly visible empty bordered skill card with line rhythm and light ornamentation only; no readable text");
+        fixedLayout.put("worksRegion", "x=120-2040, y=2250-2580 must be a clearly visible empty long bordered works list card with soft row guides only; no readable text");
+        fixedLayout.put("photoStripRegion", "x=120-2040, y=2700-3110 must reserve six clean rounded portrait thumbnail frames or quiet slots for mini-program-rendered photos");
+        fixedLayout.put("aboutRegion", "x=120-1020, y=3230-3520 must remain a clearly visible clean bordered about card background");
+        fixedLayout.put("statsRegion", "x=1140-2040, y=3230-3520 must remain a clearly visible clean bordered stats/video/contact card background with subtle columns");
         fixedLayout.put("footerRegion", "x=0-2160, y=3540-3840 should be calm parchment fade without text or buttons");
         fixedLayout.put("background", "full bleed Chinese ink-wash scenic background with bridge, distant mountains, garden architecture or bamboo details, document-like parchment in lower regions, no readable signage");
         brief.put("fixedLayout", fixedLayout);
@@ -89,7 +90,8 @@ public class AiProfileCardPromptAgent {
                 "misty Jiangnan ink-wash landscape depth behind the actor and title-safe area",
                 "delicate cinnabar seal-like ornaments are allowed only as abstract shapes without readable characters",
                 "empty bordered modules should feel like premium casting dossier cards, not modern app cards",
-                "photo thumbnail slots should have soft rounded corners and pale gold frames"
+                "photo thumbnail slots should have soft rounded corners and pale gold frames",
+                "visible blank module frames are mandatory for urban, classic, commercial and artistic styles too"
         ));
         brief.put("profileSignals", buildProfileSignals(profile));
         brief.put("style", Map.of(
@@ -128,6 +130,9 @@ public class AiProfileCardPromptAgent {
                 "subject outside hero-right layout box",
                 "busy profile-card text regions",
                 "dark blocks behind text regions",
+                "unframed information regions",
+                "plain full-bleed portrait without module frames",
+                "full-bleed photo covering information modules",
                 "fake UI labels",
                 "fake QR code",
                 "random readable calligraphy",
@@ -160,6 +165,7 @@ public class AiProfileCardPromptAgent {
                   works list card x=120-2040 y=2250-2580, portrait thumbnail strip x=120-2040 y=2700-3110,
                   about card x=120-1020 y=3230-3520, stats card x=1140-2040 y=3230-3520,
                   footer x=0-2160 y=3540-3840.
+                - Every lower or middle information slot must have a visible empty frame/panel. This applies to urban, classic, commercial and artistic styles too. Do not return a photo-only background without these blank information frames.
                 - Use antique-gold double-line borders, corner ornaments, pale parchment texture, abstract seal shapes, misty mountains, bridge, garden architecture and bamboo silhouettes.
                 - Do not render any words, Chinese characters, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
 
