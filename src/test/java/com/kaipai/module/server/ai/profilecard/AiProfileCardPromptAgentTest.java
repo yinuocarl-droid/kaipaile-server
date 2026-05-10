@@ -44,7 +44,12 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("hero right area"));
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().promptText().contains("Mini program native components"));
+        assertTrue(generation.prompt().promptText().contains("high-quality Chinese period actor profile sheet"));
+        assertTrue(generation.prompt().promptText().contains("antique-gold double-line borders"));
+        assertTrue(generation.prompt().promptText().contains("portrait thumbnail strip"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
+        assertTrue(generation.prompt().negativePrompt().contains("random readable calligraphy"));
+        assertTrue(generation.prompt().negativePrompt().contains("filled profile text"));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
         assertNotNull(request);
@@ -54,6 +59,11 @@ class AiProfileCardPromptAgentTest {
         assertEquals("costume_actor_profile_full_card", request.styleCode());
         assertEquals("https://cdn.kplyyk.com/source.png", request.sourceImageUrl());
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
+        assertTrue(request.promptJson().contains("\"referenceQuality\""));
+        assertTrue(request.promptJson().contains("premium Chinese period actor profile sheet"));
+        assertTrue(request.promptJson().contains("\"profilePanelRegion\""));
+        assertTrue(request.promptJson().contains("\"statsRegion\""));
+        assertTrue(request.promptJson().contains("six clean rounded portrait thumbnail frames"));
         assertTrue(request.promptJson().contains("\"photoStripRegion\""));
     }
 

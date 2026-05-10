@@ -65,16 +65,31 @@ public class AiProfileCardPromptAgent {
                 "targetSize", "2160x3840",
                 "renderIntent", "visual background asset for mini program native actor detail rendering"
         ));
-        brief.put("fixedLayout", Map.of(
-                "primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions",
-                "subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box",
-                "heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean for mini-program-rendered name and facts",
-                "skillsRegion", "x=120-970, y=1450-2210 must remain light and readable for mini-program-rendered skills",
-                "worksRegion", "x=1080-2010, y=1450-2210 must remain light and readable for mini-program-rendered works",
-                "photoStripRegion", "x=120-2040, y=2340-2700 must remain clean for mini-program-rendered photo thumbnails",
-                "aboutRegion", "x=120-2040, y=2860-3440 must remain clean for mini-program-rendered intro and stats",
-                "footerRegion", "x=0-2160, y=3540-3840 should be a darker calm footer background without text",
-                "background", "full bleed scenic background, document-like parchment or studio surface in lower regions, no readable signage"
+        brief.put("referenceQuality", Map.of(
+                "benchmark", "premium Chinese period actor profile sheet with parchment texture, ink-wash landscape, refined ornamental frames, right-side actor portrait, and modular information panels",
+                "qualityBar", "commercial casting-book finish, crisp facial realism, restrained antique-gold decoration, visible paper grain, elegant negative space, no cheap poster effects",
+                "importantConstraint", "match the reference quality and structure, but leave every text-bearing area blank because the mini program will render accurate native text"
+        ));
+        Map<String, Object> fixedLayout = new LinkedHashMap<>();
+        fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
+        fixedLayout.put("subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box; costume silhouette may overlap softly into the center but never cover left text-safe area");
+        fixedLayout.put("heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean parchment/ink-wash negative space for mini-program-rendered title, actor name and selling points");
+        fixedLayout.put("profilePanelRegion", "x=120-1020, y=1450-2210 should look like an empty antique bordered information card with subtle icons or divider hints only; no readable text");
+        fixedLayout.put("skillsRegion", "x=1140-2040, y=1450-2210 should look like an empty antique bordered skill card with line rhythm and light ornamentation only; no readable text");
+        fixedLayout.put("worksRegion", "x=120-2040, y=2250-2580 should look like an empty long bordered works list card with soft row guides only; no readable text");
+        fixedLayout.put("photoStripRegion", "x=120-2040, y=2700-3110 should reserve six clean rounded portrait thumbnail frames or quiet slots for mini-program-rendered photos");
+        fixedLayout.put("aboutRegion", "x=120-1020, y=3230-3520 should remain a clean bordered about card background");
+        fixedLayout.put("statsRegion", "x=1140-2040, y=3230-3520 should remain a clean bordered stats card background with four subtle columns");
+        fixedLayout.put("footerRegion", "x=0-2160, y=3540-3840 should be calm parchment fade without text or buttons");
+        fixedLayout.put("background", "full bleed Chinese ink-wash scenic background with bridge, distant mountains, garden architecture or bamboo details, document-like parchment in lower regions, no readable signage");
+        brief.put("fixedLayout", fixedLayout);
+        brief.put("moduleAesthetics", List.of(
+                "thin antique-gold double-line page border with small corner ornaments",
+                "warm ivory rice-paper/parchment texture with subtle stains and fibers",
+                "misty Jiangnan ink-wash landscape depth behind the actor and title-safe area",
+                "delicate cinnabar seal-like ornaments are allowed only as abstract shapes without readable characters",
+                "empty bordered modules should feel like premium casting dossier cards, not modern app cards",
+                "photo thumbnail slots should have soft rounded corners and pale gold frames"
         ));
         brief.put("profileSignals", buildProfileSignals(profile));
         brief.put("style", Map.of(
@@ -90,7 +105,8 @@ public class AiProfileCardPromptAgent {
                 "no readable words, phone numbers, QR codes, logos or watermarks",
                 "all fixed layout regions remain open for deterministic mini-program component rendering",
                 "subject remains in the fixed hero-right position",
-                "lower profile-card sections stay calm, low contrast, and readable"
+                "lower profile-card sections stay calm, low contrast, and readable",
+                "antique borders, paper texture and scenic details are premium but never compete with native text"
         ));
 
         String promptJson = writeJson(brief);
@@ -113,7 +129,12 @@ public class AiProfileCardPromptAgent {
                 "busy profile-card text regions",
                 "dark blocks behind text regions",
                 "fake UI labels",
-                "fake QR code"
+                "fake QR code",
+                "random readable calligraphy",
+                "filled profile text",
+                "dense decorations covering component regions",
+                "cheap fantasy costume",
+                "overly modern gradient poster"
         );
         return new AiProfileCardPrompt(promptJson, promptText, negativePrompt);
     }
@@ -133,12 +154,14 @@ public class AiProfileCardPromptAgent {
                 - Canvas: 9:16 vertical poster, target 2160x3840.
                 - This is only the visual background layer. Mini program native components will render all final text, photos, QR code and contact UI later.
                 - Place the actor in the hero right area only: x=1120-2050, y=120-1420, face center near x=1580,y=520.
-                - Keep hero left x=120-1080, y=120-1320 clean for mini-program-rendered name and profile facts.
-                - Keep lower document regions calm and readable:
-                  skills x=120-970 y=1450-2210, works x=1080-2010 y=1450-2210,
-                  photos x=120-2040 y=2340-2700, about/stats x=120-2040 y=2860-3440,
+                - Keep hero left x=120-1080, y=120-1320 as blank parchment and ink-wash negative space for mini-program-rendered title, actor name and selling points.
+                - Build the lower page as premium empty dossier modules inspired by a high-quality Chinese period actor profile sheet:
+                  basic profile card x=120-1020 y=1450-2210, skills card x=1140-2040 y=1450-2210,
+                  works list card x=120-2040 y=2250-2580, portrait thumbnail strip x=120-2040 y=2700-3110,
+                  about card x=120-1020 y=3230-3520, stats card x=1140-2040 y=3230-3520,
                   footer x=0-2160 y=3540-3840.
-                - Do not render any words, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
+                - Use antique-gold double-line borders, corner ornaments, pale parchment texture, abstract seal shapes, misty mountains, bridge, garden architecture and bamboo silhouettes.
+                - Do not render any words, Chinese characters, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
 
                 Visual style:
                 templateSceneCode=%s, styleCode=%s
@@ -224,10 +247,10 @@ public class AiProfileCardPromptAgent {
         if ("costume_actor_profile_full_card".equals(styleCode)) {
             return new StyleBrief(
                     "古风演员资料长图",
-                    "Chinese period-drama actor profile-card background, elegant palace garden and ink-wash scenery, warm ivory parchment document lower half, antique gold ornamentation, refined Han/Tang costume texture, premium realistic portrait, calm readable layout surfaces",
-                    "warm ivory, ink black, antique gold, muted cinnabar, jade green footer",
-                    "soft cinematic daylight, gentle rim light on hair and robe, low contrast in document regions",
-                    "period-drama robe silhouette, layered fabric, understated embroidery, elegant hair ornament if natural"
+                    "premium Chinese period actor dossier background matching a high-end casting profile sheet: right-side realistic actor portrait in elegant Han/Tang costume, warm ivory rice-paper parchment, misty Jiangnan ink-wash mountains and bridge, subtle pavilion and bamboo silhouettes, thin antique-gold modular frames, cinnabar seal-like abstract accents, six portrait-thumbnail slots, refined empty profile/skills/works/about/stats cards, no readable text",
+                    "warm ivory parchment, dark ink green-black, antique gold linework, muted cinnabar accent, pale jade-grey washes, soft tea-stained paper",
+                    "soft cinematic daylight, gentle rim light on hair and robe, translucent ink-wash haze, low contrast inside document cards, crisp face detail",
+                    "period-drama robe silhouette, layered silk gauze fabric, understated embroidery, elegant hair ornament or hairpin if natural, refined and realistic rather than fantasy"
             );
         }
         return switch (templateSceneCode) {
