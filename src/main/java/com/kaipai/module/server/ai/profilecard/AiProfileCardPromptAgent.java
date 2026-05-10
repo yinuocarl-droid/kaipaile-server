@@ -63,42 +63,27 @@ public class AiProfileCardPromptAgent {
         brief.put("canvas", Map.of(
                 "ratio", "9:16 vertical",
                 "targetSize", "2160x3840",
-                "renderIntent", "visual background asset for mini program native actor detail rendering"
+                "renderIntent", "visual background asset for mini program native actor detail rendering",
+                "layoutPreset", style.layoutPreset()
         ));
         brief.put("referenceQuality", Map.of(
-                "benchmark", "premium vertical actor profile background with parchment texture, ink-wash landscape, right-side actor portrait, calm lower paper surfaces, and refined negative space",
-                "qualityBar", "commercial casting-book finish, crisp facial realism, restrained antique-gold decoration, visible paper grain, elegant empty surfaces, no cheap poster effects",
+                "benchmark", style.referenceBenchmark(),
+                "qualityBar", style.qualityBar(),
                 "importantConstraint", "match the reference quality and atmosphere, but leave all final profile structure to deterministic mini-program rendering",
-                "layoutCompliance", "quiet render-safe zones are mandatory in every style; do not draw hard business panels, final card borders, section titles, rows, thumbnails or UI components that frontend content must align to"
+                "layoutCompliance", "quiet render-safe zones are mandatory in every style; do not draw hard business panels, final section titles, rows, thumbnails or UI components that frontend content must align to"
         ));
-        Map<String, Object> fixedLayout = new LinkedHashMap<>();
-        fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
-        fixedLayout.put("subjectBox", "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box; costume silhouette may overlap softly into the center but never cover left text-safe area");
-        fixedLayout.put("heroTextSafeArea", "hero left side, x=120-1080, y=120-1320 must remain clean parchment/ink-wash negative space for mini-program-rendered title, actor name and selling points");
-        fixedLayout.put("profilePanelRegion", "x=120-1020, y=1450-2210 must be a quiet low-detail paper surface for deterministic profile panel rendering; no card border, no icons, no divider hints, no readable text");
-        fixedLayout.put("skillsRegion", "x=1140-2040, y=1450-2210 must be a quiet low-detail paper surface for deterministic skill panel rendering; no card border, no icons, no divider hints, no readable text");
-        fixedLayout.put("worksRegion", "x=120-2040, y=2250-2580 must be a quiet low-detail paper surface for deterministic works panel rendering; no rows, no card border, no readable text");
-        fixedLayout.put("photoStripRegion", "x=120-2040, y=2700-3110 must be a quiet low-detail surface for deterministic photo thumbnails; do not draw thumbnail frames");
-        fixedLayout.put("aboutRegion", "x=120-1020, y=3230-3520 must be a quiet low-detail surface for deterministic intro panel rendering");
-        fixedLayout.put("statsRegion", "x=1140-2040, y=3230-3520 must be a quiet low-detail surface for deterministic video/contact panel rendering");
-        fixedLayout.put("footerRegion", "x=0-2160, y=3540-3840 should be calm parchment fade without text or buttons");
-        fixedLayout.put("background", "full bleed Chinese ink-wash scenic background with bridge, distant mountains, garden architecture or bamboo details, document-like parchment in lower regions, no readable signage");
-        brief.put("fixedLayout", fixedLayout);
-        brief.put("moduleAesthetics", List.of(
-                "warm ivory rice-paper/parchment texture with subtle stains and fibers",
-                "misty Jiangnan ink-wash landscape depth behind the actor and title-safe area",
-                "delicate cinnabar seal-like ornaments are allowed only as abstract shapes without readable characters",
-                "lower render-safe regions should be calm background surfaces, not app cards",
-                "avoid hard module borders, rows, chip shapes, thumbnails and video-player shapes",
-                "visual texture should support deterministic foreground panels drawn by the mini program"
-        ));
+        brief.put("fixedLayout", buildFixedLayout(style));
+        brief.put("moduleAesthetics", style.moduleAesthetics());
         brief.put("profileSignals", buildProfileSignals(profile));
         brief.put("style", Map.of(
                 "title", style.title(),
                 "visualDirection", style.visualDirection(),
                 "palette", style.palette(),
                 "lighting", style.lighting(),
-                "wardrobe", style.wardrobe()
+                "wardrobe", style.wardrobe(),
+                "layoutPreset", style.layoutPreset(),
+                "textTheme", style.textTheme(),
+                "panelTheme", style.panelTheme()
         ));
         brief.put("qualityChecklist", List.of(
                 "portrait identity is consistent with source image",
@@ -107,7 +92,7 @@ public class AiProfileCardPromptAgent {
                 "all fixed layout regions remain open for deterministic mini-program component rendering",
                 "subject remains in the fixed hero-right position",
                 "lower profile-card sections stay calm, low contrast, and readable",
-                "paper texture and scenic details are premium but never compete with native foreground panels"
+                "style-specific texture and visual details are premium but never compete with native foreground panels"
         ));
 
         String promptJson = writeJson(brief);
@@ -128,7 +113,7 @@ public class AiProfileCardPromptAgent {
                 "cropped head",
                 "subject outside hero-right layout box",
                 "busy profile-card text regions",
-                "dark blocks behind text regions",
+                "low-contrast blocks behind native text regions",
                 "hard information card frames",
                 "bordered lower profile-card modules",
                 "drawn thumbnail frames",
@@ -159,15 +144,13 @@ public class AiProfileCardPromptAgent {
                 Fixed composition:
                 - Canvas: 9:16 vertical poster, target 2160x3840.
                 - This is only the visual background layer. Mini program native components will render all final text, photos, QR code and contact UI later.
-                - Place the actor in the hero right area only: x=1120-2050, y=120-1420, face center near x=1580,y=520.
-                - Keep hero left x=120-1080, y=120-1320 as blank parchment and ink-wash negative space for mini-program-rendered title, actor name and selling points.
-                - Keep the lower page as calm render-safe background surfaces inspired by a high-quality Chinese period actor profile sheet:
-                  profile surface x=120-1020 y=1450-2210, skills surface x=1140-2040 y=1450-2210,
-                  works surface x=120-2040 y=2250-2580, photo surface x=120-2040 y=2700-3110,
-                  about surface x=120-1020 y=3230-3520, video/contact surface x=1140-2040 y=3230-3520,
-                  footer x=0-2160 y=3540-3840.
+                - layoutPreset=%s, textTheme=%s, panelTheme=%s.
+                - Place the actor in the style-specific hero subject area only: %s.
+                - Keep the identity text area clean for mini-program-rendered title, actor name and selling points: %s.
+                - Keep the lower page as %s:
+                  %s
                 - Do not draw hard information cards, final borders, section labels, rows, chip shapes, thumbnails, video-player UI or other foreground components. The mini program will render those deterministically.
-                - Use pale parchment texture, abstract seal shapes, misty mountains, bridge, garden architecture and bamboo silhouettes only as background material.
+                - Background material: %s.
                 - Do not render any words, Chinese characters, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
 
                 Visual style:
@@ -181,12 +164,42 @@ public class AiProfileCardPromptAgent {
                 %s
                 """.formatted(
                 sourceImageUrl,
+                style.layoutPreset(),
+                style.textTheme(),
+                style.panelTheme(),
+                style.subjectBox(),
+                style.identitySafeArea(),
+                style.safeSurfaceTone(),
+                buildReadableLayoutRegions(style),
+                style.backgroundMaterial(),
                 templateSceneCode,
                 styleCode,
                 style.visualDirection(),
                 buildReadableProfileSignals(profile),
                 promptJson
         );
+    }
+
+    private Map<String, Object> buildFixedLayout(StyleBrief style) {
+        Map<String, Object> fixedLayout = new LinkedHashMap<>();
+        fixedLayout.put("layoutPreset", style.layoutPreset());
+        fixedLayout.put("textTheme", style.textTheme());
+        fixedLayout.put("panelTheme", style.panelTheme());
+        fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
+        fixedLayout.put("subjectBox", style.subjectBox());
+        fixedLayout.put("identitySafeArea", style.identitySafeArea());
+        fixedLayout.put("safeSurfaceTone", style.safeSurfaceTone());
+        fixedLayout.put("regions", style.layoutRegions());
+        fixedLayout.put("background", style.backgroundMaterial());
+        fixedLayout.put("finalTextPolicy", "do not render final business text, labels, rows, thumbnails, video controls, QR code, phone, contact UI, or fake app components");
+        return fixedLayout;
+    }
+
+    private String buildReadableLayoutRegions(StyleBrief style) {
+        return style.layoutRegions().entrySet().stream()
+                .map(entry -> entry.getKey() + " " + entry.getValue())
+                .reduce((left, right) -> left + "; " + right)
+                .orElse("all deterministic component regions must remain calm and readable");
     }
 
     private Map<String, Object> buildProfileSignals(ActorProfileDTO profile) {
@@ -252,58 +265,259 @@ public class AiProfileCardPromptAgent {
 
     private StyleBrief resolveStyle(String templateSceneCode, String styleCode) {
         if ("costume_actor_profile_full_card".equals(styleCode)) {
-            return new StyleBrief(
+            return styleBrief(
                     "古风演员资料长图",
                     "premium Chinese period actor dossier background matching a high-end casting profile sheet: right-side realistic actor portrait in elegant Han/Tang costume, warm ivory rice-paper parchment, misty Jiangnan ink-wash mountains and bridge, subtle pavilion and bamboo silhouettes, cinnabar seal-like abstract accents, calm lower render-safe parchment surfaces, no hard information frames, no readable text",
                     "warm ivory parchment, dark ink green-black, antique gold linework, muted cinnabar accent, pale jade-grey washes, soft tea-stained paper",
                     "soft cinematic daylight, gentle rim light on hair and robe, translucent ink-wash haze, low contrast inside document cards, crisp face detail",
-                    "period-drama robe silhouette, layered silk gauze fabric, understated embroidery, elegant hair ornament or hairpin if natural, refined and realistic rather than fantasy"
+                    "period-drama robe silhouette, layered silk gauze fabric, understated embroidery, elegant hair ornament or hairpin if natural, refined and realistic rather than fantasy",
+                    "costume_profile_v3",
+                    "paper-dark",
+                    "period-paper",
+                    "premium period actor dossier background with visible parchment texture, refined ink-wash depth, realistic portrait, and calm lower safe zones",
+                    "commercial casting-book finish, crisp facial realism, restrained antique-gold decoration, visible paper grain, elegant empty surfaces, no cheap fantasy poster effects",
+                    "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box; costume silhouette may overlap softly into the center but never cover left text-safe area",
+                    "hero left side, x=120-1080, y=120-1320 must remain clean warm paper and ink-wash negative space",
+                    "warm low-detail parchment and ink-wash safe surfaces for deterministic native panels",
+                    "warm ivory rice-paper texture, abstract seal shapes, misty Jiangnan mountains, bridge, garden architecture and bamboo silhouettes only as background material",
+                    periodModuleAesthetics()
             );
         }
         return switch (templateSceneCode) {
-            case "costume" -> new StyleBrief(
+            case "costume" -> styleBrief(
                     "古风演员资料长图",
                     "cinematic Chinese period-drama actor profile-card background, elegant Han/Tang inspired wardrobe, refined fabric texture, ink-wash atmospheric depth, palace corridor or misty garden background, premium realistic portrait, calm parchment lower render-safe surfaces, no fantasy exaggeration",
                     "warm ivory, dark ink, muted cinnabar, antique gold, jade green",
                     "soft directional key light, gentle rim light on hair and shoulders, calm lower-section lighting",
-                    "period-drama robe silhouette, layered fabric, understated embroidery"
+                    "period-drama robe silhouette, layered fabric, understated embroidery",
+                    "costume_profile_v3",
+                    "paper-dark",
+                    "period-paper",
+                    "premium period actor dossier background with realistic face, warm paper texture, and calm render-safe lower zones",
+                    "commercial casting-book finish with refined period-drama mood, clean face detail, low-noise background texture",
+                    "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; robe may overlap softly but not cover text-safe zones",
+                    "hero left side, x=120-1080, y=120-1320 must remain clean warm paper and ink-wash negative space",
+                    "warm low-detail parchment and ink-wash safe surfaces for deterministic native panels",
+                    "warm paper texture, misty period architecture, bridge, bamboo and abstract seal accents without readable characters",
+                    periodModuleAesthetics()
             );
-            case "urban" -> new StyleBrief(
+            case "urban" -> styleBrief(
                     "都市演员资料长图",
-                    "modern cinematic actor profile-card background, quiet city or studio hero scene, polished fashion editorial tone, confident natural expression, realistic face detail, clean low-detail render-safe lower regions",
+                    "modern cinematic actor profile-card background, quiet city or studio hero scene, polished fashion editorial tone, confident natural expression, realistic face detail, dark low-detail render-safe lower regions compatible with glass panels",
                     "charcoal, steel blue, porcelain white, restrained neon accent, soft grey",
-                    "large softbox key light with cool rim light, readable lower panels",
-                    "modern fitted coat or clean fashion styling"
+                    "large softbox key light with cool rim light, dim but readable lower safe zones, no bright parchment dossier surfaces",
+                    "modern fitted coat or clean fashion styling",
+                    "urban_profile_v3",
+                    "cinema-light",
+                    "cinema-glass",
+                    "premium dark cinematic casting profile background with editorial portrait, controlled charcoal safe zones, and no beige paper modules",
+                    "high-end fashion editorial finish, crisp realistic face detail, restrained city/studio atmosphere, clean dark surfaces for native glass panels",
+                    "hero right side, x=1080-2050, y=120-1500; face center near x=1580,y=560; hair and coat must not cover left identity text-safe area",
+                    "hero left side, x=100-1060, y=120-1320 must remain low-detail dark gradient or soft studio haze with enough contrast for light native text",
+                    "dark charcoal low-detail safe surfaces for deterministic glass panels and light native text",
+                    "controlled city/studio depth, soft smoke or bokeh, charcoal gradients, restrained blue rim light; no parchment, no古风 scenery, no dossier frames",
+                    List.of(
+                            "dark cinematic background zones must remain low detail behind every foreground panel",
+                            "portrait can be editorial but must not cover business slots",
+                            "subtle city or studio depth is allowed only as background texture",
+                            "avoid parchment, antique borders, paper cards, UI rows, chips, thumbnails and video-player shapes",
+                            "visual texture should support dark glass deterministic foreground panels"
+                    )
             );
-            case "classic" -> new StyleBrief(
+            case "classic" -> styleBrief(
                     "经典演员资料长图",
                     "timeless film-still actor profile-card background, warm studio hero backdrop, analog cinema texture, elegant facial lighting, professional casting profile atmosphere, clean lower render-safe surfaces",
                     "warm grey, sepia brown, ivory, muted black, champagne",
                     "classic three-point portrait lighting, soft falloff, readable document lighting",
-                    "simple tailored neutral wardrobe"
+                    "simple tailored neutral wardrobe",
+                    "classic_profile_v3",
+                    "paper-dark",
+                    "paper",
+                    "premium classic actor casting background with warm studio texture, realistic portrait, and clean light lower safe zones",
+                    "timeless film-still finish, crisp facial realism, restrained warm document surfaces, no cheap poster effects",
+                    "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must not cover left text-safe area",
+                    "hero left side, x=120-1080, y=120-1320 must remain warm low-detail studio/document negative space",
+                    "warm low-detail studio or document safe surfaces for deterministic native panels",
+                    "warm studio texture, soft analog film grain, subtle neutral document surfaces, restrained decorative lines without readable text",
+                    List.of(
+                            "warm ivory or champagne low-detail surfaces behind component regions",
+                            "classic studio depth behind hero portrait and identity area",
+                            "lower render-safe regions should be calm background surfaces, not app cards",
+                            "avoid hard module borders, rows, chip shapes, thumbnails and video-player shapes",
+                            "visual texture should support deterministic foreground panels drawn by the mini program"
+                    )
             );
-            case "commercial" -> new StyleBrief(
+            case "commercial" -> styleBrief(
                     "商业演员资料长图",
                     "clean commercial actor profile-card background, bright premium studio hero scene, approachable expression, polished natural skin texture, advertising-ready composition, lower render-safe regions clean and minimal",
                     "white, graphite, muted champagne, soft blue, silver",
                     "bright clean softbox lighting, low-contrast lower panels",
-                    "minimal contemporary wardrobe"
+                    "minimal contemporary wardrobe",
+                    "commercial_profile_v3",
+                    "paper-dark",
+                    "studio-light",
+                    "premium clean studio casting profile background with bright neutral safe zones and realistic approachable portrait",
+                    "advertising-ready studio finish, crisp skin detail, clean neutral surfaces, no clutter or fake UI",
+                    "hero right side, x=1080-2050, y=120-1400; face center near x=1580,y=520; body must not cover left identity text-safe area",
+                    "hero left side, x=100-1060, y=120-1300 must remain clean light studio negative space",
+                    "clean white/soft grey low-detail safe surfaces for deterministic studio-light panels",
+                    "premium studio backdrop, soft grey/white gradients, restrained champagne or blue accent light, no ancient paper texture, no city clutter",
+                    List.of(
+                            "clean studio gradients behind component regions",
+                            "low contrast surfaces must remain readable for dark native text",
+                            "avoid decorative clutter and fake app cards",
+                            "do not draw rows, chips, thumbnails or video-player shapes",
+                            "visual texture should support neutral studio deterministic foreground panels"
+                    )
             );
-            case "artistic" -> new StyleBrief(
+            case "artistic" -> styleBrief(
                     "艺术演员资料长图",
                     "art-house actor profile-card background, cinematic shadow in hero area, expressive but realistic mood, textured backdrop, restrained gallery poster feeling, calm lower render-safe surfaces",
                     "off-white, ink black, olive grey, muted rust, stone grey",
                     "controlled dramatic side light, readable lower-panel falloff",
-                    "minimal expressive wardrobe with texture"
+                    "minimal expressive wardrobe with texture",
+                    "artistic_profile_v3",
+                    "cinema-light",
+                    "gallery-glass",
+                    "premium art-house casting profile background with expressive portrait, controlled shadows, and gallery-like readable safe zones",
+                    "restrained gallery poster finish, realistic face detail, textured but quiet surfaces, no overdecorated poster graphics",
+                    "hero right side, x=1080-2050, y=120-1480; face center near x=1580,y=560; expressive shadow must not cover left identity text-safe area",
+                    "hero left side, x=100-1060, y=120-1320 must remain low-detail gallery wall or shadow gradient for light native text",
+                    "muted dark/gallery low-detail safe surfaces for deterministic glass panels and light native text",
+                    "textured gallery wall, controlled dramatic shadows, olive/stone/rust accents, soft film grain; no古风 scenery, no parchment dossier, no fake typography",
+                    List.of(
+                            "expressive texture is allowed only outside required component readability",
+                            "lower safe zones must stay quiet enough for deterministic glass panels",
+                            "portrait must not cover business slots",
+                            "avoid hard UI rows, chips, thumbnails and video-player shapes",
+                            "visual texture should support gallery-glass deterministic foreground panels"
+                    )
             );
-            default -> new StyleBrief(
+            default -> styleBrief(
                     "演员资料长图",
                     "premium cinematic actor profile-card background, realistic face, professional share poster composition, clean lower document regions",
                     "neutral warm palette, ivory, graphite",
                     "soft professional portrait lighting with readable lower regions",
-                    "clean actor wardrobe"
+                    "clean actor wardrobe",
+                    "classic_profile_v3",
+                    "paper-dark",
+                    "paper",
+                    "premium neutral actor casting background with realistic portrait and clean safe zones",
+                    "professional casting-book finish, crisp face detail, restrained visual surfaces",
+                    "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520",
+                    "hero left side, x=120-1080, y=120-1320 must remain clean negative space",
+                    "clean low-detail safe surfaces for deterministic native panels",
+                    "neutral studio/document texture without readable text, logos or fake UI",
+                    List.of(
+                            "clean low-detail surfaces behind component regions",
+                            "portrait must not cover business slots",
+                            "avoid hard UI rows, chips, thumbnails and video-player shapes",
+                            "visual texture should support deterministic foreground panels"
+                    )
             );
         };
+    }
+
+    private StyleBrief styleBrief(String title,
+                                  String visualDirection,
+                                  String palette,
+                                  String lighting,
+                                  String wardrobe,
+                                  String layoutPreset,
+                                  String textTheme,
+                                  String panelTheme,
+                                  String referenceBenchmark,
+                                  String qualityBar,
+                                  String subjectBox,
+                                  String identitySafeArea,
+                                  String safeSurfaceTone,
+                                  String backgroundMaterial,
+                                  List<String> moduleAesthetics) {
+        return new StyleBrief(
+                title,
+                visualDirection,
+                palette,
+                lighting,
+                wardrobe,
+                layoutPreset,
+                textTheme,
+                panelTheme,
+                referenceBenchmark,
+                qualityBar,
+                subjectBox,
+                identitySafeArea,
+                safeSurfaceTone,
+                backgroundMaterial,
+                layoutRegions(layoutPreset),
+                moduleAesthetics
+        );
+    }
+
+    private List<String> periodModuleAesthetics() {
+        return List.of(
+                "warm ivory rice-paper/parchment texture with subtle stains and fibers",
+                "misty Jiangnan ink-wash landscape depth behind the actor and title-safe area",
+                "delicate cinnabar seal-like ornaments are allowed only as abstract shapes without readable characters",
+                "lower render-safe regions should be calm background surfaces, not app cards",
+                "avoid hard module borders, rows, chip shapes, thumbnails and video-player shapes",
+                "visual texture should support deterministic foreground panels drawn by the mini program"
+        );
+    }
+
+    private Map<String, String> layoutRegions(String layoutPreset) {
+        if (layoutPreset.startsWith("urban")) {
+            return Map.of(
+                    "identity", "x=214-974 y=584-1419; low-detail dark text-safe hero area",
+                    "facts", "x=216-1066 y=1688-2218; quiet dark safe surface, no fake labels",
+                    "skills", "x=1164-1944 y=1688-2218; quiet dark safe surface, no fake chips",
+                    "works", "x=216-1944 y=2328-2654; quiet dark wide surface, no rows",
+                    "photos", "x=216-1944 y=2700-3034; quiet dark strip, no thumbnail frames",
+                    "intro", "x=216-1046 y=3124-3554; quiet dark intro surface",
+                    "video", "x=1196-1944 y=3124-3554; quiet dark video surface, no video-player UI"
+            );
+        }
+        if (layoutPreset.startsWith("commercial")) {
+            return Map.of(
+                    "identity", "x=214-954 y=584-1384; clean light text-safe hero area",
+                    "facts", "x=216-1068 y=1640-2160; quiet light studio surface, no fake labels",
+                    "skills", "x=1160-1944 y=1640-2160; quiet light studio surface, no fake chips",
+                    "works", "x=216-1944 y=2266-2592; quiet light wide surface, no rows",
+                    "photos", "x=216-1944 y=2636-2978; quiet light strip, no thumbnail frames",
+                    "intro", "x=216-1058 y=3074-3520; quiet light intro surface",
+                    "video", "x=1190-1944 y=3074-3520; quiet light video surface, no video-player UI"
+            );
+        }
+        if (layoutPreset.startsWith("artistic")) {
+            return Map.of(
+                    "identity", "x=214-974 y=584-1419; low-detail gallery text-safe hero area",
+                    "facts", "x=236-1056 y=1708-2228; quiet gallery safe surface, no fake labels",
+                    "skills", "x=1186-1944 y=1708-2228; quiet gallery safe surface, no fake chips",
+                    "works", "x=236-1924 y=2338-2664; quiet gallery wide surface, no rows",
+                    "photos", "x=236-1924 y=2710-3044; quiet gallery strip, no thumbnail frames",
+                    "intro", "x=236-1056 y=3134-3564; quiet gallery intro surface",
+                    "video", "x=1186-1924 y=3134-3564; quiet gallery video surface, no video-player UI"
+            );
+        }
+        if (layoutPreset.startsWith("costume")) {
+            return Map.of(
+                    "identity", "x=233-923 y=584-1421; warm paper text-safe hero area",
+                    "facts", "x=238-1059 y=1667-2197; quiet parchment surface, no fake labels",
+                    "skills", "x=1210-1944 y=1667-2197; quiet parchment surface, no fake chips",
+                    "works", "x=242-1918 y=2308-2631; quiet parchment wide surface, no rows",
+                    "photos", "x=229-1931 y=2673-3007; quiet parchment strip, no thumbnail frames",
+                    "intro", "x=233-1041 y=3099-3556; quiet parchment intro surface",
+                    "video", "x=1197-1953 y=3099-3556; quiet parchment video surface, no video-player UI"
+            );
+        }
+        return Map.of(
+                "identity", "x=233-903 y=584-1421; warm studio/document text-safe hero area",
+                "facts", "x=238-1059 y=1667-2197; quiet light surface, no fake labels",
+                "skills", "x=1210-1944 y=1667-2197; quiet light surface, no fake chips",
+                "works", "x=242-1918 y=2308-2631; quiet light wide surface, no rows",
+                "photos", "x=229-1931 y=2673-3007; quiet light strip, no thumbnail frames",
+                "intro", "x=233-1041 y=3099-3556; quiet light intro surface",
+                "video", "x=1197-1953 y=3099-3556; quiet light video surface, no video-player UI"
+        );
     }
 
     private String writeJson(Object value) {
@@ -327,7 +541,18 @@ public class AiProfileCardPromptAgent {
             String visualDirection,
             String palette,
             String lighting,
-            String wardrobe
+            String wardrobe,
+            String layoutPreset,
+            String textTheme,
+            String panelTheme,
+            String referenceBenchmark,
+            String qualityBar,
+            String subjectBox,
+            String identitySafeArea,
+            String safeSurfaceTone,
+            String backgroundMaterial,
+            Map<String, String> layoutRegions,
+            List<String> moduleAesthetics
     ) {
     }
 }

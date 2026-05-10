@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,11 +42,11 @@ class AiProfileCardPromptAgentTest {
         assertEquals("https://cdn.kplyyk.com/generated.png", generation.imageResult().imageUrl());
         assertNotNull(generation.prompt());
         assertTrue(generation.prompt().promptText().contains("target 2160x3840"));
-        assertTrue(generation.prompt().promptText().contains("hero right area"));
+        assertTrue(generation.prompt().promptText().contains("style-specific hero subject area"));
         assertTrue(generation.prompt().promptText().contains("styleCode=costume_actor_profile_full_card"));
         assertTrue(generation.prompt().promptText().contains("Mini program native components"));
-        assertTrue(generation.prompt().promptText().contains("high-quality Chinese period actor profile sheet"));
-        assertTrue(generation.prompt().promptText().contains("calm render-safe background surfaces"));
+        assertTrue(generation.prompt().promptText().contains("layoutPreset=costume_profile_v3"));
+        assertTrue(generation.prompt().promptText().contains("warm low-detail parchment"));
         assertTrue(generation.prompt().promptText().contains("Do not draw hard information cards"));
         assertTrue(generation.prompt().promptText().contains("foreground components"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
@@ -64,12 +65,64 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"targetSize\":\"2160x3840\""));
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
         assertTrue(request.promptJson().contains("\"layoutCompliance\""));
-        assertTrue(request.promptJson().contains("premium vertical actor profile background"));
+        assertTrue(request.promptJson().contains("\"layoutPreset\":\"costume_profile_v3\""));
+        assertTrue(request.promptJson().contains("\"panelTheme\":\"period-paper\""));
         assertTrue(request.promptJson().contains("quiet render-safe zones are mandatory in every style"));
-        assertTrue(request.promptJson().contains("\"profilePanelRegion\""));
-        assertTrue(request.promptJson().contains("\"statsRegion\""));
-        assertTrue(request.promptJson().contains("do not draw thumbnail frames"));
-        assertTrue(request.promptJson().contains("\"photoStripRegion\""));
+        assertTrue(request.promptJson().contains("\"facts\""));
+        assertTrue(request.promptJson().contains("\"video\""));
+        assertTrue(request.promptJson().contains("no thumbnail frames"));
+    }
+
+    @Test
+    void generateShouldUseStyleSpecificContractForEveryScene() {
+        CapturingProvider provider = new CapturingProvider();
+        AiProfileCardPromptAgent agent = new AiProfileCardPromptAgent(
+                new ObjectMapper(),
+                new AiProfileImageProviderRegistry(List.of(provider)));
+        ActorProfileDTO profile = new ActorProfileDTO();
+        profile.setGender("female");
+        profile.setAge(24);
+        profile.setHeight(168);
+        profile.setCity("上海");
+        profile.setSkillTypes(List.of("影视表演", "短剧"));
+
+        assertSceneContract(agent, provider, profile, "classic", "classic_profile_v3", "paper", "warm studio");
+        assertSceneContract(agent, provider, profile, "costume", "costume_profile_v3", "period-paper", "warm paper");
+        assertSceneContract(agent, provider, profile, "urban", "urban_profile_v3", "cinema-glass", "no parchment");
+        assertSceneContract(agent, provider, profile, "commercial", "commercial_profile_v3", "studio-light", "clean studio");
+        assertSceneContract(agent, provider, profile, "artistic", "artistic_profile_v3", "gallery-glass", "gallery");
+    }
+
+    private void assertSceneContract(AiProfileCardPromptAgent agent,
+                                     CapturingProvider provider,
+                                     ActorProfileDTO profile,
+                                     String scene,
+                                     String layoutPreset,
+                                     String panelTheme,
+                                     String expectedPromptSignal) {
+        agent.generate(
+                profile,
+                "aipf_" + scene,
+                "kplyyk",
+                scene,
+                scene,
+                "https://cdn.kplyyk.com/source.png");
+
+        AiProfileImageGenerationRequest request = provider.lastRequest.get();
+        assertNotNull(request);
+        assertEquals(scene, request.templateSceneCode());
+        assertTrue(request.promptText().contains("layoutPreset=" + layoutPreset));
+        assertTrue(request.promptText().contains(expectedPromptSignal));
+        assertTrue(request.promptJson().contains("\"layoutPreset\":\"" + layoutPreset + "\""));
+        assertTrue(request.promptJson().contains("\"panelTheme\":\"" + panelTheme + "\""));
+        assertTrue(request.promptJson().contains("\"identity\""));
+        assertTrue(request.promptJson().contains("\"intro\""));
+        assertTrue(request.promptJson().contains("\"video\""));
+        if ("urban".equals(scene) || "artistic".equals(scene)) {
+            assertTrue(request.promptJson().contains("\"textTheme\":\"cinema-light\""));
+            assertFalse(request.promptText().contains("pale parchment"));
+            assertFalse(request.promptText().contains("Chinese period actor profile sheet"));
+        }
     }
 
     private static final class CapturingProvider implements AiProfileImageProvider {
