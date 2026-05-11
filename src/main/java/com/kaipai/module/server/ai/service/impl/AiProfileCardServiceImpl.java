@@ -147,6 +147,18 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         return toArtifactResp(task);
     }
 
+    @Override
+    public void deleteArtifact(Long currentUserId, String artifactId) {
+        if (!StringUtils.hasText(artifactId)) {
+            throw new BizException("artifactId 不能为空");
+        }
+        ActorAiProfileCardTask task = getById(artifactId.trim());
+        if (task == null || !currentUserId.equals(task.getUserId())) {
+            throw new BizException("AI 分享图作品不存在");
+        }
+        removeById(task.getTaskId());
+    }
+
     private void runGeneration(String taskId) {
         ActorAiProfileCardTask task = getById(taskId);
         if (task == null) {

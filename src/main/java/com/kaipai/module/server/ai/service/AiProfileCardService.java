@@ -18,4 +18,6 @@ public interface AiProfileCardService {
     List<AiProfileCardArtifactRespDTO> artifacts(Long currentUserId);
 
     AiProfileCardArtifactRespDTO artifact(String artifactId);
+
+    void deleteArtifact(Long currentUserId, String artifactId);
 }

@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,6 +54,14 @@ public class AiProfileCardController {
     @GetMapping("/artifacts/{artifactId}")
     public R<AiProfileCardArtifactRespDTO> artifact(@PathVariable String artifactId) {
         return R.ok(aiProfileCardService.artifact(artifactId));
+    }
+
+    @Operation(summary = "删除我的 AI 分享图作品")
+    @DeleteMapping("/artifacts/{artifactId}")
+    public R<Void> deleteArtifact(Authentication authentication,
+                                  @PathVariable String artifactId) {
+        aiProfileCardService.deleteArtifact(currentUserId(authentication), artifactId);
+        return R.ok();
     }
 
     @Operation(summary = "查询 AI 分享图生成任务")
