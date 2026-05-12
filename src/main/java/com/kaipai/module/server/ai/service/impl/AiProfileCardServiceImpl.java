@@ -26,6 +26,7 @@ import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardProviderDescriptor;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import com.kaipai.module.server.ai.service.AiProfileCardService;
 import com.kaipai.module.server.card.service.ActorCardConfigService;
 import com.kaipai.module.server.card.service.UserShareCardService;
@@ -58,6 +59,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final ActorProfileService actorProfileService;
     private final ActorProfileMapper actorProfileMapper;
     private final AiProfileCardProperties properties;
+    private final AiImageProviderConfigService aiImageProviderConfigService;
     private final AiProfileCardPromptAgent promptAgent;
     private final UserShareCardService userShareCardService;
     private final ActorCardConfigService actorCardConfigService;
@@ -73,7 +75,8 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         ActorProfileDTO profile = actorProfileService.mine(currentUserId);
         ActorProfile profileEntity = requireProfileEntity(currentUserId);
         String sourceImageUrl = resolveSourceImage(profile, dto.getSourceImageUrl());
-        AiProfileCardProviderDescriptor provider = promptAgent.resolveProvider(properties.getProviderCode());
+        String providerCode = aiImageProviderConfigService.resolveActiveProviderCode(properties.getProviderCode());
+        AiProfileCardProviderDescriptor provider = promptAgent.resolveProvider(providerCode);
 
         ActorAiProfileCardTask task = new ActorAiProfileCardTask();
         task.setTaskId("aipf_" + UUID.randomUUID().toString().replace("-", ""));

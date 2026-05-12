@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
+import com.kaipai.module.server.ai.config.AiImageProviderRuntimeConfig;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -26,6 +28,7 @@ import java.util.UUID;
 public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
     private final AiProfileCardProperties properties;
+    private final AiImageProviderConfigService aiImageProviderConfigService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -35,26 +38,27 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
     @Override
     public String modelCode() {
-        return properties.getKplyyk().getModel();
+        return aiImageProviderConfigService.resolveModelCode(providerCode(), properties.getKplyyk().getModel());
     }
 
     @Override
     public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
         AiProfileCardProperties.KplyykProvider config = properties.getKplyyk();
-        if (!StringUtils.hasText(config.getEndpoint())) {
+        EffectiveConfig effective = effectiveConfig(config);
+        if (!StringUtils.hasText(effective.endpoint())) {
             throw new BizException("KPLYYK 生图管理 API endpoint 未配置");
         }
-        if (!StringUtils.hasText(config.getAuthToken())) {
+        if (!StringUtils.hasText(effective.authToken())) {
             throw new BizException("KPLYYK 生图管理 API 密钥未配置");
         }
 
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(config.getConnectTimeoutMs()))
+                    .connectTimeout(Duration.ofMillis(effective.connectTimeoutMs()))
                     .build();
-            SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), config);
-            JsonNode submitted = submitEditTask(client, request, sourceImage, config);
-            AiProfileImageGenerationResult immediateResult = parseImageResult(submitted, config.getEndpoint());
+            SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), effective);
+            JsonNode submitted = submitEditTask(client, request, sourceImage, effective);
+            AiProfileImageGenerationResult immediateResult = parseImageResult(submitted, effective.endpoint());
             if (immediateResult != null) {
                 return immediateResult;
             }
@@ -63,7 +67,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
             if (!StringUtils.hasText(taskId)) {
                 throw new BizException("KPLYYK 生图管理 API 未返回 task_id");
             }
-            return pollTask(client, taskId.trim(), config);
+            return pollTask(client, taskId.trim(), effective);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new BizException("KPLYYK 生图任务轮询被中断");
@@ -77,7 +81,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
     private JsonNode submitEditTask(HttpClient client,
                                     AiProfileImageGenerationRequest request,
                                     SourceImage sourceImage,
-                                    AiProfileCardProperties.KplyykProvider config) throws Exception {
+                                    EffectiveConfig config) throws Exception {
         String boundary = "----KaipaiKplyykImage" + UUID.randomUUID().toString().replace("-", "");
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         writeTextPart(output, boundary, "model", modelCode());
@@ -90,7 +94,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
         HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(config.getEndpoint()))
                 .timeout(Duration.ofMillis(config.getReadTimeoutMs()))
-                .header(authHeader(config), authValue(config.getAuthToken()))
+                .header(authHeader(config), authValue(config.authToken()))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(output.toByteArray()))
                 .build();
@@ -103,13 +107,13 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
     private AiProfileImageGenerationResult pollTask(HttpClient client,
                                                     String taskId,
-                                                    AiProfileCardProperties.KplyykProvider config) throws Exception {
-        String taskUrl = appendPath(config.getEndpoint(), URLEncoder.encode(taskId, StandardCharsets.UTF_8));
+                                                    EffectiveConfig config) throws Exception {
+        String taskUrl = appendPath(config.endpoint(), URLEncoder.encode(taskId, StandardCharsets.UTF_8));
         for (int attempt = 0; attempt < Math.max(1, config.getMaxPollAttempts()); attempt++) {
             Thread.sleep(Math.max(300, config.getPollIntervalMs()));
             HttpRequest request = HttpRequest.newBuilder(URI.create(taskUrl))
                     .timeout(Duration.ofMillis(config.getReadTimeoutMs()))
-                    .header(authHeader(config), authValue(config.getAuthToken()))
+                    .header(authHeader(config), authValue(config.authToken()))
                     .GET()
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -134,7 +138,7 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
 
     private SourceImage downloadSourceImage(HttpClient client,
                                             String sourceImageUrl,
-                                            AiProfileCardProperties.KplyykProvider config) throws Exception {
+                                            EffectiveConfig config) throws Exception {
         if (!StringUtils.hasText(sourceImageUrl) || !sourceImageUrl.startsWith("http")) {
             throw new BizException("KPLYYK 图生图需要可访问的源图片 URL");
         }
@@ -259,8 +263,8 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
         return normalized.regionMatches(true, 0, "Bearer ", 0, 7) ? normalized : "Bearer " + normalized;
     }
 
-    private String authHeader(AiProfileCardProperties.KplyykProvider config) {
-        return StringUtils.hasText(config.getAuthHeader()) ? config.getAuthHeader().trim() : "Authorization";
+    private String authHeader(EffectiveConfig config) {
+        return StringUtils.hasText(config.authHeader()) ? config.authHeader().trim() : "Authorization";
     }
 
     private String resolveImageUrl(String imageUrl, String endpoint) {
@@ -305,6 +309,82 @@ public class KplyykProfileImageProvider implements AiProfileImageProvider {
             return "source.webp";
         }
         return "source.png";
+    }
+
+    private EffectiveConfig effectiveConfig(AiProfileCardProperties.KplyykProvider config) {
+        AiImageProviderRuntimeConfig runtime = aiImageProviderConfigService.findRuntimeConfig(providerCode()).orElse(null);
+        if (runtime == null) {
+            return new EffectiveConfig(
+                    config.getEndpoint(),
+                    config.getAuthHeader(),
+                    config.getAuthToken(),
+                    config.getSize(),
+                    config.getQuality(),
+                    config.getCount(),
+                    config.getConnectTimeoutMs(),
+                    config.getReadTimeoutMs(),
+                    config.getPollIntervalMs(),
+                    config.getMaxPollAttempts()
+            );
+        }
+        return new EffectiveConfig(
+                runtime.endpoint(config.getEndpoint()),
+                runtime.authHeader(config.getAuthHeader()),
+                firstText(runtime.firstSecret("authToken", "apiKey"), config.getAuthToken()),
+                runtime.size(config.getSize()),
+                runtime.quality(config.getQuality()),
+                runtime.count(config.getCount()),
+                runtime.connectTimeoutMs(config.getConnectTimeoutMs()),
+                runtime.readTimeoutMs(config.getReadTimeoutMs()),
+                runtime.pollIntervalMs(config.getPollIntervalMs()),
+                runtime.maxPollAttempts(config.getMaxPollAttempts())
+        );
+    }
+
+    private String firstText(String primary, String fallback) {
+        return StringUtils.hasText(primary) ? primary.trim() : fallback;
+    }
+
+    private record EffectiveConfig(
+            String endpoint,
+            String authHeader,
+            String authToken,
+            String size,
+            String quality,
+            int count,
+            int connectTimeoutMs,
+            int readTimeoutMs,
+            int pollIntervalMs,
+            int maxPollAttempts
+    ) {
+
+        private String getEndpoint() {
+            return endpoint;
+        }
+
+        private String getSize() {
+            return size;
+        }
+
+        private String getQuality() {
+            return quality;
+        }
+
+        private int getCount() {
+            return count;
+        }
+
+        private int getReadTimeoutMs() {
+            return readTimeoutMs;
+        }
+
+        private int getPollIntervalMs() {
+            return pollIntervalMs;
+        }
+
+        private int getMaxPollAttempts() {
+            return maxPollAttempts;
+        }
     }
 
     private record SourceImage(byte[] bytes, String contentType, String fileName) {

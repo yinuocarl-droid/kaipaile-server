@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
+import com.kaipai.module.server.ai.config.AiImageProviderRuntimeConfig;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -24,6 +26,7 @@ import java.util.Map;
 public class HttpAiProfileImageProvider implements AiProfileImageProvider {
 
     private final AiProfileCardProperties properties;
+    private final AiImageProviderConfigService aiImageProviderConfigService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -33,13 +36,19 @@ public class HttpAiProfileImageProvider implements AiProfileImageProvider {
 
     @Override
     public String modelCode() {
-        return properties.getHttp().getModel();
+        return aiImageProviderConfigService.resolveModelCode(providerCode(), properties.getHttp().getModel());
     }
 
     @Override
     public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
         AiProfileCardProperties.HttpProvider config = properties.getHttp();
-        if (!StringUtils.hasText(config.getEndpoint())) {
+        AiImageProviderRuntimeConfig runtime = aiImageProviderConfigService.findRuntimeConfig(providerCode()).orElse(null);
+        String endpoint = runtime == null ? config.getEndpoint() : runtime.endpoint(config.getEndpoint());
+        String authHeader = runtime == null ? config.getAuthHeader() : runtime.authHeader(config.getAuthHeader());
+        String authToken = runtime == null ? config.getAuthToken() : firstText(runtime.firstSecret("authToken", "apiKey"), config.getAuthToken());
+        int connectTimeoutMs = runtime == null ? config.getConnectTimeoutMs() : runtime.connectTimeoutMs(config.getConnectTimeoutMs());
+        int readTimeoutMs = runtime == null ? config.getReadTimeoutMs() : runtime.readTimeoutMs(config.getReadTimeoutMs());
+        if (!StringUtils.hasText(endpoint)) {
             throw new BizException("AI 分享图 HTTP provider endpoint 未配置");
         }
 
@@ -55,16 +64,16 @@ public class HttpAiProfileImageProvider implements AiProfileImageProvider {
             payload.put("promptJson", request.promptJson());
 
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(config.getConnectTimeoutMs()))
+                    .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                     .build();
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(config.getEndpoint()))
-                    .timeout(Duration.ofMillis(config.getReadTimeoutMs()))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
+                    .timeout(Duration.ofMillis(readTimeoutMs))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)));
-            if (StringUtils.hasText(config.getAuthToken())) {
+            if (StringUtils.hasText(authToken)) {
                 builder.header(
-                        StringUtils.hasText(config.getAuthHeader()) ? config.getAuthHeader().trim() : "Authorization",
-                        config.getAuthToken().trim());
+                        StringUtils.hasText(authHeader) ? authHeader.trim() : "Authorization",
+                        authToken.trim());
             }
 
             HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
@@ -117,5 +126,9 @@ public class HttpAiProfileImageProvider implements AiProfileImageProvider {
             }
         }
         return null;
+    }
+
+    private String firstText(String primary, String fallback) {
+        return StringUtils.hasText(primary) ? primary.trim() : fallback;
     }
 }

@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
+import com.kaipai.module.server.ai.config.AiImageProviderRuntimeConfig;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -25,6 +27,7 @@ import java.util.UUID;
 public class OpenAiProfileImageProvider implements AiProfileImageProvider {
 
     private final AiProfileCardProperties properties;
+    private final AiImageProviderConfigService aiImageProviderConfigService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -34,30 +37,38 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
 
     @Override
     public String modelCode() {
-        return properties.getOpenai().getModel();
+        return aiImageProviderConfigService.resolveModelCode(providerCode(), properties.getOpenai().getModel());
     }
 
     @Override
     public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
         AiProfileCardProperties.OpenAiProvider config = properties.getOpenai();
-        if (!StringUtils.hasText(config.getApiKey())) {
+        AiImageProviderRuntimeConfig runtime = aiImageProviderConfigService.findRuntimeConfig(providerCode()).orElse(null);
+        String apiKey = runtime == null ? config.getApiKey() : firstText(runtime.firstSecret("apiKey", "authToken"), config.getApiKey());
+        String endpoint = runtime == null ? config.getEndpoint() : runtime.endpoint(config.getEndpoint());
+        String size = runtime == null ? config.getSize() : runtime.size(config.getSize());
+        String quality = runtime == null ? config.getQuality() : runtime.quality(config.getQuality());
+        String outputFormat = runtime == null ? config.getOutputFormat() : runtime.responseFormat(config.getOutputFormat());
+        int connectTimeoutMs = runtime == null ? config.getConnectTimeoutMs() : runtime.connectTimeoutMs(config.getConnectTimeoutMs());
+        int readTimeoutMs = runtime == null ? config.getReadTimeoutMs() : runtime.readTimeoutMs(config.getReadTimeoutMs());
+        if (!StringUtils.hasText(apiKey)) {
             throw new BizException("OpenAI 图片生成 API Key 未配置");
         }
-        if (!StringUtils.hasText(config.getEndpoint())) {
+        if (!StringUtils.hasText(endpoint)) {
             throw new BizException("OpenAI 图片生成 endpoint 未配置");
         }
 
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(config.getConnectTimeoutMs()))
+                    .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                     .build();
-            SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), config);
+            SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), readTimeoutMs);
             String boundary = "----KaipaiAiProfileCard" + UUID.randomUUID().toString().replace("-", "");
-            byte[] body = buildMultipartBody(boundary, config, request, sourceImage);
+            byte[] body = buildMultipartBody(boundary, request, sourceImage, size, quality, outputFormat);
 
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(config.getEndpoint()))
-                    .timeout(Duration.ofMillis(config.getReadTimeoutMs()))
-                    .header("Authorization", "Bearer " + config.getApiKey().trim())
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
+                    .timeout(Duration.ofMillis(readTimeoutMs))
+                    .header("Authorization", "Bearer " + apiKey.trim())
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
@@ -75,12 +86,12 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
 
     private SourceImage downloadSourceImage(HttpClient client,
                                             String sourceImageUrl,
-                                            AiProfileCardProperties.OpenAiProvider config) throws Exception {
+                                            int readTimeoutMs) throws Exception {
         if (!StringUtils.hasText(sourceImageUrl) || !sourceImageUrl.startsWith("http")) {
             throw new BizException("OpenAI 图生图需要可访问的源图片 URL");
         }
         HttpRequest request = HttpRequest.newBuilder(URI.create(sourceImageUrl))
-                .timeout(Duration.ofMillis(config.getReadTimeoutMs()))
+                .timeout(Duration.ofMillis(readTimeoutMs))
                 .GET()
                 .build();
         HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
@@ -94,21 +105,23 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
     }
 
     private byte[] buildMultipartBody(String boundary,
-                                      AiProfileCardProperties.OpenAiProvider config,
                                       AiProfileImageGenerationRequest request,
-                                      SourceImage sourceImage) throws Exception {
+                                      SourceImage sourceImage,
+                                      String size,
+                                      String quality,
+                                      String outputFormat) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         writeTextPart(output, boundary, "model", modelCode());
         writeTextPart(output, boundary, "prompt", request.promptText());
         writeTextPart(output, boundary, "n", "1");
-        if (StringUtils.hasText(config.getSize())) {
-            writeTextPart(output, boundary, "size", config.getSize().trim());
+        if (StringUtils.hasText(size)) {
+            writeTextPart(output, boundary, "size", size.trim());
         }
-        if (StringUtils.hasText(config.getQuality())) {
-            writeTextPart(output, boundary, "quality", config.getQuality().trim());
+        if (StringUtils.hasText(quality)) {
+            writeTextPart(output, boundary, "quality", quality.trim());
         }
-        if (StringUtils.hasText(config.getOutputFormat())) {
-            writeTextPart(output, boundary, "output_format", config.getOutputFormat().trim());
+        if (StringUtils.hasText(outputFormat)) {
+            writeTextPart(output, boundary, "output_format", outputFormat.trim());
         }
         writeFilePart(output, boundary, "image", sourceImage.fileName(), sourceImage.contentType(), sourceImage.bytes());
         output.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
@@ -181,6 +194,10 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
             return "source.webp";
         }
         return "source.png";
+    }
+
+    private String firstText(String primary, String fallback) {
+        return StringUtils.hasText(primary) ? primary.trim() : fallback;
     }
 
     private record SourceImage(byte[] bytes, String contentType, String fileName) {
