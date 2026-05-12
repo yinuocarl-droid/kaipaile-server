@@ -12,7 +12,7 @@ class AiProfileCardServiceImplTest {
 
     @Test
     void resolveGeneratedImageUrlShouldRejectSourceImageEcho() {
-        AiProfileCardServiceImpl service = new AiProfileCardServiceImpl(null, null, null, null, null, null, null);
+        AiProfileCardServiceImpl service = new AiProfileCardServiceImpl(null, null, null, null, null, null, null, null);
         AiProfileImageGenerationResult result = AiProfileImageGenerationResult.imageUrl(
                 "https://cdn.kplyyk.com/source.png?token=generated");
 

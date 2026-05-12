@@ -11,6 +11,7 @@ import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestReqDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestRespDTO;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
 import com.kaipai.module.server.ai.provider.AiProfileImageProvider;
 import com.kaipai.module.server.ai.provider.AiProfileImageProviderRegistry;
 import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
@@ -39,6 +40,7 @@ public class AdminAiImageProviderController {
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
     private final AiProfileImageProviderRegistry providerRegistry;
+    private final AiGeneratedImageStorage generatedImageStorage;
 
     @Operation(summary = "AI 生图 provider 列表")
     @GetMapping
@@ -146,7 +148,7 @@ public class AdminAiImageProviderController {
             result.setModelCode(provider.modelCode());
             result.setStatus("success");
             result.setMessage("测试生成成功");
-            result.setImageUrl(imageResult == null ? null : imageResult.imageUrl());
+            result.setImageUrl(persistTestImage(imageResult));
             result.setElapsedMs(System.currentTimeMillis() - started);
             aiImageProviderConfigService.recordTestResult(providerCode, "success", "测试生成成功");
             return R.ok(result);
@@ -162,5 +164,21 @@ public class AdminAiImageProviderController {
 
     private AdminAiImageProviderActionDTO safeAction(AdminAiImageProviderActionDTO request) {
         return request == null ? new AdminAiImageProviderActionDTO() : request;
+    }
+
+    private String persistTestImage(AiProfileImageGenerationResult imageResult) {
+        if (imageResult == null) {
+            throw new BizException("测试生成结果为空");
+        }
+        if (StringUtils.hasText(imageResult.imageUrl())) {
+            return generatedImageStorage.uploadFromUrl(imageResult.imageUrl().trim(), "ai-profile-card-test");
+        }
+        if (imageResult.imageBytes() != null && imageResult.imageBytes().length > 0) {
+            return generatedImageStorage.upload(
+                    imageResult.imageBytes(),
+                    StringUtils.hasText(imageResult.contentType()) ? imageResult.contentType() : "image/png",
+                    "ai-profile-card-test");
+        }
+        throw new BizException("测试生成结果缺少图片内容");
     }
 }
