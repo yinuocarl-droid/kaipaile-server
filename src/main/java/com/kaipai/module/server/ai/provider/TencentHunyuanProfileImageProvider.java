@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -124,23 +125,98 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private String buildTencentPrompt(AiProfileImageGenerationRequest request, boolean hasSourceImage) {
         String styleCode = StringUtils.hasText(request.styleCode()) ? request.styleCode().trim() : "";
         String templateSceneCode = StringUtils.hasText(request.templateSceneCode()) ? request.templateSceneCode().trim() : "";
+        JsonNode fixedLayout = parsePromptJson(request.promptJson()).path("fixedLayout");
+        String subjectBox = layoutText(fixedLayout, "subjectBox",
+                "hero right side, face near upper-right, body must not cover left text-safe area");
+        String identitySafeArea = layoutText(fixedLayout, "identitySafeArea",
+                "hero left side must remain clean negative space");
+        String lowerRegions = compactLayoutRegions(fixedLayout.path("regions"));
+        String background = compactText(layoutText(fixedLayout, "background", ""), 150);
         String identityPolicy = hasSourceImage
-                ? "Use the reference image as actor identity source; preserve recognizable face, age impression, hairstyle, natural skin texture and body proportion."
-                : "Create a realistic actor portrait background with natural face detail and clean body proportion.";
+                ? "Use reference image as actor identity source; preserve face, age impression, hairstyle, skin texture and body proportion."
+                : "Create a realistic actor portrait with natural face detail and clean body proportion.";
         String prompt = """
-                Create a premium 9:16 vertical full-bleed actor profile-card background layer for a mini program.
+                Agent layout is mandatory. Create a 9:16 full-bleed actor profile-card BACKGROUND ONLY for a mini program, output 2160x3840.
                 %s
-                Scene=%s, style=%s. %s
-                The final mini program will render all business content later, so keep the image as one continuous cinematic background with calm readable lower surfaces.
-                Do not render readable text, Chinese characters, English letters, numbers, phone, QR code, watermark, logo, fake app UI, hard information cards, section titles, rows, chips, thumbnail frames, video-player controls, outer border, paper edge, poster mat or card shell.
-                Keep subject in a hero portrait area with clean eyes, hands, hairline and clothing edges; use premium realistic lighting and refined composition.
+                Actor ONLY in this subject box: %s.
+                Keep identity/title safe area clean: %s.
+                Lower fixed UI zones must stay quiet and empty, no fake panels or controls: %s.
+                Scene=%s, style=%s. %s Background=%s.
+                No readable text, Chinese characters, English letters, numbers, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
                 """.formatted(
                 identityPolicy,
+                subjectBox,
+                identitySafeArea,
+                lowerRegions,
                 templateSceneCode,
                 styleCode,
-                tencentStyleHint(templateSceneCode, styleCode)
+                tencentStyleHint(templateSceneCode, styleCode),
+                background
         ).trim().replaceAll("\\s+", " ");
         return truncatePrompt(prompt);
+    }
+
+    private JsonNode parsePromptJson(String promptJson) {
+        if (!StringUtils.hasText(promptJson)) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(promptJson);
+        } catch (Exception error) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private String layoutText(JsonNode fixedLayout, String field, String fallback) {
+        if (fixedLayout == null || fixedLayout.isMissingNode()) {
+            return fallback;
+        }
+        String value = fixedLayout.path(field).asText("");
+        return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private String compactLayoutRegions(JsonNode regions) {
+        if (regions == null || !regions.isObject()) {
+            return "facts, skills, works, photos, intro and video zones stay low-detail and readable";
+        }
+        List<String> parts = new ArrayList<>();
+        for (String key : List.of("facts", "skills", "works", "photos", "intro", "video")) {
+            String value = regions.path(key).asText("");
+            if (StringUtils.hasText(value)) {
+                parts.add(key + " " + compactRegionBox(value));
+            }
+        }
+        if (parts.isEmpty()) {
+            return "facts, skills, works, photos, intro and video zones stay low-detail and readable";
+        }
+        return String.join("; ", parts);
+    }
+
+    private String compactRegionBox(String value) {
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        int providerStart = normalized.indexOf("provider x=");
+        if (providerStart >= 0) {
+            int providerEnd = normalized.indexOf(" on 2160x3840", providerStart);
+            if (providerEnd > providerStart) {
+                return normalized.substring(providerStart, providerEnd);
+            }
+        }
+        int designStart = normalized.indexOf("design x=");
+        if (designStart >= 0) {
+            int designEnd = normalized.indexOf(" on 750x1334", designStart);
+            if (designEnd > designStart) {
+                return normalized.substring(designStart, designEnd);
+            }
+        }
+        return compactText(normalized, 80);
+    }
+
+    private String compactText(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
     }
 
     private String tencentStyleHint(String templateSceneCode, String styleCode) {
