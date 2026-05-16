@@ -136,10 +136,13 @@ class TencentHunyuanProfileImageProviderTest {
             JsonNode payload = objectMapper.readTree(submitBody.get());
             String prompt = payload.path("Prompt").asText();
             assertFalse(payload.has("Images"));
+            assertEquals(0, payload.path("Revise").asInt());
             assertTrue(prompt.length() <= 900);
             assertTrue(prompt.contains("Agent layout is mandatory"));
             assertTrue(prompt.contains("x=1120-2050"));
-            assertTrue(prompt.contains("lower half contains fixed mini-program UI zones"));
+            assertTrue(prompt.contains("continuous low-detail matte background"));
+            assertFalse(prompt.contains("profile-card"));
+            assertFalse(prompt.contains("mini-program UI zones"));
             assertFalse(prompt.contains("facts provider"));
             assertFalse(prompt.contains("Skills Provider"));
             assertFalse(prompt.contains("full provider prompt that Tencent rejects"));
