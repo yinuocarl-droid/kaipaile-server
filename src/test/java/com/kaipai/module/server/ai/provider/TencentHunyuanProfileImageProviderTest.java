@@ -139,7 +139,9 @@ class TencentHunyuanProfileImageProviderTest {
             assertTrue(prompt.length() <= 900);
             assertTrue(prompt.contains("Agent layout is mandatory"));
             assertTrue(prompt.contains("x=1120-2050"));
-            assertTrue(prompt.contains("facts provider x=239-1060 y=1667-2197"));
+            assertTrue(prompt.contains("lower half contains fixed mini-program UI zones"));
+            assertFalse(prompt.contains("facts provider"));
+            assertFalse(prompt.contains("Skills Provider"));
             assertFalse(prompt.contains("full provider prompt that Tencent rejects"));
         } finally {
             server.stop(0);

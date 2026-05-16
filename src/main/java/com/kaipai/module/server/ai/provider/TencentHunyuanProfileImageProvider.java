@@ -24,7 +24,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -130,7 +129,6 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 "hero right side, face near upper-right, body must not cover left text-safe area");
         String identitySafeArea = layoutText(fixedLayout, "identitySafeArea",
                 "hero left side must remain clean negative space");
-        String lowerRegions = compactLayoutRegions(fixedLayout.path("regions"));
         String background = compactText(layoutText(fixedLayout, "background", ""), 150);
         String identityPolicy = hasSourceImage
                 ? "Use reference image as actor identity source; preserve face, age impression, hairstyle, skin texture and body proportion."
@@ -140,14 +138,13 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 %s
                 Actor ONLY in this subject box: %s.
                 Keep identity/title safe area clean: %s.
-                Lower fixed UI zones must stay quiet and empty, no fake panels or controls: %s.
+                The lower half contains fixed mini-program UI zones. Leave it as plain low-detail matte background only: no guide words, no layout labels, no placeholder cards, no module boxes.
                 Scene=%s, style=%s. %s Background=%s.
-                No readable text, Chinese characters, English letters, numbers, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
+                Never paint prompt words or coordinate words into the image. No readable text, Chinese characters, English letters, numbers, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
                 """.formatted(
                 identityPolicy,
                 subjectBox,
                 identitySafeArea,
-                lowerRegions,
                 templateSceneCode,
                 styleCode,
                 tencentStyleHint(templateSceneCode, styleCode),
@@ -173,42 +170,6 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         }
         String value = fixedLayout.path(field).asText("");
         return StringUtils.hasText(value) ? value.trim() : fallback;
-    }
-
-    private String compactLayoutRegions(JsonNode regions) {
-        if (regions == null || !regions.isObject()) {
-            return "facts, skills, works, photos, intro and video zones stay low-detail and readable";
-        }
-        List<String> parts = new ArrayList<>();
-        for (String key : List.of("facts", "skills", "works", "photos", "intro", "video")) {
-            String value = regions.path(key).asText("");
-            if (StringUtils.hasText(value)) {
-                parts.add(key + " " + compactRegionBox(value));
-            }
-        }
-        if (parts.isEmpty()) {
-            return "facts, skills, works, photos, intro and video zones stay low-detail and readable";
-        }
-        return String.join("; ", parts);
-    }
-
-    private String compactRegionBox(String value) {
-        String normalized = value.trim().replaceAll("\\s+", " ");
-        int providerStart = normalized.indexOf("provider x=");
-        if (providerStart >= 0) {
-            int providerEnd = normalized.indexOf(" on 2160x3840", providerStart);
-            if (providerEnd > providerStart) {
-                return normalized.substring(providerStart, providerEnd);
-            }
-        }
-        int designStart = normalized.indexOf("design x=");
-        if (designStart >= 0) {
-            int designEnd = normalized.indexOf(" on 750x1334", designStart);
-            if (designEnd > designStart) {
-                return normalized.substring(designStart, designEnd);
-            }
-        }
-        return compactText(normalized, 80);
     }
 
     private String compactText(String value, int maxLength) {
