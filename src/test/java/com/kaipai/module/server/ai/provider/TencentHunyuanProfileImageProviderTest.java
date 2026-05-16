@@ -41,12 +41,12 @@ class TencentHunyuanProfileImageProviderTest {
 
             String action = exchange.getRequestHeaders().getFirst("X-TC-Action");
             exchange.getRequestBody().readAllBytes();
-            if ("SubmitHunyuanImageJob".equals(action)) {
+            if ("SubmitTextToImageJob".equals(action)) {
                 submitCalls.incrementAndGet();
                 sendJson(exchange, "{\"Response\":{\"JobId\":\"job-1\"}}");
                 return;
             }
-            if ("QueryHunyuanImageJob".equals(action)) {
+            if ("QueryTextToImageJob".equals(action)) {
                 queryCalls.incrementAndGet();
                 sendJson(exchange, "{\"Response\":{\"JobStatusCode\":\"5\",\"ResultImage\":[\"/generated.png\"]}}");
                 return;
@@ -109,13 +109,13 @@ class TencentHunyuanProfileImageProviderTest {
 
             String action = exchange.getRequestHeaders().getFirst("X-TC-Action");
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            if ("SubmitHunyuanImageJob".equals(action)) {
+            if ("SubmitTextToImageJob".equals(action)) {
                 submitCalls.incrementAndGet();
                 submitBody.set(body);
                 sendJson(exchange, "{\"Response\":{\"JobId\":\"job-1\"}}");
                 return;
             }
-            if ("QueryHunyuanImageJob".equals(action)) {
+            if ("QueryTextToImageJob".equals(action)) {
                 sendJson(exchange, "{\"Response\":{\"JobStatusCode\":\"5\",\"ResultImage\":[\"/generated.png\"]}}");
                 return;
             }
@@ -131,7 +131,7 @@ class TencentHunyuanProfileImageProviderTest {
             assertEquals(endpoint + "/generated.png", result.imageUrl());
             assertEquals(1, submitCalls.get());
             assertEquals(0, sourceCalls.get());
-            assertFalse(submitBody.get().contains("ContentImage"));
+            assertFalse(submitBody.get().contains("Images"));
         } finally {
             server.stop(0);
         }
@@ -140,7 +140,7 @@ class TencentHunyuanProfileImageProviderTest {
     private TencentHunyuanProfileImageProvider newProvider(String endpoint) {
         AiImageProviderConfigService configService = mock(AiImageProviderConfigService.class);
         when(configService.findRuntimeConfig("tencent-hunyuan")).thenReturn(Optional.of(runtimeConfig(endpoint)));
-        when(configService.resolveModelCode("tencent-hunyuan", "hunyuan-image")).thenReturn("hunyuan-image");
+        when(configService.resolveModelCode("tencent-hunyuan", "hunyuan-image")).thenReturn("hunyuan-image-3.0");
         return new TencentHunyuanProfileImageProvider(configService, new ObjectMapper());
     }
 
@@ -148,8 +148,8 @@ class TencentHunyuanProfileImageProviderTest {
         AiImageProviderPublicConfigDTO publicConfig = new AiImageProviderPublicConfigDTO();
         publicConfig.setEndpoint(endpoint);
         publicConfig.setRegion("ap-guangzhou");
-        publicConfig.setModel("hunyuan-image");
-        publicConfig.setModelVersion("2023-09-01");
+        publicConfig.setModel("hunyuan-image-3.0");
+        publicConfig.setModelVersion("2022-12-29");
         publicConfig.setResolution("720:1280");
         publicConfig.setCount(1);
         publicConfig.setConnectTimeoutMs(2000);
@@ -169,7 +169,7 @@ class TencentHunyuanProfileImageProviderTest {
     private AiProfileImageGenerationRequest request(String sourceImageUrl) {
         return new AiProfileImageGenerationRequest(
                 "test-task",
-                "hunyuan-image",
+                "hunyuan-image-3.0",
                 "classic",
                 "classic",
                 sourceImageUrl,

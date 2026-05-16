@@ -24,8 +24,8 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -33,10 +33,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TencentHunyuanProfileImageProvider implements AiProfileImageProvider {
 
-    private static final String SERVICE = "hunyuan";
-    private static final String DEFAULT_ENDPOINT = "https://hunyuan.tencentcloudapi.com";
+    private static final String SERVICE = "aiart";
+    private static final String DEFAULT_ENDPOINT = "https://aiart.tencentcloudapi.com";
     private static final String DEFAULT_REGION = "ap-guangzhou";
-    private static final String DEFAULT_VERSION = "2023-09-01";
+    private static final String DEFAULT_VERSION = "2022-12-29";
     private static final DateTimeFormatter TC3_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
@@ -71,13 +71,14 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                     .connectTimeout(Duration.ofMillis(runtime.connectTimeoutMs(10000)))
                     .build();
             String sourceImageUrl = normalizeSourceImageUrl(request.sourceImageUrl());
-            ProfileImageProviderHttpSupport.SourceImage sourceImage = sourceImageUrl == null
-                    ? null
-                    : ProfileImageProviderHttpSupport.downloadSourceImage(client, sourceImageUrl, runtime.readTimeoutMs(120000));
+            boolean hasSourceImage = sourceImageUrl != null;
+            if (hasSourceImage) {
+                ProfileImageProviderHttpSupport.downloadSourceImage(client, sourceImageUrl, runtime.readTimeoutMs(120000));
+            }
 
-            Map<String, Object> submitPayload = buildSubmitPayload(request, runtime, sourceImageUrl, sourceImage);
+            Map<String, Object> submitPayload = buildSubmitPayload(request, runtime, sourceImageUrl, hasSourceImage);
             JsonNode submitted = callTencent(client, endpoint, region, version, secretId, secretKey,
-                    "SubmitHunyuanImageJob", submitPayload, runtime.readTimeoutMs(120000));
+                    "SubmitTextToImageJob", submitPayload, runtime.readTimeoutMs(120000));
             String jobId = ProfileImageProviderHttpSupport.firstText(submitted, "/Response/JobId", "/JobId");
             if (!StringUtils.hasText(jobId)) {
                 AiProfileImageGenerationResult immediate = ProfileImageProviderHttpSupport.parseCommonResult(submitted, endpoint);
@@ -100,25 +101,21 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private Map<String, Object> buildSubmitPayload(AiProfileImageGenerationRequest request,
                                                    AiImageProviderRuntimeConfig runtime,
                                                    String sourceImageUrl,
-                                                   ProfileImageProviderHttpSupport.SourceImage sourceImage) {
+                                                   boolean hasSourceImage) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("Prompt", request.promptText());
-        if (StringUtils.hasText(request.negativePrompt())) {
-            payload.put("NegativePrompt", request.negativePrompt());
-        }
         String resolution = StringUtils.hasText(runtime.publicConfig().getResolution())
                 ? runtime.publicConfig().getResolution().trim()
                 : runtime.size("720:1280").replace("x", ":");
         payload.put("Resolution", resolution);
-        payload.put("Num", Math.max(1, runtime.count(1)));
-        if (sourceImage != null) {
-            payload.put("ContentImage", Map.of(
-                    "ImageBase64", Base64.getEncoder().encodeToString(sourceImage.bytes()),
-                    "ImageUrl", sourceImageUrl
-            ));
+        if (hasSourceImage) {
+            payload.put("Images", List.of(sourceImageUrl));
         }
         if (runtime.watermark(null) != null) {
             payload.put("LogoAdd", runtime.watermark(true) ? 1 : 0);
+        }
+        if (runtime.publicConfig().getPromptRewrite() != null) {
+            payload.put("Revise", runtime.publicConfig().getPromptRewrite() ? 1 : 0);
         }
         return payload;
     }
@@ -140,7 +137,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         for (int index = 0; index < attempts; index++) {
             Thread.sleep(intervalMs);
             JsonNode task = callTencent(client, endpoint, region, version, secretId, secretKey,
-                    "QueryHunyuanImageJob", Map.of("JobId", jobId), runtime.readTimeoutMs(120000));
+                    "QueryTextToImageJob", Map.of("JobId", jobId), runtime.readTimeoutMs(120000));
             String status = ProfileImageProviderHttpSupport.firstText(task,
                     "/Response/JobStatusCode",
                     "/Response/JobStatus",
@@ -152,7 +149,8 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 }
                 throw new BizException("腾讯混元任务完成但未返回图片");
             }
-            if ("6".equals(status) || "7".equals(status) || "FAILED".equalsIgnoreCase(status) || "FAIL".equalsIgnoreCase(status)) {
+            if ("4".equals(status) || "6".equals(status) || "7".equals(status)
+                    || "FAILED".equalsIgnoreCase(status) || "FAIL".equalsIgnoreCase(status)) {
                 throw new BizException("腾讯混元任务失败：" + truncate(task.toString()));
             }
         }
