@@ -70,10 +70,12 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(runtime.connectTimeoutMs(10000)))
                     .build();
-            ProfileImageProviderHttpSupport.SourceImage sourceImage =
-                    ProfileImageProviderHttpSupport.downloadSourceImage(client, request.sourceImageUrl(), runtime.readTimeoutMs(120000));
+            String sourceImageUrl = normalizeSourceImageUrl(request.sourceImageUrl());
+            ProfileImageProviderHttpSupport.SourceImage sourceImage = sourceImageUrl == null
+                    ? null
+                    : ProfileImageProviderHttpSupport.downloadSourceImage(client, sourceImageUrl, runtime.readTimeoutMs(120000));
 
-            Map<String, Object> submitPayload = buildSubmitPayload(request, runtime, sourceImage);
+            Map<String, Object> submitPayload = buildSubmitPayload(request, runtime, sourceImageUrl, sourceImage);
             JsonNode submitted = callTencent(client, endpoint, region, version, secretId, secretKey,
                     "SubmitHunyuanImageJob", submitPayload, runtime.readTimeoutMs(120000));
             String jobId = ProfileImageProviderHttpSupport.firstText(submitted, "/Response/JobId", "/JobId");
@@ -97,6 +99,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
 
     private Map<String, Object> buildSubmitPayload(AiProfileImageGenerationRequest request,
                                                    AiImageProviderRuntimeConfig runtime,
+                                                   String sourceImageUrl,
                                                    ProfileImageProviderHttpSupport.SourceImage sourceImage) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("Prompt", request.promptText());
@@ -108,14 +111,20 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 : runtime.size("720:1280").replace("x", ":");
         payload.put("Resolution", resolution);
         payload.put("Num", Math.max(1, runtime.count(1)));
-        payload.put("ContentImage", Map.of(
-                "ImageBase64", Base64.getEncoder().encodeToString(sourceImage.bytes()),
-                "ImageUrl", request.sourceImageUrl()
-        ));
+        if (sourceImage != null) {
+            payload.put("ContentImage", Map.of(
+                    "ImageBase64", Base64.getEncoder().encodeToString(sourceImage.bytes()),
+                    "ImageUrl", sourceImageUrl
+            ));
+        }
         if (runtime.watermark(null) != null) {
             payload.put("LogoAdd", runtime.watermark(true) ? 1 : 0);
         }
         return payload;
+    }
+
+    private String normalizeSourceImageUrl(String sourceImageUrl) {
+        return StringUtils.hasText(sourceImageUrl) ? sourceImageUrl.trim() : null;
     }
 
     private AiProfileImageGenerationResult pollJob(HttpClient client,

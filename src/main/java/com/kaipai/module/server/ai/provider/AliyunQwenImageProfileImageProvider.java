@@ -91,7 +91,9 @@ public class AliyunQwenImageProfileImageProvider implements AiProfileImageProvid
         payload.put("model", modelCode());
 
         List<Map<String, Object>> content = new ArrayList<>();
-        content.add(Map.of("image", request.sourceImageUrl()));
+        if (StringUtils.hasText(request.sourceImageUrl())) {
+            content.add(Map.of("image", request.sourceImageUrl().trim()));
+        }
         content.add(Map.of("text", request.promptText()));
 
         Map<String, Object> message = new LinkedHashMap<>();

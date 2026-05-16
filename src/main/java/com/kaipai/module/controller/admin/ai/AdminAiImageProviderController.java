@@ -129,25 +129,24 @@ public class AdminAiImageProviderController {
         long started = System.currentTimeMillis();
         try {
             AiProfileImageProvider provider = providerRegistry.resolve(providerCode);
+            String sourceImageUrl = StringUtils.hasText(request == null ? null : request.getSourceImageUrl())
+                    ? request.getSourceImageUrl().trim()
+                    : null;
             String prompt = StringUtils.hasText(request == null ? null : request.getPrompt())
                     ? request.getPrompt().trim()
-                    : "生成一张 9:16 演员资料卡背景图，保留参考图人物身份，不要出现文字、二维码和水印。";
+                    : defaultTestPrompt(sourceImageUrl);
             String templateSceneCode = StringUtils.hasText(request == null ? null : request.getTemplateSceneCode())
                     ? request.getTemplateSceneCode().trim()
                     : "classic";
             String styleCode = StringUtils.hasText(request == null ? null : request.getStyleCode())
                     ? request.getStyleCode().trim()
                     : templateSceneCode;
-            String sourceImageUrl = request == null ? null : request.getSourceImageUrl();
-            if (!StringUtils.hasText(sourceImageUrl)) {
-                throw new BizException("测试生成需要填写 sourceImageUrl");
-            }
             AiProfileImageGenerationResult imageResult = provider.generate(new AiProfileImageGenerationRequest(
                     "aitest_" + UUID.randomUUID().toString().replace("-", ""),
                     provider.modelCode(),
                     templateSceneCode,
                     styleCode,
-                    sourceImageUrl.trim(),
+                    sourceImageUrl,
                     prompt,
                     request == null ? null : request.getNegativePrompt(),
                     "{}"
@@ -172,6 +171,13 @@ public class AdminAiImageProviderController {
 
     private AdminAiImageProviderActionDTO safeAction(AdminAiImageProviderActionDTO request) {
         return request == null ? new AdminAiImageProviderActionDTO() : request;
+    }
+
+    private String defaultTestPrompt(String sourceImageUrl) {
+        if (StringUtils.hasText(sourceImageUrl)) {
+            return "生成一张 9:16 演员资料卡背景图，保留参考图人物身份，不要出现文字、二维码和水印。";
+        }
+        return "生成一张 9:16 演员资料卡背景图，不要出现文字、二维码和水印。";
     }
 
     private String persistTestImage(AiProfileImageGenerationResult imageResult) {

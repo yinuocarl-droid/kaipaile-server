@@ -17,8 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -87,6 +89,49 @@ class TencentHunyuanProfileImageProviderTest {
 
             assertTrue(error.getMessage().contains("text/plain"));
             assertEquals(0, tencentCalls.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void generateShouldSubmitPromptOnlyPayloadWhenSourceImageUrlIsBlank() throws Exception {
+        AtomicInteger submitCalls = new AtomicInteger();
+        AtomicInteger sourceCalls = new AtomicInteger();
+        AtomicReference<String> submitBody = new AtomicReference<>();
+        HttpServer server = startServer((exchange) -> {
+            String path = exchange.getRequestURI().getPath();
+            if ("/source.png".equals(path)) {
+                sourceCalls.incrementAndGet();
+                send(exchange, 200, "image/png", new byte[]{1, 2, 3, 4});
+                return;
+            }
+
+            String action = exchange.getRequestHeaders().getFirst("X-TC-Action");
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if ("SubmitHunyuanImageJob".equals(action)) {
+                submitCalls.incrementAndGet();
+                submitBody.set(body);
+                sendJson(exchange, "{\"Response\":{\"JobId\":\"job-1\"}}");
+                return;
+            }
+            if ("QueryHunyuanImageJob".equals(action)) {
+                sendJson(exchange, "{\"Response\":{\"JobStatusCode\":\"5\",\"ResultImage\":[\"/generated.png\"]}}");
+                return;
+            }
+            sendJson(exchange, "{\"Response\":{\"Error\":{\"Message\":\"unexpected action\"}}}");
+        });
+
+        try {
+            String endpoint = endpoint(server);
+            TencentHunyuanProfileImageProvider provider = newProvider(endpoint);
+
+            AiProfileImageGenerationResult result = provider.generate(request(" "));
+
+            assertEquals(endpoint + "/generated.png", result.imageUrl());
+            assertEquals(1, submitCalls.get());
+            assertEquals(0, sourceCalls.get());
+            assertFalse(submitBody.get().contains("ContentImage"));
         } finally {
             server.stop(0);
         }

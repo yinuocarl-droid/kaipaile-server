@@ -84,7 +84,9 @@ public class VolcSeedreamProfileImageProvider implements AiProfileImageProvider 
         payload.put("model", modelCode());
         payload.put("prompt", request.promptText());
         payload.put("prompts", List.of(request.promptText()));
-        payload.put("reference_images", List.of(request.sourceImageUrl()));
+        if (StringUtils.hasText(request.sourceImageUrl())) {
+            payload.put("reference_images", List.of(request.sourceImageUrl().trim()));
+        }
         if (StringUtils.hasText(request.negativePrompt())) {
             payload.put("negative_prompt", request.negativePrompt());
         }

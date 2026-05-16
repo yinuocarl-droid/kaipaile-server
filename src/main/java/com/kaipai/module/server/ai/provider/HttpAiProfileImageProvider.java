@@ -58,7 +58,9 @@ public class HttpAiProfileImageProvider implements AiProfileImageProvider {
             payload.put("model", modelCode());
             payload.put("templateSceneCode", request.templateSceneCode());
             payload.put("styleCode", request.styleCode());
-            payload.put("sourceImageUrl", request.sourceImageUrl());
+            if (StringUtils.hasText(request.sourceImageUrl())) {
+                payload.put("sourceImageUrl", request.sourceImageUrl().trim());
+            }
             payload.put("prompt", request.promptText());
             payload.put("negativePrompt", request.negativePrompt());
             payload.put("promptJson", request.promptJson());

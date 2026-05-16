@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -77,6 +78,31 @@ class AdminAiImageProviderControllerTest {
         verify(configService).recordTestResult("volc-seedream", "failed", "测试生成结果缺少图片内容");
     }
 
+    @Test
+    void testShouldAllowPromptOnlyRequestWithoutSourceImageUrl() {
+        AiImageProviderConfigService configService = mock(AiImageProviderConfigService.class);
+        AiGeneratedImageStorage storage = mock(AiGeneratedImageStorage.class);
+        CapturingProvider provider = new CapturingProvider(
+                "tencent-hunyuan",
+                AiProfileImageGenerationResult.imageUrl("https://provider.example/generated.png"));
+        AdminAiImageProviderController controller = newController(configService, storage, provider);
+
+        when(storage.uploadFromUrl("https://provider.example/generated.png", "ai-profile-card-test"))
+                .thenReturn("https://cdn.kplyyk.com/ai-profile-card-test/generated.png");
+
+        AdminAiImageProviderTestReqDTO request = new AdminAiImageProviderTestReqDTO();
+        request.setPrompt("prompt only");
+        request.setTemplateSceneCode("classic");
+        request.setStyleCode("classic");
+
+        R<AdminAiImageProviderTestRespDTO> response = controller.test("tencent-hunyuan", request);
+
+        assertEquals("success", response.getData().getStatus());
+        assertNull(provider.lastRequest.sourceImageUrl());
+        assertEquals("prompt only", provider.lastRequest.promptText());
+        verify(configService).recordTestResult("tencent-hunyuan", "success", "测试生成成功");
+    }
+
     private AdminAiImageProviderController newController(AiImageProviderConfigService configService,
                                                          AiGeneratedImageStorage storage,
                                                          AiProfileImageProvider provider) {
@@ -104,6 +130,33 @@ class AdminAiImageProviderControllerTest {
 
         @Override
         public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
+            return generationResult;
+        }
+    }
+
+    private static final class CapturingProvider implements AiProfileImageProvider {
+        private final String providerCode;
+        private final AiProfileImageGenerationResult generationResult;
+        private AiProfileImageGenerationRequest lastRequest;
+
+        private CapturingProvider(String providerCode, AiProfileImageGenerationResult generationResult) {
+            this.providerCode = providerCode;
+            this.generationResult = generationResult;
+        }
+
+        @Override
+        public String providerCode() {
+            return providerCode;
+        }
+
+        @Override
+        public String modelCode() {
+            return providerCode + "-model";
+        }
+
+        @Override
+        public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
+            lastRequest = request;
             return generationResult;
         }
     }

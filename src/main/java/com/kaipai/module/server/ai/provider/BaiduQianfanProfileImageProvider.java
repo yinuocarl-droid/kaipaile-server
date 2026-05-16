@@ -80,7 +80,9 @@ public class BaiduQianfanProfileImageProvider implements AiProfileImageProvider 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", modelCode());
         payload.put("prompt", request.promptText());
-        payload.put("image", request.sourceImageUrl());
+        if (StringUtils.hasText(request.sourceImageUrl())) {
+            payload.put("image", request.sourceImageUrl().trim());
+        }
         if (StringUtils.hasText(request.negativePrompt())) {
             payload.put("negative_prompt", request.negativePrompt());
         }
