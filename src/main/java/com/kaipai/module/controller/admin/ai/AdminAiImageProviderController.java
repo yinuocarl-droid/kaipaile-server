@@ -6,6 +6,7 @@ import com.kaipai.module.model.ai.dto.AdminAiImageProviderActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderPublicConfigSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderRevealSecretRespDTO;
+import com.kaipai.module.model.ai.dto.AdminAiImageProviderSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderSecretSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestReqDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestRespDTO;
@@ -54,6 +55,13 @@ public class AdminAiImageProviderController {
     @PreAuthorize("hasAuthority('page.system.ai-image-providers')")
     public R<AdminAiImageProviderDTO> detail(@PathVariable String providerCode) {
         return R.ok(aiImageProviderConfigService.adminDetail(providerCode));
+    }
+
+    @Operation(summary = "新增或更新 AI 生图厂商接入信息")
+    @PostMapping
+    @PreAuthorize("hasAuthority('action.system.ai-image-provider.update')")
+    public R<AdminAiImageProviderDTO> saveProvider(@Valid @RequestBody AdminAiImageProviderSaveDTO request) {
+        return R.ok(aiImageProviderConfigService.saveProvider(request));
     }
 
     @Operation(summary = "保存 AI 生图 provider 公开配置")

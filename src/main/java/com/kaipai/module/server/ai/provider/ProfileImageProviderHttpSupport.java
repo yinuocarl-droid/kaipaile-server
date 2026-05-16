@@ -29,9 +29,14 @@ final class ProfileImageProviderHttpSupport {
         if (response.statusCode() < 200 || response.statusCode() >= 300 || response.body() == null || response.body().length == 0) {
             throw new BizException("源图片下载失败：" + response.statusCode());
         }
+        String guessedContentType = guessContentType(sourceImageUrl);
         String contentType = response.headers().firstValue("content-type")
                 .map(value -> value.split(";")[0].trim().toLowerCase())
-                .orElseGet(() -> guessContentType(sourceImageUrl));
+                .filter(value -> !"application/octet-stream".equals(value) || !StringUtils.hasText(guessedContentType))
+                .orElse(guessedContentType);
+        if (!StringUtils.hasText(contentType) || !contentType.startsWith("image/")) {
+            throw new BizException("源图片 URL 返回内容不是图片：" + (StringUtils.hasText(contentType) ? contentType : "未知类型"));
+        }
         return new SourceImage(response.body(), contentType, fileNameForContentType(contentType));
     }
 
@@ -118,10 +123,13 @@ final class ProfileImageProviderHttpSupport {
         if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) {
             return "image/jpeg";
         }
+        if (normalized.endsWith(".png")) {
+            return "image/png";
+        }
         if (normalized.endsWith(".webp")) {
             return "image/webp";
         }
-        return "image/png";
+        return "";
     }
 
     static String fileNameForContentType(String contentType) {

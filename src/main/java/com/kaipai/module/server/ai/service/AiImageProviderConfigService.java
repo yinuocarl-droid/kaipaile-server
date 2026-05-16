@@ -5,6 +5,7 @@ import com.kaipai.module.model.ai.dto.AdminAiImageProviderActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderPublicConfigSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderRevealSecretRespDTO;
+import com.kaipai.module.model.ai.dto.AdminAiImageProviderSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderSecretSaveDTO;
 import com.kaipai.module.model.ai.dto.AiImageProviderPublicConfigDTO;
 import com.kaipai.module.model.ai.entity.AiImageProviderConfig;
@@ -19,6 +20,8 @@ public interface AiImageProviderConfigService extends IService<AiImageProviderCo
     List<AdminAiImageProviderDTO> adminList();
 
     AdminAiImageProviderDTO adminDetail(String providerCode);
+
+    AdminAiImageProviderDTO saveProvider(AdminAiImageProviderSaveDTO request);
 
     AdminAiImageProviderDTO savePublicConfig(String providerCode, AdminAiImageProviderPublicConfigSaveDTO request);
 

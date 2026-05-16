@@ -166,7 +166,6 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 .timeout(Duration.ofMillis(readTimeoutMs))
                 .header("Authorization", authorization)
                 .header("Content-Type", "application/json; charset=utf-8")
-                .header("Host", URI.create(endpoint).getHost())
                 .header("X-TC-Action", action)
                 .header("X-TC-Version", version)
                 .header("X-TC-Region", region)

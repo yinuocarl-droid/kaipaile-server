@@ -43,6 +43,12 @@ public class AdminAiImageProviderDTO {
 
     private List<String> requiredPublicFields;
 
+    private List<String> missingPublicFields;
+
+    private List<String> missingSecretFields;
+
+    private Boolean activationReady;
+
     private LocalDateTime createTime;
 
     private LocalDateTime lastUpdate;

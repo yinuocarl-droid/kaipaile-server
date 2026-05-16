@@ -7,13 +7,13 @@ import com.kaipai.module.server.ai.service.AiProviderSecretCryptoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.util.DigestUtils;
 import org.springframework.util.StringUtils;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -67,16 +67,24 @@ public class AiProviderSecretCryptoServiceImpl implements AiProviderSecretCrypto
         }
         try {
             Map<String, String> envelope = objectMapper.readValue(envelopeJson, STRING_MAP_TYPE);
-            byte[] iv = Base64.getDecoder().decode(envelope.get("iv"));
-            byte[] ciphertext = Base64.getDecoder().decode(envelope.get("ciphertext"));
-            Cipher cipher = Cipher.getInstance(ALG);
-            cipher.init(Cipher.DECRYPT_MODE, keySpec(), new GCMParameterSpec(GCM_TAG_BITS, iv));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
+            try {
+                return decryptEnvelope(envelope, keySpec());
+            } catch (Exception currentKeyError) {
+                return decryptEnvelope(envelope, legacyPassphraseKeySpec());
+            }
         } catch (BizException error) {
             throw error;
         } catch (Exception error) {
             throw new BizException("AI provider 密钥解密失败，请确认 AI_PROVIDER_CONFIG_MASTER_KEY 是否正确");
         }
+    }
+
+    private String decryptEnvelope(Map<String, String> envelope, SecretKeySpec key) throws Exception {
+        byte[] iv = Base64.getDecoder().decode(envelope.get("iv"));
+        byte[] ciphertext = Base64.getDecoder().decode(envelope.get("ciphertext"));
+        Cipher cipher = Cipher.getInstance(ALG);
+        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+        return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
     }
 
     private SecretKeySpec keySpec() {
@@ -104,8 +112,43 @@ public class AiProviderSecretCryptoServiceImpl implements AiProviderSecretCrypto
         } catch (IllegalArgumentException ignored) {
             // Fall back to SHA-256 derivation below.
         }
-        return DigestUtils.md5DigestAsHex(value.getBytes(StandardCharsets.UTF_8)).concat(
-                DigestUtils.md5DigestAsHex(("kaipai:" + value).getBytes(StandardCharsets.UTF_8))
-        ).substring(0, 32).getBytes(StandardCharsets.UTF_8);
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            throw new BizException("AI provider 密钥主密钥派生失败");
+        }
+    }
+
+    private SecretKeySpec legacyPassphraseKeySpec() {
+        if (!StringUtils.hasText(masterKey)) {
+            throw new BizException("AI_PROVIDER_CONFIG_MASTER_KEY 未配置，禁止保存、查看或调用 AI provider 密钥");
+        }
+        String normalized = masterKey.trim();
+        if (normalized.matches("^[0-9a-fA-F]{64}$")) {
+            return keySpec();
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(normalized);
+            if (decoded.length == 32) {
+                return keySpec();
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Fall back to legacy passphrase derivation below.
+        }
+        String legacyKey = md5Hex(normalized).concat(md5Hex("kaipai:" + normalized)).substring(0, 32);
+        return new SecretKeySpec(legacyKey.getBytes(StandardCharsets.UTF_8), "AES");
+    }
+
+    private String md5Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("MD5").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(digest.length * 2);
+            for (byte item : digest) {
+                builder.append(String.format("%02x", item & 0xff));
+            }
+            return builder.toString();
+        } catch (Exception error) {
+            throw new BizException("AI provider 密钥旧版主密钥派生失败");
+        }
     }
 }

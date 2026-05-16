@@ -5,6 +5,7 @@ import com.kaipai.common.result.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -85,6 +86,13 @@ public class GlobalExceptionHandler {
     public R<Void> handleMethodNotSupportedException(HttpRequestMethodNotSupportedException e) {
         log.warn("请求方法不支持: {}", e.getMessage());
         return R.fail(405, "请求方法不支持");
+    }
+
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    @ExceptionHandler(AccessDeniedException.class)
+    public R<Void> handleAccessDeniedException(AccessDeniedException e) {
+        log.warn("权限不足: {}", e.getMessage());
+        return R.fail(ResultCode.FORBIDDEN);
     }
 
     @ExceptionHandler(Exception.class)

@@ -15,6 +15,7 @@ import com.kaipai.module.model.ai.dto.AdminAiImageProviderActionDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderPublicConfigSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderRevealSecretRespDTO;
+import com.kaipai.module.model.ai.dto.AdminAiImageProviderSaveDTO;
 import com.kaipai.module.model.ai.dto.AdminAiImageProviderSecretSaveDTO;
 import com.kaipai.module.model.ai.dto.AiImageProviderPublicConfigDTO;
 import com.kaipai.module.model.ai.entity.AiImageProviderConfig;
@@ -78,6 +79,26 @@ public class AiImageProviderConfigServiceImpl
             "aliyun-wanxiang", List.of("endpoint", "model"),
             "baidu-qianfan", List.of("endpoint", "model")
     );
+    private static final Map<String, String> DEFAULT_DISPLAY_NAMES = Map.of(
+            "kplyyk", "KPLYYK 管理 API",
+            "http", "通用 HTTP Provider",
+            "openai", "OpenAI Images",
+            "volc-seedream", "火山/豆包 Seedream",
+            "aliyun-qwen-image", "阿里云百炼 Qwen Image",
+            "aliyun-wanxiang", "阿里云通义万相",
+            "tencent-hunyuan", "腾讯混元生图",
+            "baidu-qianfan", "百度千帆图像生成"
+    );
+    private static final Map<String, Integer> DEFAULT_PRIORITIES = Map.of(
+            "kplyyk", 10,
+            "volc-seedream", 20,
+            "aliyun-qwen-image", 30,
+            "aliyun-wanxiang", 40,
+            "tencent-hunyuan", 50,
+            "baidu-qianfan", 60,
+            "http", 90,
+            "openai", 100
+    );
 
     private final ObjectMapper objectMapper;
     private final AiProviderSecretCryptoService secretCryptoService;
@@ -93,6 +114,56 @@ public class AiImageProviderConfigServiceImpl
     @Override
     public AdminAiImageProviderDTO adminDetail(String providerCode) {
         return toAdminDto(requireConfig(providerCode));
+    }
+
+    @Override
+    @Transactional
+    public AdminAiImageProviderDTO saveProvider(AdminAiImageProviderSaveDTO request) {
+        if (request == null) {
+            throw new BizException("厂商接入信息不能为空");
+        }
+        String providerCode = normalizeProviderCode(request.getProviderCode());
+        Optional<AiImageProviderConfig> existing = findByProviderCode(providerCode);
+        AiImageProviderConfig config = existing.orElseGet(AiImageProviderConfig::new);
+        AdminAiImageProviderDTO before = existing.map(this::toAdminDto).orElse(null);
+
+        config.setProviderCode(providerCode);
+        config.setDisplayName(resolveDisplayName(providerCode, request.getDisplayName()));
+        config.setEnabled(Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0);
+        config.setActive(existing.map(AiImageProviderConfig::getActive).orElse(0));
+        config.setPriority(resolvePriority(providerCode, request.getPriority()));
+        config.setPublicConfigJson(writeJson(normalizePublicConfig(
+                request.getPublicConfig(),
+                existing.map(this::readPublicConfig).orElseGet(AiImageProviderPublicConfigDTO::new)
+        )));
+
+        Map<String, String> submittedSecrets = normalizeSecrets(request.getSecrets());
+        if (!submittedSecrets.isEmpty()) {
+            AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
+            Map<String, String> merged = existing
+                    .map(this::decryptSecrets)
+                    .map(LinkedHashMap::new)
+                    .orElseGet(LinkedHashMap::new);
+            merged.putAll(submittedSecrets);
+            config.setSecretConfigCiphertext(secretCryptoService.encrypt(writeJson(merged)));
+            config.setSecretMaskJson(writeJson(maskSecrets(merged)));
+            config.setSecretUpdatedBy(admin.getAdminUserId());
+            config.setSecretUpdatedByName(admin.getUserName());
+            config.setSecretUpdatedAt(LocalDateTime.now());
+        }
+
+        if (existing.isPresent()) {
+            updateById(config);
+        } else {
+            save(config);
+        }
+
+        AiImageProviderConfig updated = requireConfig(providerCode);
+        AdminAiImageProviderDTO after = toAdminDto(updated);
+        String actionCode = existing.isPresent() ? "provider_config_update" : "provider_config_create";
+        recordAudit(updated, actionCode, before, after, "success", reason(request.getReason()));
+        logOperation("ai_image_provider_config_save", updated, before, after, request.getReason());
+        return after;
     }
 
     @Override
@@ -148,15 +219,17 @@ public class AiImageProviderConfigServiceImpl
         requireConfirm(providerCode, request);
         AdminAiImageProviderDTO before = toAdminDto(config);
         AdminAuthenticatedUser admin = adminAuthContext.requireCurrentAdmin();
-        config.setSecretConfigCiphertext(null);
-        config.setSecretMaskJson(null);
-        config.setSecretUpdatedBy(admin.getAdminUserId());
-        config.setSecretUpdatedByName(admin.getUserName());
-        config.setSecretUpdatedAt(LocalDateTime.now());
+        LambdaUpdateWrapper<AiImageProviderConfig> update = new LambdaUpdateWrapper<AiImageProviderConfig>()
+                .eq(AiImageProviderConfig::getConfigId, config.getConfigId())
+                .set(AiImageProviderConfig::getSecretConfigCiphertext, null)
+                .set(AiImageProviderConfig::getSecretMaskJson, null)
+                .set(AiImageProviderConfig::getSecretUpdatedBy, admin.getAdminUserId())
+                .set(AiImageProviderConfig::getSecretUpdatedByName, admin.getUserName())
+                .set(AiImageProviderConfig::getSecretUpdatedAt, LocalDateTime.now());
         if (Integer.valueOf(1).equals(config.getActive())) {
-            config.setActive(0);
+            update.set(AiImageProviderConfig::getActive, 0);
         }
-        updateById(config);
+        update(update);
         AiImageProviderConfig updated = requireConfig(providerCode);
         AdminAiImageProviderDTO after = toAdminDto(updated);
         recordAudit(updated, "secret_clear", before, after, "success", reason(request == null ? null : request.getReason()));
@@ -199,7 +272,9 @@ public class AiImageProviderConfigServiceImpl
         AiImageProviderConfig config = requireConfig(providerCode);
         validateCanActivate(config);
         List<AdminAiImageProviderDTO> beforeList = adminList();
-        update(new LambdaUpdateWrapper<AiImageProviderConfig>().set(AiImageProviderConfig::getActive, 0));
+        update(new LambdaUpdateWrapper<AiImageProviderConfig>()
+                .eq(AiImageProviderConfig::getDeleted, 0)
+                .set(AiImageProviderConfig::getActive, 0));
         AiImageProviderConfig update = new AiImageProviderConfig();
         update.setConfigId(config.getConfigId());
         update.setEnabled(1);
@@ -335,6 +410,20 @@ public class AiImageProviderConfigServiceImpl
         return normalized;
     }
 
+    private String resolveDisplayName(String providerCode, String displayName) {
+        if (StringUtils.hasText(displayName)) {
+            return truncate(displayName, 128);
+        }
+        return DEFAULT_DISPLAY_NAMES.getOrDefault(providerCode, providerCode);
+    }
+
+    private Integer resolvePriority(String providerCode, Integer priority) {
+        if (priority != null && priority > 0) {
+            return priority;
+        }
+        return DEFAULT_PRIORITIES.getOrDefault(providerCode, 100);
+    }
+
     private AiImageProviderRuntimeConfig toRuntimeConfig(AiImageProviderConfig config) {
         return new AiImageProviderRuntimeConfig(
                 config.getProviderCode(),
@@ -357,6 +446,9 @@ public class AiImageProviderConfigServiceImpl
         dto.setSecretConfigured(!secretMask.isEmpty());
         dto.setRequiredSecretFields(requiredSecretFields(config.getProviderCode()));
         dto.setRequiredPublicFields(requiredPublicFields(config.getProviderCode()));
+        dto.setMissingPublicFields(missingPublicFields(config, dto.getPublicConfig()));
+        dto.setMissingSecretFields(missingSecretFields(config, secretMask));
+        dto.setActivationReady(dto.getMissingPublicFields().isEmpty() && dto.getMissingSecretFields().isEmpty());
         return dto;
     }
 
@@ -384,10 +476,24 @@ public class AiImageProviderConfigServiceImpl
         if (normalized.getCount() == null || normalized.getCount() <= 0) {
             normalized.setCount(1);
         }
+        normalizeTextFields(normalized);
         if (StringUtils.hasText(normalized.getExtraParamsJson())) {
             validateJsonObject(normalized.getExtraParamsJson());
         }
         return normalized;
+    }
+
+    private void normalizeTextFields(AiImageProviderPublicConfigDTO config) {
+        config.setEndpoint(trimToNull(config.getEndpoint()));
+        config.setRegion(trimToNull(config.getRegion()));
+        config.setModel(trimToNull(config.getModel()));
+        config.setModelVersion(trimToNull(config.getModelVersion()));
+        config.setSize(trimToNull(config.getSize()));
+        config.setQuality(trimToNull(config.getQuality()));
+        config.setResponseFormat(trimToNull(config.getResponseFormat()));
+        config.setAuthHeader(trimToNull(config.getAuthHeader()));
+        config.setResolution(trimToNull(config.getResolution()));
+        config.setExtraParamsJson(trimToNull(config.getExtraParamsJson()));
     }
 
     private Map<String, String> decryptSecrets(AiImageProviderConfig config) {
@@ -439,6 +545,16 @@ public class AiImageProviderConfigServiceImpl
     private void validateCanActivate(AiImageProviderConfig config) {
         AiImageProviderPublicConfigDTO publicConfig = readPublicConfig(config);
         List<String> missing = new ArrayList<>();
+        missing.addAll(missingPublicFields(config, publicConfig));
+        Map<String, String> secrets = decryptSecrets(config);
+        missing.addAll(missingSecretFields(config, secrets));
+        if (!missing.isEmpty()) {
+            throw new BizException("激活 provider 前请补齐配置：" + String.join(", ", missing));
+        }
+    }
+
+    private List<String> missingPublicFields(AiImageProviderConfig config, AiImageProviderPublicConfigDTO publicConfig) {
+        List<String> missing = new ArrayList<>();
         for (String field : requiredPublicFields(config.getProviderCode())) {
             Object value = switch (field) {
                 case "endpoint" -> publicConfig.getEndpoint();
@@ -450,15 +566,17 @@ public class AiImageProviderConfigServiceImpl
                 missing.add(field);
             }
         }
-        Map<String, String> secrets = decryptSecrets(config);
+        return missing;
+    }
+
+    private List<String> missingSecretFields(AiImageProviderConfig config, Map<String, String> secretsOrMask) {
+        List<String> missing = new ArrayList<>();
         for (String field : requiredSecretFields(config.getProviderCode())) {
-            if (!StringUtils.hasText(secrets.get(field))) {
+            if (!StringUtils.hasText(secretsOrMask.get(field))) {
                 missing.add(field);
             }
         }
-        if (!missing.isEmpty()) {
-            throw new BizException("激活 provider 前请补齐配置：" + String.join(", ", missing));
-        }
+        return missing;
     }
 
     private List<String> requiredSecretFields(String providerCode) {
@@ -543,7 +661,12 @@ public class AiImageProviderConfigServiceImpl
         return message
                 .replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-+/=]+", "Bearer ***")
                 .replaceAll("(?i)(secretId|secretKey|apiKey|authToken)\\s*[:=]\\s*[^,\\s}]+", "$1=***")
+                .replaceAll("(?i)\"(secretId|secretKey|apiKey|authToken)\"\\s*:\\s*\"[^\"]*\"", "\"$1\":\"***\"")
                 .trim();
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private String truncate(String value, int maxLength) {
