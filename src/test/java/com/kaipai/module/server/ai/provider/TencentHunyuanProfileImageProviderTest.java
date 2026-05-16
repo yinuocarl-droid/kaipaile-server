@@ -1,5 +1,6 @@
 package com.kaipai.module.server.ai.provider;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.ai.dto.AiImageProviderPublicConfigDTO;
@@ -99,6 +100,7 @@ class TencentHunyuanProfileImageProviderTest {
         AtomicInteger submitCalls = new AtomicInteger();
         AtomicInteger sourceCalls = new AtomicInteger();
         AtomicReference<String> submitBody = new AtomicReference<>();
+        ObjectMapper objectMapper = new ObjectMapper();
         HttpServer server = startServer((exchange) -> {
             String path = exchange.getRequestURI().getPath();
             if ("/source.png".equals(path)) {
@@ -131,7 +133,12 @@ class TencentHunyuanProfileImageProviderTest {
             assertEquals(endpoint + "/generated.png", result.imageUrl());
             assertEquals(1, submitCalls.get());
             assertEquals(0, sourceCalls.get());
-            assertFalse(submitBody.get().contains("Images"));
+            JsonNode payload = objectMapper.readTree(submitBody.get());
+            String prompt = payload.path("Prompt").asText();
+            assertFalse(payload.has("Images"));
+            assertTrue(prompt.length() <= 900);
+            assertTrue(prompt.contains("Do not render readable text"));
+            assertFalse(prompt.contains("full provider prompt that Tencent rejects"));
         } finally {
             server.stop(0);
         }
@@ -173,7 +180,7 @@ class TencentHunyuanProfileImageProviderTest {
                 "classic",
                 "classic",
                 sourceImageUrl,
-                "profile image",
+                "full provider prompt that Tencent rejects ".repeat(80),
                 "",
                 "{}"
         );

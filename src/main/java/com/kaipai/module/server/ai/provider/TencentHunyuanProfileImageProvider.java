@@ -37,6 +37,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private static final String DEFAULT_ENDPOINT = "https://aiart.tencentcloudapi.com";
     private static final String DEFAULT_REGION = "ap-guangzhou";
     private static final String DEFAULT_VERSION = "2022-12-29";
+    private static final int MAX_PROMPT_LENGTH = 900;
     private static final DateTimeFormatter TC3_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
@@ -103,7 +104,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                                                    String sourceImageUrl,
                                                    boolean hasSourceImage) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("Prompt", request.promptText());
+        payload.put("Prompt", buildTencentPrompt(request, hasSourceImage));
         String resolution = StringUtils.hasText(runtime.publicConfig().getResolution())
                 ? runtime.publicConfig().getResolution().trim()
                 : runtime.size("720:1280").replace("x", ":");
@@ -118,6 +119,49 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
             payload.put("Revise", runtime.publicConfig().getPromptRewrite() ? 1 : 0);
         }
         return payload;
+    }
+
+    private String buildTencentPrompt(AiProfileImageGenerationRequest request, boolean hasSourceImage) {
+        String styleCode = StringUtils.hasText(request.styleCode()) ? request.styleCode().trim() : "";
+        String templateSceneCode = StringUtils.hasText(request.templateSceneCode()) ? request.templateSceneCode().trim() : "";
+        String identityPolicy = hasSourceImage
+                ? "Use the reference image as actor identity source; preserve recognizable face, age impression, hairstyle, natural skin texture and body proportion."
+                : "Create a realistic actor portrait background with natural face detail and clean body proportion.";
+        String prompt = """
+                Create a premium 9:16 vertical full-bleed actor profile-card background layer for a mini program.
+                %s
+                Scene=%s, style=%s. %s
+                The final mini program will render all business content later, so keep the image as one continuous cinematic background with calm readable lower surfaces.
+                Do not render readable text, Chinese characters, English letters, numbers, phone, QR code, watermark, logo, fake app UI, hard information cards, section titles, rows, chips, thumbnail frames, video-player controls, outer border, paper edge, poster mat or card shell.
+                Keep subject in a hero portrait area with clean eyes, hands, hairline and clothing edges; use premium realistic lighting and refined composition.
+                """.formatted(
+                identityPolicy,
+                templateSceneCode,
+                styleCode,
+                tencentStyleHint(templateSceneCode, styleCode)
+        ).trim().replaceAll("\\s+", " ");
+        return truncatePrompt(prompt);
+    }
+
+    private String tencentStyleHint(String templateSceneCode, String styleCode) {
+        String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
+        if (normalized.contains("costume")) {
+            return "Use refined modern costume-drama editorial styling, elegant traditional wardrobe, cinematic texture, restrained premium atmosphere, never cheap fantasy.";
+        }
+        if (normalized.contains("urban")) {
+            return "Use a modern urban fashion editorial tone, quiet city or studio hero scene, polished contemporary wardrobe and confident natural expression.";
+        }
+        if (normalized.contains("classic")) {
+            return "Use a clean commercial studio portrait tone, bright premium background, approachable expression and advertising-ready composition.";
+        }
+        return "Use a high-end actor portfolio visual tone tailored to the selected scene, realistic and polished.";
+    }
+
+    private String truncatePrompt(String prompt) {
+        if (!StringUtils.hasText(prompt) || prompt.length() <= MAX_PROMPT_LENGTH) {
+            return prompt;
+        }
+        return prompt.substring(0, MAX_PROMPT_LENGTH);
     }
 
     private String normalizeSourceImageUrl(String sourceImageUrl) {
