@@ -177,9 +177,13 @@ class AiProfileCardPromptAgentTest {
         assertEquals("aipf_test_resume", resumeRequest.taskId());
         assertTrue(resumeRequest.promptText().contains("pageNo=2/3, pageType=resume"));
         assertTrue(resumeRequest.promptText().contains("resume information expansion page"));
+        assertTrue(resumeRequest.promptText().contains("Do not reproduce the actor"));
+        assertTrue(resumeRequest.promptText().contains("no person subject"));
         assertTrue(resumeRequest.promptJson().contains("\"pageType\":\"resume\""));
+        assertTrue(resumeRequest.promptJson().contains("\"sourceImageMode\":\"loose_palette_reference_only_no_identity\""));
         assertTrue(resumeRequest.promptJson().contains("\"workTimeline\""));
         assertTrue(resumeRequest.promptJson().contains("\"languages\""));
+        assertEquals("https://cdn.kplyyk.com/source.png", resumeRequest.sourceImageUrl());
 
         AiProfileCardGeneration gallery = agent.generatePage(
                 profile,
@@ -197,22 +201,82 @@ class AiProfileCardPromptAgentTest {
         assertEquals("aipf_test_gallery", galleryRequest.taskId());
         assertTrue(galleryRequest.promptText().contains("pageNo=3/3, pageType=gallery"));
         assertTrue(galleryRequest.promptText().contains("gallery page for real profile photos"));
+        assertTrue(galleryRequest.promptText().contains("Do not reproduce the actor"));
+        assertTrue(galleryRequest.promptText().contains("no person subject"));
         assertTrue(galleryRequest.promptJson().contains("\"pageType\":\"gallery\""));
+        assertTrue(galleryRequest.promptJson().contains("\"sourceImageMode\":\"loose_palette_reference_only_no_identity\""));
         assertTrue(galleryRequest.promptJson().contains("\"portraitPhotos\""));
         assertTrue(galleryRequest.promptJson().contains("\"workPhotos\""));
+        assertEquals("https://cdn.kplyyk.com/source.png", galleryRequest.sourceImageUrl());
+    }
+
+    @Test
+    void generatePageShouldOmitSourceImageForTencentLayoutPages() {
+        CapturingProvider provider = new CapturingProvider("tencent-hunyuan", "hunyuan-image-3.0");
+        AiProfileCardPromptAgent agent = new AiProfileCardPromptAgent(
+                new ObjectMapper(),
+                new AiProfileImageProviderRegistry(List.of(provider)));
+        ActorProfileDTO profile = new ActorProfileDTO();
+        profile.setGender("female");
+        profile.setAge(24);
+        profile.setHeight(168);
+
+        agent.generatePage(
+                profile,
+                "aipf_test_resume",
+                "tencent-hunyuan",
+                "costume",
+                "costume_actor_profile_full_card",
+                "https://cdn.kplyyk.com/source.png",
+                "resume",
+                2);
+
+        AiProfileImageGenerationRequest resumeRequest = provider.lastRequest.get();
+        assertNotNull(resumeRequest);
+        assertEquals("", resumeRequest.sourceImageUrl());
+        assertTrue(resumeRequest.promptText().contains("layout-only information page background"));
+        assertTrue(resumeRequest.promptText().contains("Do not create or place any actor portrait"));
+        assertTrue(resumeRequest.promptJson().contains("\"sourceImageMode\":\"none\""));
+
+        agent.generatePage(
+                profile,
+                "aipf_test_cover",
+                "tencent-hunyuan",
+                "costume",
+                "costume_actor_profile_full_card",
+                "https://cdn.kplyyk.com/source.png",
+                "cover",
+                1);
+
+        AiProfileImageGenerationRequest coverRequest = provider.lastRequest.get();
+        assertNotNull(coverRequest);
+        assertEquals("https://cdn.kplyyk.com/source.png", coverRequest.sourceImageUrl());
+        assertTrue(coverRequest.promptText().contains("Preserve the actor's recognizable face"));
+        assertTrue(coverRequest.promptJson().contains("\"sourceImageMode\":\"identity_reference\""));
     }
 
     private static final class CapturingProvider implements AiProfileImageProvider {
         private final AtomicReference<AiProfileImageGenerationRequest> lastRequest = new AtomicReference<>();
+        private final String providerCode;
+        private final String modelCode;
+
+        private CapturingProvider() {
+            this("kplyyk", "gpt-image-2");
+        }
+
+        private CapturingProvider(String providerCode, String modelCode) {
+            this.providerCode = providerCode;
+            this.modelCode = modelCode;
+        }
 
         @Override
         public String providerCode() {
-            return "kplyyk";
+            return providerCode;
         }
 
         @Override
         public String modelCode() {
-            return "gpt-image-2";
+            return modelCode;
         }
 
         @Override

@@ -123,6 +123,8 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         String styleCode = StringUtils.hasText(request.styleCode()) ? request.styleCode().trim() : "";
         String templateSceneCode = StringUtils.hasText(request.templateSceneCode()) ? request.templateSceneCode().trim() : "";
         JsonNode fixedLayout = parsePromptJson(request.promptJson()).path("fixedLayout");
+        String pageType = layoutText(fixedLayout, "pageType", "cover");
+        boolean coverPage = "cover".equals(pageType);
         String subjectBox = layoutText(fixedLayout, "subjectBox",
                 "hero right side, face near upper-right, body must not cover left text-safe area");
         String identitySafeArea = layoutText(fixedLayout, "identitySafeArea",
@@ -130,6 +132,23 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         String safeSurfaceTone = compactText(layoutText(fixedLayout, "safeSurfaceTone",
                 "low-detail matte background surfaces"), 120);
         String background = tencentBackgroundHint(templateSceneCode, styleCode, layoutText(fixedLayout, "background", ""));
+        if (!coverPage) {
+            String prompt = """
+                    Agent layout is mandatory. Generate only a clean 9:16 full-bleed non-portrait editorial background image for album pageType=%s, output 2160x3840.
+                    This page is for native mini-program information/photo modules. Do not create any actor portrait, human face, body, silhouette, head, skin, hair, eyes or duplicated cover subject.
+                    Keep the title-safe area empty and quiet: %s.
+                    Keep all module regions as continuous %s for later native overlays, with no boxes, frames, panels, photo slots, thumbnails, interface shapes or document edges.
+                    The coordinate descriptions above are generation constraints only, never visible content. %s Background material: %s.
+                    Strictly no readable text, Chinese characters, English letters, numbers, calligraphy, seal-script words, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
+                    """.formatted(
+                    pageType,
+                    identitySafeArea,
+                    safeSurfaceTone,
+                    tencentStyleHint(templateSceneCode, styleCode),
+                    background
+            ).trim().replaceAll("\\s+", " ");
+            return truncatePrompt(prompt);
+        }
         String identityPolicy = hasSourceImage
                 ? "Use reference image as actor identity source; preserve face, age impression, hairstyle, skin texture and body proportion."
                 : "Create a realistic actor portrait with natural face detail and clean body proportion.";

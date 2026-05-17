@@ -151,6 +151,55 @@ class TencentHunyuanProfileImageProviderTest {
         }
     }
 
+    @Test
+    void generateShouldBuildNonPortraitPromptForResumeAndGalleryPages() throws Exception {
+        AtomicReference<String> submitBody = new AtomicReference<>();
+        ObjectMapper objectMapper = new ObjectMapper();
+        HttpServer server = startServer((exchange) -> {
+            String action = exchange.getRequestHeaders().getFirst("X-TC-Action");
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if ("SubmitTextToImageJob".equals(action)) {
+                submitBody.set(body);
+                sendJson(exchange, "{\"Response\":{\"JobId\":\"job-1\"}}");
+                return;
+            }
+            if ("QueryTextToImageJob".equals(action)) {
+                sendJson(exchange, "{\"Response\":{\"JobStatusCode\":\"5\",\"ResultImage\":[\"/generated.png\"]}}");
+                return;
+            }
+            sendJson(exchange, "{\"Response\":{\"Error\":{\"Message\":\"unexpected action\"}}}");
+        });
+
+        try {
+            String endpoint = endpoint(server);
+            TencentHunyuanProfileImageProvider provider = newProvider(endpoint);
+
+            AiProfileImageGenerationResult result = provider.generate(request(" ", """
+                    {
+                      "fixedLayout": {
+                        "pageType": "resume",
+                        "subjectBox": "layout-only information page; do not place any actor, human face, body, portrait or silhouette",
+                        "identitySafeArea": "title area must stay quiet",
+                        "safeSurfaceTone": "warm low-detail ink-wash matte background surfaces",
+                        "background": "warm ivory full-bleed ink-wash texture without any person subject"
+                      }
+                    }
+                    """));
+
+            assertEquals(endpoint + "/generated.png", result.imageUrl());
+            JsonNode payload = objectMapper.readTree(submitBody.get());
+            assertFalse(payload.has("Images"));
+            String prompt = payload.path("Prompt").asText();
+            assertTrue(prompt.contains("non-portrait editorial background"));
+            assertTrue(prompt.contains("pageType=resume"));
+            assertTrue(prompt.contains("Do not create any actor portrait"));
+            assertTrue(prompt.contains("human face"));
+            assertFalse(prompt.contains("Place the actor"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private TencentHunyuanProfileImageProvider newProvider(String endpoint) {
         AiImageProviderConfigService configService = mock(AiImageProviderConfigService.class);
         when(configService.findRuntimeConfig("tencent-hunyuan")).thenReturn(Optional.of(runtimeConfig(endpoint)));
@@ -181,6 +230,26 @@ class TencentHunyuanProfileImageProviderTest {
     }
 
     private AiProfileImageGenerationRequest request(String sourceImageUrl) {
+        return request(sourceImageUrl, """
+                {
+                  "fixedLayout": {
+                    "subjectBox": "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; robe may overlap softly but not cover text-safe zones",
+                    "identitySafeArea": "hero left side, x=120-1080, y=120-1320 must remain clean warm ink-wash negative space",
+                    "background": "warm ivory full-bleed ink-wash texture, misty period architecture, bridge, bamboo and abstract seal accents without readable characters, no paper sheet edge",
+                    "regions": {
+                      "facts": "design x=83-368 y=579-763 on 750x1334; provider x=239-1060 y=1667-2197 on 2160x3840; quiet warm matte surface, no fake labels",
+                      "skills": "design x=420-675 y=579-763 on 750x1334; provider x=1210-1944 y=1667-2197 on 2160x3840; quiet warm matte surface, no fake chips",
+                      "works": "design x=84-666 y=802-914 on 750x1334; provider x=242-1918 y=2310-2632 on 2160x3840; quiet warm matte wide surface, no rows",
+                      "photos": "design x=80-671 y=929-1045 on 750x1334; provider x=230-1932 y=2675-3009 on 2160x3840; quiet warm matte strip, no thumbnail frames",
+                      "intro": "design x=81-362 y=1077-1236 on 750x1334; provider x=233-1043 y=3101-3558 on 2160x3840; quiet warm matte intro surface",
+                      "video": "design x=416-679 y=1077-1236 on 750x1334; provider x=1198-1956 y=3101-3558 on 2160x3840; quiet warm matte video surface, no video-player UI"
+                    }
+                  }
+                }
+                """);
+    }
+
+    private AiProfileImageGenerationRequest request(String sourceImageUrl, String promptJson) {
         return new AiProfileImageGenerationRequest(
                 "test-task",
                 "hunyuan-image-3.0",
@@ -189,23 +258,7 @@ class TencentHunyuanProfileImageProviderTest {
                 sourceImageUrl,
                 "full provider prompt that Tencent rejects ".repeat(80),
                 "",
-                """
-                        {
-                          "fixedLayout": {
-                            "subjectBox": "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; robe may overlap softly but not cover text-safe zones",
-                            "identitySafeArea": "hero left side, x=120-1080, y=120-1320 must remain clean warm ink-wash negative space",
-                            "background": "warm ivory full-bleed ink-wash texture, misty period architecture, bridge, bamboo and abstract seal accents without readable characters, no paper sheet edge",
-                            "regions": {
-                              "facts": "design x=83-368 y=579-763 on 750x1334; provider x=239-1060 y=1667-2197 on 2160x3840; quiet warm matte surface, no fake labels",
-                              "skills": "design x=420-675 y=579-763 on 750x1334; provider x=1210-1944 y=1667-2197 on 2160x3840; quiet warm matte surface, no fake chips",
-                              "works": "design x=84-666 y=802-914 on 750x1334; provider x=242-1918 y=2310-2632 on 2160x3840; quiet warm matte wide surface, no rows",
-                              "photos": "design x=80-671 y=929-1045 on 750x1334; provider x=230-1932 y=2675-3009 on 2160x3840; quiet warm matte strip, no thumbnail frames",
-                              "intro": "design x=81-362 y=1077-1236 on 750x1334; provider x=233-1043 y=3101-3558 on 2160x3840; quiet warm matte intro surface",
-                              "video": "design x=416-679 y=1077-1236 on 750x1334; provider x=1198-1956 y=3101-3558 on 2160x3840; quiet warm matte video surface, no video-player UI"
-                            }
-                          }
-                        }
-                        """
+                promptJson
         );
     }
 

@@ -62,13 +62,14 @@ public class AiProfileCardPromptAgent {
                                                      String pageType,
                                                      int pageNo) {
         AiProfileImageProvider provider = providerRegistry.resolve(providerCode);
-        AiProfileCardPrompt prompt = build(profile, templateSceneCode, styleCode, sourceImageUrl, provider.modelCode(), pageType, pageNo);
+        String effectiveSourceImageUrl = resolveProviderSourceImageUrl(provider.providerCode(), pageType, sourceImageUrl);
+        AiProfileCardPrompt prompt = build(profile, templateSceneCode, styleCode, effectiveSourceImageUrl, provider.modelCode(), pageType, pageNo);
         AiProfileImageGenerationResult imageResult = provider.generate(new AiProfileImageGenerationRequest(
                 taskId,
                 provider.modelCode(),
                 templateSceneCode,
                 styleCode,
-                sourceImageUrl,
+                effectiveSourceImageUrl,
                 prompt.promptText(),
                 prompt.negativePrompt(),
                 prompt.promptJson()
@@ -87,7 +88,7 @@ public class AiProfileCardPromptAgent {
         StyleBrief style = resolveStyle(templateSceneCode, resolvedStyleCode);
         PageBrief page = resolvePageBrief(style, pageType, pageNo);
         Map<String, Object> brief = new LinkedHashMap<>();
-        brief.put("task", "image_to_image_actor_profile_card_album_background");
+        brief.put("task", isCoverPage(page) ? "image_to_image_actor_profile_card_album_cover_background" : "layout_only_actor_profile_card_album_page_background");
         brief.put("modelCode", modelCode);
         brief.put("templateSceneCode", templateSceneCode);
         brief.put("styleCode", resolvedStyleCode);
@@ -109,7 +110,8 @@ public class AiProfileCardPromptAgent {
                         "pageType", page.pageType(),
                         "role", page.roleDescription(),
                         "composition", page.composition(),
-                        "subjectPolicy", page.subjectPolicy()
+                        "subjectPolicy", page.subjectPolicy(),
+                        "sourceImageMode", sourceImageMode(page, sourceImageUrl)
                 )
         ));
         brief.put("referenceQuality", Map.of(
@@ -132,9 +134,15 @@ public class AiProfileCardPromptAgent {
                 "textTheme", style.textTheme(),
                 "panelTheme", style.panelTheme()
         ));
-        brief.put("qualityChecklist", List.of(
-                "portrait identity is consistent with source image",
-                "hands, eyes, hairline, clothing edges are clean",
+        List<String> qualityChecklist = new ArrayList<>();
+        if (isCoverPage(page)) {
+            qualityChecklist.add("portrait identity is consistent with source image");
+            qualityChecklist.add("hands, eyes, hairline, clothing edges are clean");
+        } else {
+            qualityChecklist.add("no actor portrait, no human face, no body, no silhouette and no duplicated cover subject");
+            qualityChecklist.add("page reads as a clean editorial background surface for deterministic information modules");
+        }
+        qualityChecklist.addAll(List.of(
                 "no readable words, phone numbers, QR codes, logos or watermarks",
                 "current album page role is followed: " + page.roleDescription(),
                 "all fixed layout regions remain open for deterministic mini-program component rendering",
@@ -143,6 +151,7 @@ public class AiProfileCardPromptAgent {
                 "style-specific texture and visual details are premium but never compete with native foreground panels",
                 "background stays full-bleed from edge to edge with no frame, border, card shell, page edge or corner ornament"
         ));
+        brief.put("qualityChecklist", qualityChecklist);
 
         String promptJson = writeJson(brief);
         String promptText = buildPromptText(profile, style, page, templateSceneCode, resolvedStyleCode, sourceImageUrl, promptJson);
@@ -161,6 +170,11 @@ public class AiProfileCardPromptAgent {
                 "over-smoothed plastic skin",
                 "cropped head",
                 "subject outside hero-right layout box",
+                "large portrait on resume page",
+                "large portrait on gallery page",
+                "person as resume background",
+                "person as gallery background",
+                "human silhouette on information pages",
                 "busy profile-card text regions",
                 "low-contrast blocks behind native text regions",
                 "visible frame",
@@ -190,6 +204,36 @@ public class AiProfileCardPromptAgent {
         return new AiProfileCardPrompt(promptJson, promptText, negativePrompt);
     }
 
+    private String resolveProviderSourceImageUrl(String providerCode, String pageType, String sourceImageUrl) {
+        if (!StringUtils.hasText(sourceImageUrl)) {
+            return "";
+        }
+        String normalizedPageType = normalizePageType(pageType);
+        if ("cover".equals(normalizedPageType)) {
+            return sourceImageUrl;
+        }
+        String normalizedProviderCode = StringUtils.hasText(providerCode) ? providerCode.trim() : "";
+        if ("openai".equals(normalizedProviderCode) || "kplyyk".equals(normalizedProviderCode)) {
+            return sourceImageUrl;
+        }
+        return "";
+    }
+
+    private String normalizePageType(String pageType) {
+        return StringUtils.hasText(pageType) ? pageType.trim() : "cover";
+    }
+
+    private boolean isCoverPage(PageBrief page) {
+        return "cover".equals(page.pageType());
+    }
+
+    private String sourceImageMode(PageBrief page, String sourceImageUrl) {
+        if (isCoverPage(page)) {
+            return StringUtils.hasText(sourceImageUrl) ? "identity_reference" : "none";
+        }
+        return StringUtils.hasText(sourceImageUrl) ? "loose_palette_reference_only_no_identity" : "none";
+    }
+
     private String buildPromptText(ActorProfileDTO profile,
                                    StyleBrief style,
                                    PageBrief page,
@@ -198,9 +242,8 @@ public class AiProfileCardPromptAgent {
                                    String sourceImageUrl,
                                    String promptJson) {
         return """
-                Create a high-end vertical actor profile-card album background layer using image-to-image generation.
-                Use reference image #1 as the actor identity source: %s
-                Preserve the actor's recognizable face, age impression, hairstyle direction, body proportion and natural skin texture.
+                Create a high-end vertical actor profile-card album background layer.
+                %s
 
                 Fixed composition:
                 - Canvas: 9:16 vertical poster, target 2160x3840.
@@ -229,7 +272,7 @@ public class AiProfileCardPromptAgent {
                 Model-independent brief:
                 %s
                 """.formatted(
-                sourceImageUrl,
+                sourceReferenceInstruction(page, sourceImageUrl),
                 page.pageNo(),
                 page.pageType(),
                 page.roleDescription(),
@@ -251,6 +294,25 @@ public class AiProfileCardPromptAgent {
         );
     }
 
+    private String sourceReferenceInstruction(PageBrief page, String sourceImageUrl) {
+        if (isCoverPage(page)) {
+            if (!StringUtils.hasText(sourceImageUrl)) {
+                return "Create a realistic actor cover portrait with natural face detail and clean body proportion.";
+            }
+            return """
+                    Use reference image #1 as the actor identity source: %s
+                    Preserve the actor's recognizable face, age impression, hairstyle direction, body proportion and natural skin texture.
+                    """.formatted(sourceImageUrl).trim();
+        }
+        if (!StringUtils.hasText(sourceImageUrl)) {
+            return "This is a layout-only information page background. Do not create or place any actor portrait, human face, body, silhouette or duplicated cover subject.";
+        }
+        return """
+                Reference image #1 is only a loose palette and lighting reference, not an identity or subject to preserve: %s
+                Do not reproduce the actor. Remove all human face/body/silhouette cues and create an abstract editorial surface background only.
+                """.formatted(sourceImageUrl).trim();
+    }
+
     private Map<String, Object> buildFixedLayout(StyleBrief style, PageBrief page) {
         Map<String, Object> fixedLayout = new LinkedHashMap<>();
         fixedLayout.put("layoutPreset", style.layoutPreset());
@@ -262,7 +324,10 @@ public class AiProfileCardPromptAgent {
         fixedLayout.put("designCanvas", designCanvas());
         fixedLayout.put("providerCanvas", providerCanvas());
         fixedLayout.put("coordinatePolicy", "design coordinates are the single source of truth; provider coordinates are scaled descriptions only");
-        fixedLayout.put("primaryReferenceSlot", "reference image #1 is the actor identity source; preserve facial identity and natural proportions");
+        fixedLayout.put("primaryReferenceSlot", isCoverPage(page)
+                ? "reference image #1 is the actor identity source; preserve facial identity and natural proportions"
+                : "information/gallery page background; no actor portrait, no human face/body/silhouette, and no duplicated cover subject");
+        fixedLayout.put("sourceImageMode", isCoverPage(page) ? "identity_reference" : "layout_background_only");
         fixedLayout.put("subjectBox", page.subjectPolicy());
         fixedLayout.put("identitySafeArea", page.identitySafeArea());
         fixedLayout.put("safeSurfaceTone", page.safeSurfaceTone());
@@ -348,10 +413,10 @@ public class AiProfileCardPromptAgent {
                     2,
                     "resume",
                     "resume information expansion page for full profile facts, language, skills, intro and work timeline",
-                    "use the reference identity only for consistent atmosphere; prefer environment-only or very soft distant actor silhouette, no strong hero face and no duplicated cover portrait",
+                    "layout-only information page; do not place any actor, human face, body, portrait or silhouette; no duplicated cover portrait",
                     "nearly the full page must stay calm and low-detail for mini-program-rendered title, basics, appearance, language, skill, intro and timeline modules",
                     style.safeSurfaceTone(),
-                    "orderly editorial resume background with large quiet surfaces and subtle scene depth, not a document page and not drawn cards",
+                    "orderly editorial resume background with large quiet surfaces, subtle texture and no person subject; not a document page and not drawn cards",
                     layoutRegions(style.layoutPreset(), "resume")
             );
         }
@@ -360,10 +425,10 @@ public class AiProfileCardPromptAgent {
                     3,
                     "gallery",
                     "gallery page for real profile photos, production stills, work photos and video resume entry",
-                    "use the reference identity only for color, lighting and casting mood; keep background light and avoid a large face competing with real photo grids",
+                    "layout-only gallery page; do not place any actor, human face, body, portrait or silhouette; real people appear only in mini-program-rendered photo grid images",
                     "central and lower areas must remain low-detail for mini-program-rendered photo grids and video entry",
                     style.safeSurfaceTone(),
-                    "premium film-gallery or studio background with restrained depth, no fake thumbnails, no labels and no video player controls",
+                    "premium film-gallery or studio background with restrained depth, subtle texture and no person subject; no fake thumbnails, labels or video player controls",
                     layoutRegions(style.layoutPreset(), "gallery")
             );
         }
