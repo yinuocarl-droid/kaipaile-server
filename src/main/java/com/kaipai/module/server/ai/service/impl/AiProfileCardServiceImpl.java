@@ -26,6 +26,7 @@ import com.kaipai.module.server.ai.mapper.ActorAiProfileCardPageMapper;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardPageBackgroundRenderer;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardProviderDescriptor;
@@ -74,6 +75,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final ActorCardConfigService actorCardConfigService;
     private final AiGeneratedImageStorage generatedImageStorage;
     private final ActorAiProfileCardPageMapper actorAiProfileCardPageMapper;
+    private final AiProfileCardPageBackgroundRenderer pageBackgroundRenderer;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor aiProfileCardTaskExecutor;
@@ -211,21 +213,27 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 }
                 try {
                     markPageRunning(page);
-                    AiProfileCardGeneration generation = promptAgent.generatePage(
-                            profile,
-                            taskId + "_" + pageDef.pageType(),
-                            task.getProviderCode(),
-                            task.getTemplateSceneCode(),
-                            task.getStyleCode(),
-                            task.getSourceImageUrl(),
-                            pageDef.pageType(),
-                            pageDef.pageNo());
-                    savePagePrompt(page, generation.prompt());
-                    if ("cover".equals(pageDef.pageType())) {
+                    String pageImageUrl;
+                    if (isLayoutOnlyAlbumPage(pageDef)) {
+                        savePagePrompt(page, deterministicPagePrompt(task, pageDef));
+                        pageImageUrl = generatedImageStorage.upload(
+                                pageBackgroundRenderer.render(task.getTemplateSceneCode(), pageDef.pageType()),
+                                "image/png",
+                                "ai-profile-card");
+                    } else {
+                        AiProfileCardGeneration generation = promptAgent.generatePage(
+                                profile,
+                                taskId + "_" + pageDef.pageType(),
+                                task.getProviderCode(),
+                                task.getTemplateSceneCode(),
+                                task.getStyleCode(),
+                                task.getSourceImageUrl(),
+                                pageDef.pageType(),
+                                pageDef.pageNo());
+                        savePagePrompt(page, generation.prompt());
                         savePrompt(taskId, generation.prompt());
+                        pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
                     }
-
-                    String pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
                     markPageSuccess(page, pageImageUrl);
                     page.setStatus(STATUS_SUCCESS);
                     page.setGeneratedImageUrl(pageImageUrl);
@@ -254,6 +262,25 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
             markFailed(taskId, error.getMessage());
         }
+    }
+
+    private boolean isLayoutOnlyAlbumPage(AlbumPageDef pageDef) {
+        return pageDef != null && !"cover".equals(pageDef.pageType());
+    }
+
+    private AiProfileCardPrompt deterministicPagePrompt(ActorAiProfileCardTask task, AlbumPageDef pageDef) {
+        String promptJson = """
+                {"task":"deterministic_layout_background","templateSceneCode":"%s","styleCode":"%s","pageNo":%d,"pageType":"%s","subjectPolicy":"no actor portrait, no human face, no body, no silhouette, no readable text"}
+                """.formatted(
+                defaultText(task.getTemplateSceneCode(), ""),
+                defaultText(task.getStyleCode(), ""),
+                pageDef.pageNo(),
+                pageDef.pageType()
+        ).trim();
+        String promptText = "Deterministic neutral layout background for AI profile card album page " + pageDef.pageType()
+                + "; no actor portrait, no human face/body/silhouette, no readable text.";
+        String negativePrompt = "actor portrait, human face, body, silhouette, readable text, logo, watermark, QR code";
+        return new AiProfileCardPrompt(promptJson, promptText, negativePrompt);
     }
 
     private ActorMyShareCardItemDTO createOrGetGeneratedShareCard(ActorAiProfileCardTask task) {
