@@ -112,9 +112,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         if (hasSourceImage) {
             payload.put("Images", List.of(sourceImageUrl));
         }
-        if (runtime.watermark(null) != null) {
-            payload.put("LogoAdd", runtime.watermark(true) ? 1 : 0);
-        }
+        payload.put("LogoAdd", runtime.watermark(false) ? 1 : 0);
         payload.put("Revise", Boolean.TRUE.equals(runtime.publicConfig().getPromptRewrite()) ? 1 : 0);
         return payload;
     }

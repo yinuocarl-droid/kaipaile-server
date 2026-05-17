@@ -136,6 +136,7 @@ class TencentHunyuanProfileImageProviderTest {
             JsonNode payload = objectMapper.readTree(submitBody.get());
             String prompt = payload.path("Prompt").asText();
             assertFalse(payload.has("Images"));
+            assertEquals(0, payload.path("LogoAdd").asInt());
             assertEquals(0, payload.path("Revise").asInt());
             assertTrue(prompt.length() <= 1200);
             assertTrue(prompt.contains("Agent layout is mandatory"));
