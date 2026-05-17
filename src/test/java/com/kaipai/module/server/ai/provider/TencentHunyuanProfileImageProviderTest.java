@@ -137,8 +137,14 @@ class TencentHunyuanProfileImageProviderTest {
             String prompt = payload.path("Prompt").asText();
             assertFalse(payload.has("Images"));
             assertEquals(0, payload.path("Revise").asInt());
-            assertTrue(prompt.length() <= 900);
+            assertTrue(prompt.length() <= 1200);
             assertTrue(prompt.contains("Agent layout is mandatory"));
+            assertTrue(prompt.contains("Absolute no-text rule"));
+            int identityInstructionIndex = Math.max(
+                    prompt.indexOf("Use reference image"),
+                    prompt.indexOf("Create a realistic actor portrait"));
+            assertTrue(identityInstructionIndex > 0);
+            assertTrue(prompt.indexOf("Absolute no-text rule") < identityInstructionIndex);
             assertTrue(prompt.contains("x=1120-2050"));
             assertTrue(prompt.contains("continuous low-detail matte background"));
             assertFalse(prompt.contains("profile-card"));

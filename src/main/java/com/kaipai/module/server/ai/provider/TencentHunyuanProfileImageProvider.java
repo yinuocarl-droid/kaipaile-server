@@ -37,7 +37,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private static final String DEFAULT_ENDPOINT = "https://aiart.tencentcloudapi.com";
     private static final String DEFAULT_REGION = "ap-guangzhou";
     private static final String DEFAULT_VERSION = "2022-12-29";
-    private static final int MAX_PROMPT_LENGTH = 900;
+    private static final int MAX_PROMPT_LENGTH = 1200;
     private static final DateTimeFormatter TC3_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
@@ -154,6 +154,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 : "Create a realistic actor portrait with natural face detail and clean body proportion.";
         String prompt = """
                 Agent layout is mandatory. Generate only a clean 9:16 full-bleed cinematic actor portrait background image, output 2160x3840. It must not look like a poster, document, app screen, resume sheet or card.
+                Absolute no-text rule: do not create any Chinese characters, calligraphy, seal-script glyphs, English letters, numbers, title graphics, handwritten marks, signature marks, captions, logos, watermarks or readable/pretend-readable text anywhere in the image.
                 %s
                 Place the actor only in this fixed subject area: %s.
                 Keep this fixed title-safe area empty and quiet: %s.
@@ -215,7 +216,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private String tencentBackgroundHint(String templateSceneCode, String styleCode, String background) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "warm ivory full-bleed ink-wash texture, misty garden architecture, bridge and bamboo silhouettes, subtle cinnabar color accents";
+            return "warm ivory full-bleed ink-wash texture, misty garden architecture, bridge and bamboo silhouettes, plain abstract cinnabar wash shapes only, no stamp marks and no calligraphy";
         }
         if (normalized.contains("urban")) {
             return "controlled city or studio depth, soft haze, charcoal gradients and restrained cool rim light";
