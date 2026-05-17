@@ -148,6 +148,60 @@ class AiProfileCardPromptAgentTest {
         }
     }
 
+    @Test
+    void generatePageShouldBuildIndependentAlbumPageContracts() {
+        CapturingProvider provider = new CapturingProvider();
+        AiProfileCardPromptAgent agent = new AiProfileCardPromptAgent(
+                new ObjectMapper(),
+                new AiProfileImageProviderRegistry(List.of(provider)));
+        ActorProfileDTO profile = new ActorProfileDTO();
+        profile.setGender("female");
+        profile.setAge(24);
+        profile.setHeight(168);
+        profile.setCity("上海");
+        profile.setSkillTypes(List.of("影视表演", "短剧"));
+
+        AiProfileCardGeneration resume = agent.generatePage(
+                profile,
+                "aipf_test_resume",
+                "kplyyk",
+                "classic",
+                "classic",
+                "https://cdn.kplyyk.com/source.png",
+                "resume",
+                2);
+
+        assertEquals("kplyyk", resume.providerCode());
+        AiProfileImageGenerationRequest resumeRequest = provider.lastRequest.get();
+        assertNotNull(resumeRequest);
+        assertEquals("aipf_test_resume", resumeRequest.taskId());
+        assertTrue(resumeRequest.promptText().contains("pageNo=2/3, pageType=resume"));
+        assertTrue(resumeRequest.promptText().contains("resume information expansion page"));
+        assertTrue(resumeRequest.promptJson().contains("\"pageType\":\"resume\""));
+        assertTrue(resumeRequest.promptJson().contains("\"workTimeline\""));
+        assertTrue(resumeRequest.promptJson().contains("\"languages\""));
+
+        AiProfileCardGeneration gallery = agent.generatePage(
+                profile,
+                "aipf_test_gallery",
+                "kplyyk",
+                "classic",
+                "classic",
+                "https://cdn.kplyyk.com/source.png",
+                "gallery",
+                3);
+
+        assertEquals("kplyyk", gallery.providerCode());
+        AiProfileImageGenerationRequest galleryRequest = provider.lastRequest.get();
+        assertNotNull(galleryRequest);
+        assertEquals("aipf_test_gallery", galleryRequest.taskId());
+        assertTrue(galleryRequest.promptText().contains("pageNo=3/3, pageType=gallery"));
+        assertTrue(galleryRequest.promptText().contains("gallery page for real profile photos"));
+        assertTrue(galleryRequest.promptJson().contains("\"pageType\":\"gallery\""));
+        assertTrue(galleryRequest.promptJson().contains("\"portraitPhotos\""));
+        assertTrue(galleryRequest.promptJson().contains("\"workPhotos\""));
+    }
+
     private static final class CapturingProvider implements AiProfileImageProvider {
         private final AtomicReference<AiProfileImageGenerationRequest> lastRequest = new AtomicReference<>();
 

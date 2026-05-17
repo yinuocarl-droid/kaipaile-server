@@ -1,6 +1,7 @@
 package com.kaipai.module.server.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.actor.dto.ActorPhotoCategoriesDTO;
@@ -10,7 +11,9 @@ import com.kaipai.module.model.actor.entity.ActorProfile;
 import com.kaipai.module.model.ai.dto.AiProfileCardArtifactRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateRespDTO;
+import com.kaipai.module.model.ai.dto.AiProfileCardPageRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
+import com.kaipai.module.model.ai.entity.ActorAiProfileCardPage;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
 import com.kaipai.module.model.card.dto.ActorCardConfigRespDTO;
 import com.kaipai.module.model.card.dto.ActorCardConfigSaveDTO;
@@ -19,6 +22,7 @@ import com.kaipai.module.model.card.dto.CreateShareCardDTO;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
+import com.kaipai.module.server.ai.mapper.ActorAiProfileCardPageMapper;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
@@ -55,6 +59,11 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private static final String STATUS_RUNNING = "running";
     private static final String STATUS_SUCCESS = "success";
     private static final String STATUS_FAILED = "failed";
+    private static final List<AlbumPageDef> ALBUM_PAGE_DEFS = List.of(
+            new AlbumPageDef(1, "cover"),
+            new AlbumPageDef(2, "resume"),
+            new AlbumPageDef(3, "gallery")
+    );
 
     private final ActorProfileService actorProfileService;
     private final ActorProfileMapper actorProfileMapper;
@@ -64,6 +73,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final UserShareCardService userShareCardService;
     private final ActorCardConfigService actorCardConfigService;
     private final AiGeneratedImageStorage generatedImageStorage;
+    private final ActorAiProfileCardPageMapper actorAiProfileCardPageMapper;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor aiProfileCardTaskExecutor;
@@ -90,6 +100,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         task.setGenerationMode(defaultText(properties.getGenerationMode(), "image_to_image"));
         task.setStatus(STATUS_PENDING);
         save(task);
+        createInitialPages(task);
 
         aiProfileCardTaskExecutor.execute(() -> runGeneration(task.getTaskId()));
 
@@ -151,6 +162,21 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     }
 
     @Override
+    public AiProfileCardArtifactRespDTO latestArtifactByShareCard(Long shareCardId) {
+        if (shareCardId == null || shareCardId <= 0) {
+            throw new BizException("shareCardId 不能为空");
+        }
+        ActorAiProfileCardTask task = getOne(successArtifactQuery()
+                .eq(ActorAiProfileCardTask::getShareCardId, shareCardId)
+                .orderByDesc(ActorAiProfileCardTask::getCreateTime)
+                .last("limit 1"), false);
+        if (task == null || !isRealGeneratedImageTask(task)) {
+            throw new BizException("AI 分享图作品不存在");
+        }
+        return toArtifactResp(task);
+    }
+
+    @Override
     public void deleteArtifact(Long currentUserId, String artifactId) {
         if (!StringUtils.hasText(artifactId)) {
             throw new BizException("artifactId 不能为空");
@@ -159,6 +185,8 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         if (task == null || !currentUserId.equals(task.getUserId())) {
             throw new BizException("AI 分享图作品不存在");
         }
+        actorAiProfileCardPageMapper.delete(new LambdaQueryWrapper<ActorAiProfileCardPage>()
+                .eq(ActorAiProfileCardPage::getTaskId, task.getTaskId()));
         removeById(task.getTaskId());
     }
 
@@ -171,18 +199,56 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         markRunning(taskId);
         try {
             ActorProfileDTO profile = actorProfileService.mine(task.getUserId());
-            AiProfileCardGeneration generation = promptAgent.generate(
-                    profile,
-                    taskId,
-                    task.getProviderCode(),
-                    task.getTemplateSceneCode(),
-                    task.getStyleCode(),
-                    task.getSourceImageUrl());
-            savePrompt(taskId, generation.prompt());
+            List<ActorAiProfileCardPage> pages = ensurePages(task);
+            String generatedImageUrl = "";
+            for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
+                ActorAiProfileCardPage page = findPage(pages, pageDef);
+                if (isRealGeneratedPage(page, task.getSourceImageUrl())) {
+                    if ("cover".equals(pageDef.pageType())) {
+                        generatedImageUrl = page.getGeneratedImageUrl();
+                    }
+                    continue;
+                }
+                try {
+                    markPageRunning(page);
+                    AiProfileCardGeneration generation = promptAgent.generatePage(
+                            profile,
+                            taskId + "_" + pageDef.pageType(),
+                            task.getProviderCode(),
+                            task.getTemplateSceneCode(),
+                            task.getStyleCode(),
+                            task.getSourceImageUrl(),
+                            pageDef.pageType(),
+                            pageDef.pageNo());
+                    savePagePrompt(page, generation.prompt());
+                    if ("cover".equals(pageDef.pageType())) {
+                        savePrompt(taskId, generation.prompt());
+                    }
 
-            String generatedImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
+                    String pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
+                    markPageSuccess(page, pageImageUrl);
+                    page.setStatus(STATUS_SUCCESS);
+                    page.setGeneratedImageUrl(pageImageUrl);
+                    if ("cover".equals(pageDef.pageType())) {
+                        generatedImageUrl = pageImageUrl;
+                    }
+                } catch (Exception error) {
+                    markPageFailed(page, error.getMessage());
+                    throw error;
+                }
+            }
+
+            if (!StringUtils.hasText(generatedImageUrl)) {
+                generatedImageUrl = loadPages(taskId).stream()
+                        .filter(page -> "cover".equals(page.getPageType()))
+                        .filter(page -> isRealGeneratedPage(page, task.getSourceImageUrl()))
+                        .map(ActorAiProfileCardPage::getGeneratedImageUrl)
+                        .findFirst()
+                        .orElseThrow(() -> new BizException("AI 分享图封面页生成失败"));
+            }
             ActorMyShareCardItemDTO card = createOrGetGeneratedShareCard(task);
             saveGeneratedShareCardConfig(task, profile, card, generatedImageUrl);
+            markPagesShareCardId(taskId, card.getCardId());
             markSuccess(taskId, card.getCardId(), generatedImageUrl);
         } catch (Exception error) {
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
@@ -194,6 +260,58 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         CreateShareCardDTO createDto = new CreateShareCardDTO();
         createDto.setTemplateSceneCode(task.getTemplateSceneCode());
         return userShareCardService.createCard(task.getUserId(), createDto);
+    }
+
+    private void createInitialPages(ActorAiProfileCardTask task) {
+        for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
+            ActorAiProfileCardPage page = new ActorAiProfileCardPage();
+            page.setTaskId(task.getTaskId());
+            page.setPageNo(pageDef.pageNo());
+            page.setPageType(pageDef.pageType());
+            page.setProviderCode(task.getProviderCode());
+            page.setModelCode(task.getModelCode());
+            page.setStatus(STATUS_PENDING);
+            actorAiProfileCardPageMapper.insert(page);
+        }
+    }
+
+    private List<ActorAiProfileCardPage> ensurePages(ActorAiProfileCardTask task) {
+        List<ActorAiProfileCardPage> pages = loadPages(task.getTaskId());
+        if (pages.size() >= ALBUM_PAGE_DEFS.size()) {
+            return pages;
+        }
+        for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
+            boolean exists = pages.stream().anyMatch(page -> pageDef.matches(page));
+            if (exists) {
+                continue;
+            }
+            ActorAiProfileCardPage page = new ActorAiProfileCardPage();
+            page.setTaskId(task.getTaskId());
+            page.setShareCardId(task.getShareCardId());
+            page.setPageNo(pageDef.pageNo());
+            page.setPageType(pageDef.pageType());
+            page.setProviderCode(task.getProviderCode());
+            page.setModelCode(task.getModelCode());
+            page.setStatus(STATUS_PENDING);
+            actorAiProfileCardPageMapper.insert(page);
+        }
+        return loadPages(task.getTaskId());
+    }
+
+    private ActorAiProfileCardPage findPage(List<ActorAiProfileCardPage> pages, AlbumPageDef pageDef) {
+        return pages.stream()
+                .filter(page -> pageDef.matches(page))
+                .findFirst()
+                .orElseThrow(() -> new BizException("AI 分享图页面任务缺失：" + pageDef.pageType()));
+    }
+
+    private List<ActorAiProfileCardPage> loadPages(String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            return Collections.emptyList();
+        }
+        return actorAiProfileCardPageMapper.selectList(new LambdaQueryWrapper<ActorAiProfileCardPage>()
+                .eq(ActorAiProfileCardPage::getTaskId, taskId)
+                .orderByAsc(ActorAiProfileCardPage::getPageNo));
     }
 
     private void saveGeneratedShareCardConfig(ActorAiProfileCardTask task,
@@ -311,6 +429,16 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         updateById(update);
     }
 
+    private void markPageRunning(ActorAiProfileCardPage page) {
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setPageId(page.getPageId());
+        update.setStatus(STATUS_RUNNING);
+        update.setStartedAt(LocalDateTime.now());
+        update.setFailureReason("");
+        actorAiProfileCardPageMapper.updateById(update);
+        page.setStatus(STATUS_RUNNING);
+    }
+
     private void savePrompt(String taskId, AiProfileCardPrompt prompt) {
         ActorAiProfileCardTask update = new ActorAiProfileCardTask();
         update.setTaskId(taskId);
@@ -318,6 +446,44 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         update.setPromptText(prompt.promptText());
         update.setNegativePrompt(prompt.negativePrompt());
         updateById(update);
+    }
+
+    private void savePagePrompt(ActorAiProfileCardPage page, AiProfileCardPrompt prompt) {
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setPageId(page.getPageId());
+        update.setPromptJson(prompt.promptJson());
+        update.setPromptText(prompt.promptText());
+        update.setNegativePrompt(prompt.negativePrompt());
+        actorAiProfileCardPageMapper.updateById(update);
+    }
+
+    private void markPageSuccess(ActorAiProfileCardPage page, String generatedImageUrl) {
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setPageId(page.getPageId());
+        update.setStatus(STATUS_SUCCESS);
+        update.setGeneratedImageUrl(generatedImageUrl);
+        update.setFailureReason("");
+        update.setCompletedAt(LocalDateTime.now());
+        actorAiProfileCardPageMapper.updateById(update);
+    }
+
+    private void markPageFailed(ActorAiProfileCardPage page, String failureReason) {
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setPageId(page.getPageId());
+        update.setStatus(STATUS_FAILED);
+        update.setFailureReason(truncateFailure(failureReason));
+        update.setCompletedAt(LocalDateTime.now());
+        actorAiProfileCardPageMapper.updateById(update);
+    }
+
+    private void markPagesShareCardId(String taskId, Long shareCardId) {
+        if (!StringUtils.hasText(taskId) || shareCardId == null || shareCardId <= 0) {
+            return;
+        }
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setShareCardId(shareCardId);
+        actorAiProfileCardPageMapper.update(update, new LambdaUpdateWrapper<ActorAiProfileCardPage>()
+                .eq(ActorAiProfileCardPage::getTaskId, taskId));
     }
 
     private void markSuccess(String taskId, Long shareCardId, String generatedImageUrl) {
@@ -352,6 +518,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setSourceImageUrl(task.getSourceImageUrl());
         dto.setGeneratedImageUrl(isRealGeneratedImageTask(task) ? task.getGeneratedImageUrl() : null);
         dto.setFailureReason(task.getFailureReason());
+        dto.setPages(toPageRespList(task));
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
         return dto;
@@ -370,8 +537,29 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setShareCardId(task.getShareCardId());
         dto.setSourceImageUrl(task.getSourceImageUrl());
         dto.setGeneratedImageUrl(task.getGeneratedImageUrl());
+        dto.setPages(toPageRespList(task));
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
+        return dto;
+    }
+
+    private List<AiProfileCardPageRespDTO> toPageRespList(ActorAiProfileCardTask task) {
+        return loadPages(task.getTaskId()).stream()
+                .map(page -> toPageResp(page, task.getSourceImageUrl()))
+                .toList();
+    }
+
+    private AiProfileCardPageRespDTO toPageResp(ActorAiProfileCardPage page, String sourceImageUrl) {
+        AiProfileCardPageRespDTO dto = new AiProfileCardPageRespDTO();
+        dto.setPageNo(page.getPageNo());
+        dto.setPageType(page.getPageType());
+        dto.setStatus(page.getStatus());
+        dto.setProviderCode(page.getProviderCode());
+        dto.setModelCode(page.getModelCode());
+        dto.setGeneratedImageUrl(isRealGeneratedPage(page, sourceImageUrl) ? page.getGeneratedImageUrl() : null);
+        dto.setFailureReason(page.getFailureReason());
+        dto.setCreateTime(page.getCreateTime());
+        dto.setLastUpdate(page.getLastUpdate());
         return dto;
     }
 
@@ -381,6 +569,14 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 && StringUtils.hasText(task.getGeneratedImageUrl())
                 && !"mock".equalsIgnoreCase(defaultText(task.getProviderCode(), ""))
                 && !sameMediaUrl(task.getGeneratedImageUrl(), task.getSourceImageUrl());
+    }
+
+    private boolean isRealGeneratedPage(ActorAiProfileCardPage page, String sourceImageUrl) {
+        return page != null
+                && STATUS_SUCCESS.equals(page.getStatus())
+                && StringUtils.hasText(page.getGeneratedImageUrl())
+                && !"mock".equalsIgnoreCase(defaultText(page.getProviderCode(), ""))
+                && !sameMediaUrl(page.getGeneratedImageUrl(), sourceImageUrl);
     }
 
     private boolean sameMediaUrl(String left, String right) {
@@ -413,12 +609,24 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             update.setTaskId(task.getTaskId());
             update.setGeneratedImageUrl(persistedImageUrl);
             updateById(update);
+            replaceGeneratedImageInPages(task.getTaskId(), originalImageUrl, persistedImageUrl);
             replaceGeneratedImageInCardConfig(task, originalImageUrl, persistedImageUrl);
             task.setGeneratedImageUrl(persistedImageUrl);
         } catch (Exception error) {
             log.warn("AI profile card generated image persist fallback failed, taskId={}", task.getTaskId(), error);
         }
         return task;
+    }
+
+    private void replaceGeneratedImageInPages(String taskId, String originalImageUrl, String persistedImageUrl) {
+        if (!StringUtils.hasText(taskId) || !StringUtils.hasText(originalImageUrl) || !StringUtils.hasText(persistedImageUrl)) {
+            return;
+        }
+        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
+        update.setGeneratedImageUrl(persistedImageUrl);
+        actorAiProfileCardPageMapper.update(update, new LambdaUpdateWrapper<ActorAiProfileCardPage>()
+                .eq(ActorAiProfileCardPage::getTaskId, taskId)
+                .eq(ActorAiProfileCardPage::getGeneratedImageUrl, originalImageUrl));
     }
 
     private void replaceGeneratedImageInCardConfig(ActorAiProfileCardTask task,
@@ -489,5 +697,17 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
 
     private <T> List<T> safeList(List<T> values) {
         return values == null ? Collections.emptyList() : values;
+    }
+
+    private record AlbumPageDef(
+            int pageNo,
+            String pageType
+    ) {
+
+        private boolean matches(ActorAiProfileCardPage page) {
+            return page != null
+                    && pageNo == (page.getPageNo() == null ? 0 : page.getPageNo())
+                    && pageType.equals(page.getPageType());
+        }
     }
 }

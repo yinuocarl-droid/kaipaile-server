@@ -3,6 +3,8 @@ package com.kaipai.module.model.ai.dto;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 public class AiProfileCardArtifactRespDTO {
@@ -26,6 +28,8 @@ public class AiProfileCardArtifactRespDTO {
     private String sourceImageUrl;
 
     private String generatedImageUrl;
+
+    private List<AiProfileCardPageRespDTO> pages = new ArrayList<>();
 
     private LocalDateTime createTime;
 

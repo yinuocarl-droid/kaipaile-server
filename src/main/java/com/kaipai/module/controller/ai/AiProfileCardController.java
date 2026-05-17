@@ -56,6 +56,12 @@ public class AiProfileCardController {
         return R.ok(aiProfileCardService.artifact(artifactId));
     }
 
+    @Operation(summary = "按分享卡查询最新 AI 分享图公开作品")
+    @GetMapping("/share-cards/{shareCardId}/artifact")
+    public R<AiProfileCardArtifactRespDTO> latestArtifactByShareCard(@PathVariable Long shareCardId) {
+        return R.ok(aiProfileCardService.latestArtifactByShareCard(shareCardId));
+    }
+
     @Operation(summary = "删除我的 AI 分享图作品")
     @DeleteMapping("/artifacts/{artifactId}")
     public R<Void> deleteArtifact(Authentication authentication,

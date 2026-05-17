@@ -19,5 +19,7 @@ public interface AiProfileCardService {
 
     AiProfileCardArtifactRespDTO artifact(String artifactId);
 
+    AiProfileCardArtifactRespDTO latestArtifactByShareCard(Long shareCardId);
+
     void deleteArtifact(Long currentUserId, String artifactId);
 }
