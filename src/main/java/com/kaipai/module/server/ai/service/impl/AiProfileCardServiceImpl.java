@@ -26,6 +26,8 @@ import com.kaipai.module.server.ai.mapper.ActorAiProfileCardPageMapper;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspection;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspector;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPageBackgroundRenderer;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
@@ -76,6 +78,7 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private final AiGeneratedImageStorage generatedImageStorage;
     private final ActorAiProfileCardPageMapper actorAiProfileCardPageMapper;
     private final AiProfileCardPageBackgroundRenderer pageBackgroundRenderer;
+    private final AiProfileCardImageQualityInspector imageQualityInspector;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor aiProfileCardTaskExecutor;
@@ -212,15 +215,18 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                     continue;
                 }
                 try {
-                    markPageRunning(page);
                     String pageImageUrl;
                     if (isLayoutOnlyAlbumPage(pageDef)) {
+                        markPageRunning(page);
                         savePagePrompt(page, deterministicPagePrompt(task, pageDef));
                         pageImageUrl = generatedImageStorage.upload(
                                 pageBackgroundRenderer.render(task.getTemplateSceneCode(), pageDef.pageType()),
                                 "image/png",
                                 "ai-profile-card");
+                    } else if ("cover".equals(pageDef.pageType())) {
+                        pageImageUrl = generateCoverPageWithQualityGate(profile, task, page, pageDef);
                     } else {
+                        markPageRunning(page);
                         AiProfileCardGeneration generation = promptAgent.generatePage(
                                 profile,
                                 taskId + "_" + pageDef.pageType(),
@@ -262,6 +268,69 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
             markFailed(taskId, error.getMessage());
         }
+    }
+
+    private String generateCoverPageWithQualityGate(ActorProfileDTO profile,
+                                                    ActorAiProfileCardTask task,
+                                                    ActorAiProfileCardPage page,
+                                                    AlbumPageDef pageDef) {
+        int maxAttempts = Math.max(1, properties.getCoverQualityMaxAttempts());
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            markPageRunning(page);
+            try {
+                AiProfileCardGeneration generation = promptAgent.generatePage(
+                        profile,
+                        task.getTaskId() + "_" + pageDef.pageType() + "_try" + attempt,
+                        task.getProviderCode(),
+                        task.getTemplateSceneCode(),
+                        task.getStyleCode(),
+                        task.getSourceImageUrl(),
+                        pageDef.pageType(),
+                        pageDef.pageNo());
+                savePagePrompt(page, generation.prompt());
+                savePrompt(task.getTaskId(), generation.prompt());
+                String pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
+                if (properties.isCoverQualityGateEnabled()) {
+                    AiProfileCardImageQualityInspection inspection = imageQualityInspector.inspectCover(
+                            pageImageUrl,
+                            task.getProviderCode());
+                    if (!inspection.accepted()) {
+                        throw new BizException(inspection.reason());
+                    }
+                }
+                return pageImageUrl;
+            } catch (RuntimeException error) {
+                lastError = error;
+                markPageFailed(page, buildCoverRetryFailureReason(attempt, maxAttempts, error.getMessage()));
+                if (attempt >= maxAttempts) {
+                    throw error;
+                }
+            } catch (Exception error) {
+                lastError = new BizException(error.getMessage());
+                markPageFailed(page, buildCoverRetryFailureReason(attempt, maxAttempts, error.getMessage()));
+                if (attempt >= maxAttempts) {
+                    throw lastError;
+                }
+            }
+        }
+        throw lastError == null ? new BizException("AI 分享图封面页生成失败") : lastError;
+    }
+
+    private String generateCoverPageWithQualityGate(ActorProfileDTO profile,
+                                                    ActorAiProfileCardTask task,
+                                                    ActorAiProfileCardPage page,
+                                                    String pageType,
+                                                    int pageNo) {
+        return generateCoverPageWithQualityGate(profile, task, page, new AlbumPageDef(pageNo, pageType));
+    }
+
+    private String buildCoverRetryFailureReason(int attempt, int maxAttempts, String detail) {
+        String reason = StringUtils.hasText(detail) ? detail.trim() : "封面成图质检未通过";
+        if (attempt >= maxAttempts) {
+            return reason;
+        }
+        return "封面成图质检未通过，已自动重试（" + attempt + "/" + maxAttempts + "）：" + reason;
     }
 
     private boolean isLayoutOnlyAlbumPage(AlbumPageDef pageDef) {

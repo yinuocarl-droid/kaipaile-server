@@ -15,6 +15,10 @@ public class AiProfileCardProperties {
 
     private int estimatedReadyMinutes = 10;
 
+    private boolean coverQualityGateEnabled = true;
+
+    private int coverQualityMaxAttempts = 3;
+
     private OpenAiProvider openai = new OpenAiProvider();
 
     private HttpProvider http = new HttpProvider();

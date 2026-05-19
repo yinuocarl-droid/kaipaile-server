@@ -11,19 +11,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -38,7 +31,6 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private static final String DEFAULT_REGION = "ap-guangzhou";
     private static final String DEFAULT_VERSION = "2022-12-29";
     private static final int MAX_PROMPT_LENGTH = 1200;
-    private static final DateTimeFormatter TC3_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
     private final ObjectMapper objectMapper;
@@ -286,7 +278,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                                  int readTimeoutMs) throws Exception {
         String body = objectMapper.writeValueAsString(payload);
         long timestamp = Instant.now().getEpochSecond();
-        String authorization = sign(endpoint, secretId, secretKey, action, timestamp, body);
+        String authorization = TencentCloudApiSupport.sign(endpoint, SERVICE, secretId, secretKey, action, timestamp, body);
         HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
                 .timeout(Duration.ofMillis(readTimeoutMs))
                 .header("Authorization", authorization)
@@ -309,59 +301,10 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         return root;
     }
 
-    private String sign(String endpoint,
-                        String secretId,
-                        String secretKey,
-                        String action,
-                        long timestamp,
-                        String body) throws Exception {
-        String host = URI.create(endpoint).getHost();
-        String date = LocalDateTime.ofEpochSecond(timestamp, 0, ZoneOffset.UTC).format(TC3_DATE);
-        String canonicalHeaders = "content-type:application/json; charset=utf-8\n"
-                + "host:" + host + "\n"
-                + "x-tc-action:" + action.toLowerCase(Locale.ROOT) + "\n";
-        String signedHeaders = "content-type;host;x-tc-action";
-        String canonicalRequest = "POST\n/\n\n"
-                + canonicalHeaders + "\n"
-                + signedHeaders + "\n"
-                + sha256Hex(body);
-        String credentialScope = date + "/" + SERVICE + "/tc3_request";
-        String stringToSign = "TC3-HMAC-SHA256\n"
-                + timestamp + "\n"
-                + credentialScope + "\n"
-                + sha256Hex(canonicalRequest);
-        byte[] secretDate = hmac256(("TC3" + secretKey).getBytes(StandardCharsets.UTF_8), date);
-        byte[] secretService = hmac256(secretDate, SERVICE);
-        byte[] secretSigning = hmac256(secretService, "tc3_request");
-        String signature = bytesToHex(hmac256(secretSigning, stringToSign));
-        return "TC3-HMAC-SHA256 Credential=" + secretId + "/" + credentialScope
-                + ", SignedHeaders=" + signedHeaders
-                + ", Signature=" + signature;
-    }
-
     private AiImageProviderRuntimeConfig requireRuntimeConfig() {
         return aiImageProviderConfigService.findRuntimeConfig(providerCode())
                 .filter(AiImageProviderRuntimeConfig::enabled)
                 .orElseThrow(() -> new BizException("腾讯混元 provider 未启用或未配置"));
-    }
-
-    private String sha256Hex(String value) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        return bytesToHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
-    }
-
-    private byte[] hmac256(byte[] key, String value) throws Exception {
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(key, "HmacSHA256"));
-        return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private String bytesToHex(byte[] bytes) {
-        StringBuilder builder = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) {
-            builder.append(String.format("%02x", value & 0xff));
-        }
-        return builder.toString();
     }
 
     private String truncate(String value) {
