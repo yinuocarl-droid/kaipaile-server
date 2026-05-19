@@ -138,19 +138,20 @@ class TencentHunyuanProfileImageProviderTest {
             assertFalse(payload.has("Images"));
             assertEquals(0, payload.path("LogoAdd").asInt());
             assertEquals(1, payload.path("Revise").asInt());
-            assertTrue(prompt.length() <= 4096);
-            assertTrue(prompt.contains("Layout directive"));
-            assertTrue(prompt.contains("symbol-free and unmarked"));
+            assertTrue(prompt.length() <= 1200);
+            assertTrue(prompt.contains("Create a premium 9:16 full-bleed actor portrait background"));
+            assertTrue(prompt.contains("Plain, unmarked, symbol-free"));
             int identityInstructionIndex = Math.max(
-                    prompt.indexOf("Use reference image"),
+                    prompt.indexOf("Use the reference image"),
                     prompt.indexOf("Create a realistic actor portrait"));
             assertTrue(identityInstructionIndex > 0);
-            assertTrue(prompt.indexOf("symbol-free and unmarked") < identityInstructionIndex);
-            assertTrue(prompt.contains("x=1120-2050"));
-            assertTrue(prompt.contains("continuous low-detail matte background"));
+            assertTrue(prompt.indexOf("Composition: actor on the right") > identityInstructionIndex);
+            assertFalse(prompt.contains("x=1120-2050"));
+            assertFalse(prompt.contains("coordinate"));
             assertFalse(prompt.contains("text-safe"));
             assertFalse(prompt.contains("calligraphy"));
             assertFalse(prompt.contains("seal-script"));
+            assertFalse(prompt.contains("Layout directive"));
             assertFalse(prompt.contains("profile-card"));
             assertFalse(prompt.contains("mini-program UI zones"));
             assertFalse(prompt.contains("facts provider"));
@@ -200,11 +201,9 @@ class TencentHunyuanProfileImageProviderTest {
             JsonNode payload = objectMapper.readTree(submitBody.get());
             assertFalse(payload.has("Images"));
             String prompt = payload.path("Prompt").asText();
-            assertTrue(prompt.contains("non-portrait editorial background"));
-            assertTrue(prompt.contains("pageType=resume"));
-            assertTrue(prompt.contains("Do not create any actor portrait"));
-            assertTrue(prompt.contains("human face"));
-            assertTrue(prompt.contains("symbol-free"));
+            assertTrue(prompt.contains("Create a premium 9:16 full-bleed editorial background for resume"));
+            assertTrue(prompt.contains("No actor portrait or human subject"));
+            assertTrue(prompt.contains("Plain, unmarked, symbol-free"));
             assertFalse(prompt.contains("Place the actor"));
         } finally {
             server.stop(0);

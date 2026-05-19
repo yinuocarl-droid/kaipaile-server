@@ -115,48 +115,31 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         JsonNode fixedLayout = parsePromptJson(request.promptJson()).path("fixedLayout");
         String pageType = layoutText(fixedLayout, "pageType", "cover");
         boolean coverPage = "cover".equals(pageType);
-        String subjectBox = layoutText(fixedLayout, "subjectBox",
-                "hero right side, face near upper-right, body must not cover the left overlay-safe area");
-        String identitySafeArea = layoutText(fixedLayout, "identitySafeArea",
-                "hero left side must remain clean empty overlay space");
-        String safeSurfaceTone = compactText(layoutText(fixedLayout, "safeSurfaceTone",
-                "low-detail matte background surfaces"), 120);
         String background = tencentBackgroundHint(templateSceneCode, styleCode, layoutText(fixedLayout, "background", ""));
         if (!coverPage) {
             String prompt = """
-                    Layout directive: generate only a clean 9:16 full-bleed non-portrait editorial background image for album pageType=%s, output 2160x3840.
-                    This page is for native mini-program information/photo modules. Do not create any actor portrait, human face, body, silhouette, head, skin, hair, eyes or duplicated cover subject.
-                    Keep the top overlay zone empty and quiet: %s.
-                    Keep all module regions as continuous %s for later native overlays, with no boxes, frames, panels, photo slots, thumbnails, interface shapes or document edges.
-                    The coordinate descriptions above are generation constraints only, never visible content. %s Background material: %s.
-                    The final image must read as a symbol-free background layer: plain, unmarked, and safe for later native overlays.
-                    Do not add typography-like marks, captions, labels, logos, watermarks, marked emblems, signatures, QR patterns, UI chrome, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, borders, paper edges or card shells.
+                    Create a premium 9:16 full-bleed editorial background for %s, output 2160x3840.
+                    No actor portrait or human subject. Keep the image open for later mini-program overlays.
+                    Style: %s. Background: %s.
+                    Plain, unmarked, symbol-free. No readable text, pseudo-text, logos, watermarks, labels, stamps, UI shapes, or QR patterns.
                     """.formatted(
                     pageType,
-                    identitySafeArea,
-                    safeSurfaceTone,
                     tencentStyleHint(templateSceneCode, styleCode),
                     background
             ).trim().replaceAll("\\s+", " ");
             return truncatePrompt(prompt);
         }
         String identityPolicy = hasSourceImage
-                ? "Use reference image as actor identity source; preserve face, age impression, hairstyle, skin texture and body proportion."
-                : "Create a realistic actor portrait with natural face detail and clean body proportion.";
+                ? "Use the reference image only for identity."
+                : "Create a realistic actor portrait.";
         String prompt = """
-                Layout directive: generate only a clean 9:16 full-bleed cinematic actor portrait background image, output 2160x3840. It must not look like a poster, document, app screen, resume sheet or card.
-                The final image must be symbol-free and unmarked: plain textures, quiet gradients and empty overlay surfaces only, with no typography-like marks, captions, labels, logos, watermarks, marked emblems, signatures, QR patterns, fake UI, or pretend-readable strokes anywhere in the image.
+                Create a premium 9:16 full-bleed actor portrait background, output 2160x3840.
                 %s
-                Place the actor only in this fixed subject area: %s.
-                Keep this empty overlay zone clean and quiet: %s.
-                All remaining left, center and lower areas must stay as continuous %s for later native overlays, with no boxes, frames, panels or interface shapes.
-                The coordinate descriptions above are generation constraints only, never visible content. %s Background material: %s.
-                Keep the background as a premium photographic texture only, with empty overlay surfaces, quiet gradients, and no readable or pseudo-readable marks of any kind.
+                Composition: actor on the right, left side open for later overlays.
+                Style: %s. Background: %s.
+                Plain, unmarked, symbol-free. No readable text, pseudo-text, logos, watermarks, labels, stamps, UI shapes, or QR patterns.
                 """.formatted(
                 identityPolicy,
-                subjectBox,
-                identitySafeArea,
-                safeSurfaceTone,
                 tencentStyleHint(templateSceneCode, styleCode),
                 background
         ).trim().replaceAll("\\s+", " ");
@@ -193,35 +176,35 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private String tencentStyleHint(String templateSceneCode, String styleCode) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "Use refined modern costume-drama editorial styling, elegant traditional wardrobe, cinematic texture, restrained premium atmosphere, never cheap fantasy.";
+            return "Elegant period-drama portrait, warm ink texture, realistic costume, restrained premium mood.";
         }
         if (normalized.contains("urban")) {
-            return "Use a modern urban fashion editorial tone, quiet city or studio hero scene, polished contemporary wardrobe and confident natural expression.";
+            return "Modern urban portrait, soft studio depth, polished fashion mood.";
         }
         if (normalized.contains("classic")) {
-            return "Use a clean commercial studio portrait tone, bright premium background, approachable expression and advertising-ready composition.";
+            return "Clean studio portrait, bright neutral background, approachable and realistic.";
         }
-        return "Use a high-end actor portfolio visual tone tailored to the selected scene, realistic and polished.";
+        return "Premium actor portrait, realistic and polished.";
     }
 
     private String tencentBackgroundHint(String templateSceneCode, String styleCode, String background) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "warm ivory full-bleed ink-wash texture, misty garden architecture, bridge and bamboo silhouettes, soft mineral-red abstract washes only, clean unmarked surfaces";
+            return "warm ivory ink texture, misty garden depth, bridge and bamboo silhouettes, soft red accents";
         }
         if (normalized.contains("urban")) {
-            return "controlled city or studio depth, soft haze, charcoal gradients and restrained cool rim light";
+            return "soft city or studio depth, charcoal gradients, restrained cool rim light";
         }
         if (normalized.contains("commercial")) {
-            return "premium studio backdrop, soft grey or white gradients, restrained champagne or blue accent light";
+            return "premium studio backdrop, soft grey or white gradients";
         }
         if (normalized.contains("artistic")) {
-            return "textured gallery wall, controlled dramatic shadows, muted olive, stone and rust accents, soft film grain";
+            return "textured gallery wall, controlled shadows, muted olive and rust accents";
         }
         if (StringUtils.hasText(background)) {
             return compactText(sanitizeForTencentPrompt(background), 130);
         }
-        return "warm studio texture, soft analog film grain, subtle neutral matte surfaces and restrained atmosphere";
+        return "warm studio texture, soft film grain, neutral matte surfaces";
     }
 
     private String sanitizeForTencentPrompt(String value) {
