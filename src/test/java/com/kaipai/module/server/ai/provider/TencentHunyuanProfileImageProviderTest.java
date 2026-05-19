@@ -137,17 +137,20 @@ class TencentHunyuanProfileImageProviderTest {
             String prompt = payload.path("Prompt").asText();
             assertFalse(payload.has("Images"));
             assertEquals(0, payload.path("LogoAdd").asInt());
-            assertEquals(0, payload.path("Revise").asInt());
-            assertTrue(prompt.length() <= 1200);
-            assertTrue(prompt.contains("Agent layout is mandatory"));
-            assertTrue(prompt.contains("Absolute no-text rule"));
+            assertEquals(1, payload.path("Revise").asInt());
+            assertTrue(prompt.length() <= 4096);
+            assertTrue(prompt.contains("Layout directive"));
+            assertTrue(prompt.contains("symbol-free and unmarked"));
             int identityInstructionIndex = Math.max(
                     prompt.indexOf("Use reference image"),
                     prompt.indexOf("Create a realistic actor portrait"));
             assertTrue(identityInstructionIndex > 0);
-            assertTrue(prompt.indexOf("Absolute no-text rule") < identityInstructionIndex);
+            assertTrue(prompt.indexOf("symbol-free and unmarked") < identityInstructionIndex);
             assertTrue(prompt.contains("x=1120-2050"));
             assertTrue(prompt.contains("continuous low-detail matte background"));
+            assertFalse(prompt.contains("text-safe"));
+            assertFalse(prompt.contains("calligraphy"));
+            assertFalse(prompt.contains("seal-script"));
             assertFalse(prompt.contains("profile-card"));
             assertFalse(prompt.contains("mini-program UI zones"));
             assertFalse(prompt.contains("facts provider"));
@@ -201,6 +204,7 @@ class TencentHunyuanProfileImageProviderTest {
             assertTrue(prompt.contains("pageType=resume"));
             assertTrue(prompt.contains("Do not create any actor portrait"));
             assertTrue(prompt.contains("human face"));
+            assertTrue(prompt.contains("symbol-free"));
             assertFalse(prompt.contains("Place the actor"));
         } finally {
             server.stop(0);

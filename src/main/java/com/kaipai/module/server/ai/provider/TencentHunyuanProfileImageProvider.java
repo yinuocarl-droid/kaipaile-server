@@ -30,7 +30,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private static final String DEFAULT_ENDPOINT = "https://aiart.tencentcloudapi.com";
     private static final String DEFAULT_REGION = "ap-guangzhou";
     private static final String DEFAULT_VERSION = "2022-12-29";
-    private static final int MAX_PROMPT_LENGTH = 1200;
+    private static final int MAX_PROMPT_LENGTH = 4096;
 
     private final AiImageProviderConfigService aiImageProviderConfigService;
     private final ObjectMapper objectMapper;
@@ -105,7 +105,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
             payload.put("Images", List.of(sourceImageUrl));
         }
         payload.put("LogoAdd", runtime.watermark(false) ? 1 : 0);
-        payload.put("Revise", Boolean.TRUE.equals(runtime.publicConfig().getPromptRewrite()) ? 1 : 0);
+        payload.put("Revise", Boolean.FALSE.equals(runtime.publicConfig().getPromptRewrite()) ? 0 : 1);
         return payload;
     }
 
@@ -116,20 +116,21 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         String pageType = layoutText(fixedLayout, "pageType", "cover");
         boolean coverPage = "cover".equals(pageType);
         String subjectBox = layoutText(fixedLayout, "subjectBox",
-                "hero right side, face near upper-right, body must not cover left text-safe area");
+                "hero right side, face near upper-right, body must not cover the left overlay-safe area");
         String identitySafeArea = layoutText(fixedLayout, "identitySafeArea",
-                "hero left side must remain clean negative space");
+                "hero left side must remain clean empty overlay space");
         String safeSurfaceTone = compactText(layoutText(fixedLayout, "safeSurfaceTone",
                 "low-detail matte background surfaces"), 120);
         String background = tencentBackgroundHint(templateSceneCode, styleCode, layoutText(fixedLayout, "background", ""));
         if (!coverPage) {
             String prompt = """
-                    Agent layout is mandatory. Generate only a clean 9:16 full-bleed non-portrait editorial background image for album pageType=%s, output 2160x3840.
+                    Layout directive: generate only a clean 9:16 full-bleed non-portrait editorial background image for album pageType=%s, output 2160x3840.
                     This page is for native mini-program information/photo modules. Do not create any actor portrait, human face, body, silhouette, head, skin, hair, eyes or duplicated cover subject.
-                    Keep the title-safe area empty and quiet: %s.
+                    Keep the top overlay zone empty and quiet: %s.
                     Keep all module regions as continuous %s for later native overlays, with no boxes, frames, panels, photo slots, thumbnails, interface shapes or document edges.
                     The coordinate descriptions above are generation constraints only, never visible content. %s Background material: %s.
-                    Strictly no readable text, Chinese characters, English letters, numbers, calligraphy, seal-script words, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
+                    The final image must read as a symbol-free background layer: plain, unmarked, and safe for later native overlays.
+                    Do not add typography-like marks, captions, labels, logos, watermarks, marked emblems, signatures, QR patterns, UI chrome, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, borders, paper edges or card shells.
                     """.formatted(
                     pageType,
                     identitySafeArea,
@@ -143,14 +144,14 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 ? "Use reference image as actor identity source; preserve face, age impression, hairstyle, skin texture and body proportion."
                 : "Create a realistic actor portrait with natural face detail and clean body proportion.";
         String prompt = """
-                Agent layout is mandatory. Generate only a clean 9:16 full-bleed cinematic actor portrait background image, output 2160x3840. It must not look like a poster, document, app screen, resume sheet or card.
-                Absolute no-text rule: do not create any Chinese characters, calligraphy, seal-script glyphs, English letters, numbers, title graphics, handwritten marks, signature marks, captions, logos, watermarks or readable/pretend-readable text anywhere in the image.
+                Layout directive: generate only a clean 9:16 full-bleed cinematic actor portrait background image, output 2160x3840. It must not look like a poster, document, app screen, resume sheet or card.
+                The final image must be symbol-free and unmarked: plain textures, quiet gradients and empty overlay surfaces only, with no typography-like marks, captions, labels, logos, watermarks, marked emblems, signatures, QR patterns, fake UI, or pretend-readable strokes anywhere in the image.
                 %s
                 Place the actor only in this fixed subject area: %s.
-                Keep this fixed title-safe area empty and quiet: %s.
+                Keep this empty overlay zone clean and quiet: %s.
                 All remaining left, center and lower areas must stay as continuous %s for later native overlays, with no boxes, frames, panels or interface shapes.
                 The coordinate descriptions above are generation constraints only, never visible content. %s Background material: %s.
-                Strictly no readable text, Chinese characters, English letters, numbers, calligraphy, seal-script words, phone, QR code, watermark, logo, fake app UI, hard cards, section titles, rows, chips, thumbnail frames, video-player controls, border, paper edge or card shell.
+                Keep the background as a premium photographic texture only, with empty overlay surfaces, quiet gradients, and no readable or pseudo-readable marks of any kind.
                 """.formatted(
                 identityPolicy,
                 subjectBox,
@@ -175,10 +176,10 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
 
     private String layoutText(JsonNode fixedLayout, String field, String fallback) {
         if (fixedLayout == null || fixedLayout.isMissingNode()) {
-            return fallback;
+            return sanitizeForTencentPrompt(fallback);
         }
         String value = fixedLayout.path(field).asText("");
-        return StringUtils.hasText(value) ? value.trim() : fallback;
+        return sanitizeForTencentPrompt(StringUtils.hasText(value) ? value.trim() : fallback);
     }
 
     private String compactText(String value, int maxLength) {
@@ -206,7 +207,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
     private String tencentBackgroundHint(String templateSceneCode, String styleCode, String background) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "warm ivory full-bleed ink-wash texture, misty garden architecture, bridge and bamboo silhouettes, plain abstract cinnabar wash shapes only, no stamp marks and no calligraphy";
+            return "warm ivory full-bleed ink-wash texture, misty garden architecture, bridge and bamboo silhouettes, soft mineral-red abstract washes only, clean unmarked surfaces";
         }
         if (normalized.contains("urban")) {
             return "controlled city or studio depth, soft haze, charcoal gradients and restrained cool rim light";
@@ -218,9 +219,26 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
             return "textured gallery wall, controlled dramatic shadows, muted olive, stone and rust accents, soft film grain";
         }
         if (StringUtils.hasText(background)) {
-            return compactText(background, 130);
+            return compactText(sanitizeForTencentPrompt(background), 130);
         }
         return "warm studio texture, soft analog film grain, subtle neutral matte surfaces and restrained atmosphere";
+    }
+
+    private String sanitizeForTencentPrompt(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim()
+                .replace("text-safe", "overlay-safe")
+                .replace("title-safe", "top overlay")
+                .replace("abstract seal accents", "abstract warm-red motifs")
+                .replace("abstract seal shapes", "abstract warm-red motifs")
+                .replace("seal-script", "decorative")
+                .replace("calligraphy", "decorative strokes")
+                .replace("stamp marks", "marked emblems")
+                .replace("readable characters", "recognizable symbols")
+                .replace("readable text", "recognizable typography")
+                .replaceAll("\\s+", " ");
     }
 
     private String truncatePrompt(String prompt) {

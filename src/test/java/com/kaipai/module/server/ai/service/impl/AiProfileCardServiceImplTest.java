@@ -48,6 +48,7 @@ class AiProfileCardServiceImplTest {
     @Test
     void generateCoverPageShouldRetryWhenQualityGateRejectsFirstImage() {
         AiProfileCardProperties properties = new AiProfileCardProperties();
+        properties.setCoverQualityGateEnabled(true);
         properties.setCoverQualityMaxAttempts(2);
         AiProfileCardPromptAgent promptAgent = mock(AiProfileCardPromptAgent.class);
         AiGeneratedImageStorage imageStorage = mock(AiGeneratedImageStorage.class);
