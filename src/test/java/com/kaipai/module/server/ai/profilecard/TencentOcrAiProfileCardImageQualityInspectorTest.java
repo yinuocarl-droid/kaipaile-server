@@ -1,6 +1,7 @@
 package com.kaipai.module.server.ai.profilecard;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kaipai.common.exception.BizException;
 import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -43,5 +44,19 @@ class TencentOcrAiProfileCardImageQualityInspectorTest {
         assertTrue(chineseBlocked);
         assertTrue(asciiBlocked);
         assertFalse(lowConfidenceNoise);
+    }
+
+    @Test
+    void ocrUnavailableErrorShouldBeTreatedAsSkip() {
+        TencentOcrAiProfileCardImageQualityInspector inspector = new TencentOcrAiProfileCardImageQualityInspector(
+                mock(AiImageProviderConfigService.class),
+                new ObjectMapper());
+
+        boolean unavailable = ReflectionTestUtils.invokeMethod(
+                inspector,
+                "isOcrUnavailable",
+                new BizException("腾讯 OCR API 错误：{\"Code\":\"FailedOperation.UnOpenError\",\"Message\":\"服务未开通\"}"));
+
+        assertTrue(unavailable);
     }
 }

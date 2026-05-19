@@ -69,6 +69,11 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
             }
             return AiProfileCardImageQualityInspection.accept();
         } catch (BizException error) {
+            if (isOcrUnavailable(error)) {
+                String message = "腾讯 OCR 服务不可用，已跳过封面质检";
+                log.warn(message + ": {}", truncate(error.getMessage()));
+                return AiProfileCardImageQualityInspection.skipped(message);
+            }
             throw error;
         } catch (Exception error) {
             throw new BizException("腾讯 OCR 封面质检失败：" + error.getMessage());
@@ -188,5 +193,15 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
             return "";
         }
         return value.length() > 500 ? value.substring(0, 500) : value;
+    }
+
+    private boolean isOcrUnavailable(BizException error) {
+        if (error == null || !StringUtils.hasText(error.getMessage())) {
+            return false;
+        }
+        String message = error.getMessage();
+        return message.contains("FailedOperation.UnOpenError")
+                || message.contains("服务未开通")
+                || message.contains("未开通");
     }
 }
