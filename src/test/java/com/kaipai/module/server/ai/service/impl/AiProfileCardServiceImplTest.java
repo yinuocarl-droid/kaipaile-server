@@ -4,6 +4,8 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.actor.dto.ActorProfileDTO;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardPage;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
+import com.kaipai.module.model.ai.dto.AiProfileCardPageRespDTO;
+import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
 import com.kaipai.module.model.card.dto.ActorMyShareCardItemDTO;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
@@ -258,6 +260,80 @@ class AiProfileCardServiceImplTest {
         ), calls);
         verify(imageStorage, atLeastOnce()).uploadBottomBandFromUrl("https://cdn.example.com/cover.png", "ai-profile-card/continuity", 0.15d);
         verify(imageStorage, atLeastOnce()).uploadBottomBandFromUrl("https://cdn.example.com/resume.png", "ai-profile-card/continuity", 0.15d);
+    }
+
+    @Test
+    void taskShouldExposeContinuityFieldsOnReturnedPages() {
+        AiProfileCardProperties properties = new AiProfileCardProperties();
+        ActorProfileService actorProfileService = mock(ActorProfileService.class);
+        ActorProfileMapper actorProfileMapper = mock(ActorProfileMapper.class);
+        AiImageProviderConfigService aiImageProviderConfigService = mock(AiImageProviderConfigService.class);
+        AiProfileCardPromptAgent promptAgent = mock(AiProfileCardPromptAgent.class);
+        UserShareCardService userShareCardService = mock(UserShareCardService.class);
+        ActorCardConfigService actorCardConfigService = mock(ActorCardConfigService.class);
+        AiGeneratedImageStorage imageStorage = mock(AiGeneratedImageStorage.class);
+        ActorAiProfileCardPageMapper pageMapper = mock(ActorAiProfileCardPageMapper.class);
+        AiProfileCardImageQualityInspector qualityInspector = mock(AiProfileCardImageQualityInspector.class);
+        AiProfileCardServiceImpl service = spy(new AiProfileCardServiceImpl(
+                actorProfileService,
+                actorProfileMapper,
+                properties,
+                aiImageProviderConfigService,
+                promptAgent,
+                userShareCardService,
+                actorCardConfigService,
+                imageStorage,
+                pageMapper,
+                qualityInspector));
+        doReturn(newTask()).when(service).getById("aipf_flow");
+
+        ActorAiProfileCardPage cover = newPage(1L, "aipf_flow", "cover");
+        cover.setStatus("success");
+        cover.setGeneratedImageUrl("https://cdn.example.com/cover.png");
+        cover.setContinuityMode("identity_reference");
+        cover.setContinuityReferenceUrl("https://cdn.example.com/source.png");
+
+        ActorAiProfileCardPage resume = newPage(2L, "aipf_flow", "resume");
+        resume.setStatus("success");
+        resume.setGeneratedImageUrl("https://cdn.example.com/resume.png");
+        resume.setContinuityMode("tail_reference");
+        resume.setContinuityReferenceUrl("https://cdn.example.com/crop/cover-tail.png");
+        resume.setContinuityReferenceSourcePageType("cover");
+        resume.setContinuityReferenceSourcePageNo(1);
+        resume.setContinuityBandRatio(0.15d);
+        resume.setContinuityBandRect("x=0-2160 y=3264-3840");
+
+        ActorAiProfileCardPage gallery = newPage(3L, "aipf_flow", "gallery");
+        gallery.setStatus("success");
+        gallery.setGeneratedImageUrl("https://cdn.example.com/gallery.png");
+        gallery.setContinuityMode("tail_reference");
+        gallery.setContinuityReferenceUrl("https://cdn.example.com/crop/resume-tail.png");
+        gallery.setContinuityReferenceSourcePageType("resume");
+        gallery.setContinuityReferenceSourcePageNo(2);
+        gallery.setContinuityBandRatio(0.15d);
+        gallery.setContinuityBandRect("x=0-2160 y=3264-3840");
+
+        when(pageMapper.selectList(any())).thenReturn(List.of(cover, resume, gallery));
+        when(pageMapper.updateById(any(ActorAiProfileCardPage.class))).thenReturn(1);
+        when(pageMapper.update(any(), any())).thenReturn(1);
+
+        AiProfileCardTaskRespDTO dto = service.task(7L, "aipf_flow");
+
+        assertEquals(3, dto.getPages().size());
+        AiProfileCardPageRespDTO resumeDto = dto.getPages().get(1);
+        assertEquals("tail_reference", resumeDto.getContinuityMode());
+        assertEquals("https://cdn.example.com/crop/cover-tail.png", resumeDto.getContinuityReferenceUrl());
+        assertEquals("cover", resumeDto.getContinuityReferenceSourcePageType());
+        assertEquals(1, resumeDto.getContinuityReferenceSourcePageNo());
+        assertEquals(0.15d, resumeDto.getContinuityBandRatio());
+        assertEquals("x=0-2160 y=3264-3840", resumeDto.getContinuityBandRect());
+        AiProfileCardPageRespDTO galleryDto = dto.getPages().get(2);
+        assertEquals("tail_reference", galleryDto.getContinuityMode());
+        assertEquals("https://cdn.example.com/crop/resume-tail.png", galleryDto.getContinuityReferenceUrl());
+        assertEquals("resume", galleryDto.getContinuityReferenceSourcePageType());
+        assertEquals(2, galleryDto.getContinuityReferenceSourcePageNo());
+        assertEquals(0.15d, galleryDto.getContinuityBandRatio());
+        assertEquals("x=0-2160 y=3264-3840", galleryDto.getContinuityBandRect());
     }
 
     private ActorAiProfileCardTask newTask() {

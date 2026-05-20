@@ -270,8 +270,14 @@ class AiProfileCardPromptAgentTest {
 
     private void assertCoverPromptContract(String promptText) {
         assertChinesePromptContract(promptText);
-        assertTrue(promptText.contains("底部"));
-        assertTrue(promptText.contains("过渡区") || promptText.contains("过渡带") || promptText.contains("接续带"));
+        assertTrue(promptText.contains("底部约 15%") || promptText.contains("底部 15%"));
+        assertTrue(promptText.contains("干净"));
+        assertTrue(promptText.contains("低细节"));
+        assertTrue(promptText.contains("无人物身体"));
+        assertTrue(promptText.contains("无衣料主体"));
+        assertTrue(promptText.contains("无文字"));
+        assertTrue(promptText.contains("无 UI"));
+        assertTrue(promptText.contains("可延展背景过渡带") || promptText.contains("可延展的背景过渡带"));
     }
 
     private void assertContinuityPromptContract(String promptText) {
@@ -282,10 +288,15 @@ class AiProfileCardPromptAgentTest {
                 || promptText.contains("延续上一页底部")
                 || promptText.contains("延续上一页结尾")
                 || promptText.contains("上一页底部裁切"));
+        assertTrue(promptText.contains("主要形状"));
         assertTrue(promptText.contains("色彩"));
         assertTrue(promptText.contains("光线"));
-        assertTrue(promptText.contains("材质"));
+        assertTrue(promptText.contains("纹理"));
         assertTrue(promptText.contains("空间方向"));
+        assertTrue(promptText.contains("像直接从上一页底部继续向下生成"));
+        assertTrue(promptText.contains("不是只保持同风格")
+                || promptText.contains("不要替换成普通墙面")
+                || promptText.contains("全新背景"));
         assertTrue(promptText.contains("不复制人物") || promptText.contains("不要人物"));
         assertTrue(promptText.contains("文字"));
         assertTrue(promptText.contains("Logo") || promptText.contains("logo"));

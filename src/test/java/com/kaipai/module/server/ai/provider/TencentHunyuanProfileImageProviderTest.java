@@ -148,6 +148,12 @@ class TencentHunyuanProfileImageProviderTest {
             assertTrue(prompt.contains("背景"));
             assertTrue(prompt.contains("Plain, unmarked, symbol-free"));
             assertTrue(prompt.trim().endsWith("Plain, unmarked, symbol-free."));
+            assertTrue(prompt.contains("底部约 15%"));
+            assertTrue(prompt.contains("干净"));
+            assertTrue(prompt.contains("低细节"));
+            assertTrue(prompt.contains("无人物身体"));
+            assertTrue(prompt.contains("无衣料主体"));
+            assertTrue(prompt.contains("可延展背景过渡带"));
             assertTrue(prompt.contains("不要可读文字") || prompt.contains("不要文字") || prompt.contains("无人物主体"));
             assertFalse(prompt.contains("Layout directive"));
             assertFalse(prompt.contains("profile-card"));
@@ -306,6 +312,15 @@ class TencentHunyuanProfileImageProviderTest {
         assertTrue(prompt.contains("沿用上一页底部的色彩、光线、材质和空间方向")
                 || prompt.contains("延续上一页底部的色彩、光线、材质和空间方向")
                 || prompt.contains("连续性参考带"));
+        assertTrue(prompt.contains("主要形状"));
+        assertTrue(prompt.contains("色彩"));
+        assertTrue(prompt.contains("光线"));
+        assertTrue(prompt.contains("纹理"));
+        assertTrue(prompt.contains("空间方向"));
+        assertTrue(prompt.contains("像直接从上一页底部继续向下生成"));
+        assertTrue(prompt.contains("不是只保持同风格")
+                || prompt.contains("不要替换成普通墙面")
+                || prompt.contains("全新背景"));
         assertTrue(prompt.contains("不复制人物、文字") || prompt.contains("不要复制人物、文字"));
         assertTrue(prompt.contains("Logo") || prompt.contains("logo"));
         assertTrue(prompt.contains("二维码"));

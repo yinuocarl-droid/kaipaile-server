@@ -122,16 +122,19 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 ? "参考图1是用户源图，只用于人物身份与自然气质参考，不要复制背景文字、标签或版式。"
                 : "当前没有可用身份参考图，按封面人物气质生成。")
                 : (hasSourceImage
-                ? "参考图1是上一页底部裁切出的连续性参考带，只延续色彩、光线、材质和空间方向，不复制人物、文字、Logo、二维码或前景布局。"
+                ? "参考图1是上一页底部裁切出的连续性参考带，顶部约 15% 必须接近参考带的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成，而不是只保持同风格，不复制人物、文字、Logo、二维码或前景布局。"
                 : "当前没有可用连续性参考带，仅按文字连续性生成背景气质。");
         String composition = coverPage
-                ? "构图：演员位于右侧，左侧留空给后续信息层，底部保留安静过渡区。"
-                : "构图：顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，无人物主体，页面以背景承载为主。";
+                ? "构图：演员位于右侧，左侧留空给后续信息层，底部约 15% 必须是干净、低细节、无人物身体、无衣料主体、无文字、无 Logo、无二维码、无卡片和无 UI 的可延展背景过渡带。"
+                : "构图：顶部约 15% 必须接近上一页参考带的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成，不要替换成普通墙面或全新背景，无人物主体，页面以背景承载为主。";
         String subject = coverPage
                 ? "页面职责：演员封面背景，允许保留身份感，但不要加入可读文字或多余装饰。"
                 : ("resume".equalsIgnoreCase(pageType)
                 ? "页面职责：履历页背景，以资料承载为主，不要重复封面级人物主视觉。"
                 : "页面职责：影像页背景，以照片墙和视频入口承载为主，不要重复封面级人物主视觉。");
+        String safetyRequirement = coverPage
+                ? "底部约 15% 必须是干净、低细节、无人物身体、无衣料主体、无文字、无 Logo、无二维码、无卡片和无 UI 的可延展背景过渡带"
+                : "顶部约 15% 必须接近上一页参考带的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成，不要替换成普通墙面或全新背景";
         String prompt = """
                 生成一张 9:16 全幅%s，输出 2160x3840。
                 %s
@@ -139,7 +142,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 %s
                 风格：%s
                 背景：%s
-                安全要求：背景必须全幅铺满，连续性区域只用于延续背景氛围，不要复制人物、文字、Logo、标签、二维码或 UI 形状。
+                安全要求：背景必须全幅铺满，%s；连续性区域只用于延续背景氛围，不要复制人物、文字、Logo、标签、二维码或 UI 形状。
                 不要可读文字、水印、Logo、标签、二维码或任何 UI 形状。
                 Plain, unmarked, symbol-free.
                 """.formatted(
@@ -148,7 +151,8 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 composition,
                 subject,
                 tencentStyleHint(templateSceneCode, styleCode),
-                background
+                background,
+                safetyRequirement
         ).trim().replaceAll("\\s+", " ");
         return truncatePrompt(prompt);
     }

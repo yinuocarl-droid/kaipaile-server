@@ -121,8 +121,8 @@ public class AiProfileCardPromptAgent {
                 "mode", sourceImageMode(page, sourceImageUrl),
                 "bandRatio", CONTINUITY_BAND_RATIO,
                 "referencePolicy", isCoverPage(page)
-                        ? "cover uses the user source image as identity reference; reserve a quiet bottom transition band"
-                        : "resume/gallery use the previous page tail crop as background continuity only; never copy people, text, logos or foreground UI",
+                        ? "cover uses the user source image as identity reference; bottom ~15% must be a clean, low-detail, extendable background transition band with no human body, clothing mass, text, logo, QR code, card or UI foreground"
+                        : "resume/gallery use the previous page tail crop as background continuity only; top ~15% must closely match reference image #1 main shapes, colors, lighting, texture and spatial direction, as if continuing downward from the previous page bottom, not merely same style",
                 "hardTail", "Plain, unmarked, symbol-free."
         ));
         brief.put("referenceQuality", Map.of(
@@ -149,9 +149,10 @@ public class AiProfileCardPromptAgent {
         if (isCoverPage(page)) {
             qualityChecklist.add("portrait identity is consistent with source image");
             qualityChecklist.add("hands, eyes, hairline, clothing edges are clean");
-            qualityChecklist.add("bottom 15% remains calm, low-detail and extendable for the next page tail reference");
+            qualityChecklist.add("bottom 15% is a clean, low-detail, extendable background transition band with no human body, clothing mass, readable text, logo, QR code, card or UI foreground");
         } else {
-            qualityChecklist.add("top 15% continues the previous page tail reference band in color, light, material and spatial direction");
+            qualityChecklist.add("top 15% closely matches reference image #1 main shapes, colors, lighting, texture and spatial direction, as if generated downward from the previous page bottom");
+            qualityChecklist.add("top continuity band must not be replaced by a generic wall, blank surface or unrelated new background");
             qualityChecklist.add("no actor portrait, no human face, no body, no silhouette and no duplicated cover subject");
             qualityChecklist.add("page reads as a clean editorial background surface for deterministic information modules");
         }
@@ -254,7 +255,7 @@ public class AiProfileCardPromptAgent {
                 风格：%s
                 背景：%s
                 人物气质参考：%s
-                安全要求：背景必须全幅铺满，底部保留安静过渡区，真实业务文字、照片、二维码、联系方式和前景组件都交给后续渲染。
+                安全要求：背景必须全幅铺满，%s，真实业务文字、照片、二维码、联系方式和前景组件都交给后续渲染。
                 不要可读文字、水印、Logo、标签、二维码或任何 UI 形状。
                 Plain, unmarked, symbol-free.
                 """.formatted(
@@ -265,7 +266,8 @@ public class AiProfileCardPromptAgent {
                 chinesePageRole(page.pageType()),
                 chineseStyleHint(templateSceneCode, styleCode, style),
                 chineseBackgroundHint(templateSceneCode, styleCode, style.backgroundMaterial()),
-                buildChineseProfileSignals(profile)
+                buildChineseProfileSignals(profile),
+                chineseContinuitySafety(page.pageType())
         );
     }
 
@@ -279,7 +281,7 @@ public class AiProfileCardPromptAgent {
         if (!StringUtils.hasText(sourceImageUrl)) {
             return "当前没有可用连续性参考带，仅按文字连续性生成背景气质，不要生成人物、文字、Logo、标签、二维码或卡片布局。";
         }
-        return "参考图1是上一页底部裁切出的连续性参考带，只延续色彩、光线、材质和空间方向，不复制人物、文字、Logo、二维码或前景布局。";
+        return "参考图1是上一页底部裁切出的连续性参考带；当前页顶部约 15% 必须接近参考图1的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成，而不是只保持同风格；不复制人物、文字、Logo、二维码或前景布局。";
     }
 
     private String chinesePageLabel(String pageType) {
@@ -300,9 +302,16 @@ public class AiProfileCardPromptAgent {
 
     private String chinesePageComposition(String pageType) {
         return switch (normalizePageType(pageType)) {
-            case "resume" -> "顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，只延续背景氛围，不复制人物和文字；无人物主体，画面以资料背景为主。";
-            case "gallery" -> "顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，只延续背景氛围，不复制人物和文字；无人物主体，画面以照片墙和视频入口背景为主。";
-            default -> "演员位于右侧，左侧留空给后续信息层，页面底部保留一段安静、低细节、可继续延伸的过渡区。";
+            case "resume" -> "顶部约 15% 必须接近上一页参考带的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成；不要替换成普通墙面或全新背景；无人物主体，画面以资料背景为主。";
+            case "gallery" -> "顶部约 15% 必须接近上一页参考带的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成；不要替换成普通墙面或全新背景；无人物主体，画面以照片墙和视频入口背景为主。";
+            default -> "演员位于右侧，左侧留空给后续信息层，页面底部约 15% 必须是干净、低细节、无人物身体、无衣料主体、无文字、无 Logo、无二维码、无卡片和无 UI 的可延展背景过渡带。";
+        };
+    }
+
+    private String chineseContinuitySafety(String pageType) {
+        return switch (normalizePageType(pageType)) {
+            case "resume", "gallery" -> "顶部约 15% 必须接近参考图1的主要形状、色彩、光线、纹理和空间方向，像直接从上一页底部继续向下生成，不要替换成普通墙面或全新背景";
+            default -> "底部约 15% 必须是干净、低细节、无人物身体、无衣料主体、无文字、无 Logo、无二维码、无卡片和无 UI 的可延展背景过渡带";
         };
     }
 
@@ -390,7 +399,7 @@ public class AiProfileCardPromptAgent {
         fixedLayout.put("coordinatePolicy", "design coordinates are the single source of truth; provider coordinates are scaled descriptions only");
         fixedLayout.put("primaryReferenceSlot", isCoverPage(page)
                 ? "reference image #1 is the actor identity source; preserve facial identity and natural proportions"
-                : "reference image #1 is the previous page tail continuity band; preserve only background color, light, material and direction, never identity or text");
+                : "reference image #1 is the previous page tail continuity band; top ~15% must preserve main shapes, colors, lighting, texture and spatial direction, never identity or text");
         fixedLayout.put("sourceImageMode", isCoverPage(page) ? "identity_reference" : "tail_reference_only_no_identity");
         fixedLayout.put("subjectBox", page.subjectPolicy());
         fixedLayout.put("identitySafeArea", page.identitySafeArea());
