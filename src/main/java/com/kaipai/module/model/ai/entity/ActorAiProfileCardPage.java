@@ -9,6 +9,12 @@ import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
+/**
+ * Legacy multi-page profile-card page entity.
+ * Current generation writes the primary result to ActorAiProfileCardTask.generatedImageUrl and share-card config;
+ * this table mapping remains only for historical compatibility and cleanup of old page rows.
+ */
+@Deprecated(since = "Phase 5", forRemoval = false)
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("actor_ai_profile_card_page")
@@ -33,18 +39,29 @@ public class ActorAiProfileCardPage extends BaseEntity {
 
     private String promptLocale;
 
+    /**
+     * Legacy continuity metadata for the retired multi-page album flow.
+     * Current generation does not read or write continuity state on the main path.
+     */
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private String continuityMode;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private String continuityReferenceUrl;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private String continuityReferenceSourcePageType;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private Integer continuityReferenceSourcePageNo;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private Double continuityBandRatio;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private String continuityBandRect;
 
+    @Deprecated(since = "Phase 5", forRemoval = false)
     private String continuityFailureReason;
 
     private String providerCode;

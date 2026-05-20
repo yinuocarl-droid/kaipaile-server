@@ -50,6 +50,11 @@ public class AiGeneratedImageStorage {
         return upload(downloadedImage.bytes(), resolveDownloadedContentType(downloadedImage.contentType(), normalizedUrl), folder);
     }
 
+    /**
+     * Legacy helper for the retired multi-page album continuity flow.
+     * Current AI profile-card generation uploads only the single provider cover image.
+     */
+    @Deprecated(since = "Phase 5", forRemoval = false)
     public CroppedImageBand uploadBottomBandFromUrl(String imageUrl, String folder, double bandRatio) {
         String normalizedUrl = requireHttpImageUrl(imageUrl);
         DownloadedImage downloadedImage = downloadImage(normalizedUrl);
@@ -228,6 +233,10 @@ public class AiGeneratedImageStorage {
         return Math.max(0.12d, Math.min(0.15d, bandRatio));
     }
 
+    /**
+     * Legacy metadata for continuity reference bands in the retired multi-page album flow.
+     */
+    @Deprecated(since = "Phase 5", forRemoval = false)
     public record CroppedImageBand(
             String imageUrl,
             int sourceWidth,

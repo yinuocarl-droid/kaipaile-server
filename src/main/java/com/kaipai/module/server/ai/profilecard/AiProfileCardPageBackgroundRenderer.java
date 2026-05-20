@@ -16,12 +16,22 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Random;
 
+/**
+ * Legacy local background renderer for the retired multi-page album flow.
+ * The current profile-card path generates and persists a single provider image on the task/artifact.
+ */
+@Deprecated(since = "Phase 5", forRemoval = false)
 @Component
 public class AiProfileCardPageBackgroundRenderer {
 
     private static final int WIDTH = 2160;
     private static final int HEIGHT = 3840;
 
+    /**
+     * Renders a placeholder page background for historical compatibility only.
+     * New generation should use the provider-backed cover image path.
+     */
+    @Deprecated(since = "Phase 5", forRemoval = false)
     public byte[] render(String templateSceneCode, String pageType) {
         Palette palette = resolvePalette(templateSceneCode);
         BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
