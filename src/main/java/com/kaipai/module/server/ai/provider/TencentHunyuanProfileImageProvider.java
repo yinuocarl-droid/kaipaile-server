@@ -114,32 +114,39 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         String templateSceneCode = StringUtils.hasText(request.templateSceneCode()) ? request.templateSceneCode().trim() : "";
         JsonNode fixedLayout = parsePromptJson(request.promptJson()).path("fixedLayout");
         String pageType = layoutText(fixedLayout, "pageType", "cover");
-        boolean coverPage = "cover".equals(pageType);
+        boolean coverPage = "cover".equalsIgnoreCase(pageType);
         String background = tencentBackgroundHint(templateSceneCode, styleCode, layoutText(fixedLayout, "background", ""));
-        if (!coverPage) {
-            String prompt = """
-                    Create a premium 9:16 full-bleed editorial background for %s, output 2160x3840.
-                    No actor portrait or human subject. Keep the image open for later mini-program overlays.
-                    Style: %s. Background: %s.
-                    Plain, unmarked, symbol-free. No readable text, pseudo-text, logos, watermarks, labels, stamps, UI shapes, or QR patterns.
-                    """.formatted(
-                    pageType,
-                    tencentStyleHint(templateSceneCode, styleCode),
-                    background
-            ).trim().replaceAll("\\s+", " ");
-            return truncatePrompt(prompt);
-        }
-        String identityPolicy = hasSourceImage
-                ? "Use the reference image only for identity."
-                : "Create a realistic actor portrait.";
+        String pageLabel = tencentPageLabel(pageType);
+        String referenceInstruction = coverPage
+                ? (hasSourceImage
+                ? "参考图1是用户源图，只用于人物身份与自然气质参考，不要复制背景文字、标签或版式。"
+                : "当前没有可用身份参考图，按封面人物气质生成。")
+                : (hasSourceImage
+                ? "参考图1是上一页底部裁切出的连续性参考带，只延续色彩、光线、材质和空间方向，不复制人物、文字、Logo、二维码或前景布局。"
+                : "当前没有可用连续性参考带，仅按文字连续性生成背景气质。");
+        String composition = coverPage
+                ? "构图：演员位于右侧，左侧留空给后续信息层，底部保留安静过渡区。"
+                : "构图：顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，无人物主体，页面以背景承载为主。";
+        String subject = coverPage
+                ? "页面职责：演员封面背景，允许保留身份感，但不要加入可读文字或多余装饰。"
+                : ("resume".equalsIgnoreCase(pageType)
+                ? "页面职责：履历页背景，以资料承载为主，不要重复封面级人物主视觉。"
+                : "页面职责：影像页背景，以照片墙和视频入口承载为主，不要重复封面级人物主视觉。");
         String prompt = """
-                Create a premium 9:16 full-bleed actor portrait background, output 2160x3840.
+                生成一张 9:16 全幅%s，输出 2160x3840。
                 %s
-                Composition: actor on the right, left side open for later overlays.
-                Style: %s. Background: %s.
-                Plain, unmarked, symbol-free. No readable text, pseudo-text, logos, watermarks, labels, stamps, UI shapes, or QR patterns.
+                %s
+                %s
+                风格：%s
+                背景：%s
+                安全要求：背景必须全幅铺满，连续性区域只用于延续背景氛围，不要复制人物、文字、Logo、标签、二维码或 UI 形状。
+                不要可读文字、水印、Logo、标签、二维码或任何 UI 形状。
+                Plain, unmarked, symbol-free.
                 """.formatted(
-                identityPolicy,
+                pageLabel,
+                referenceInstruction,
+                composition,
+                subject,
                 tencentStyleHint(templateSceneCode, styleCode),
                 background
         ).trim().replaceAll("\\s+", " ");
@@ -173,38 +180,58 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
     }
 
+    private String tencentPageLabel(String pageType) {
+        String normalized = StringUtils.hasText(pageType) ? pageType.trim().toLowerCase(Locale.ROOT) : "cover";
+        if ("resume".equals(normalized)) {
+            return "履历页背景图";
+        }
+        if ("gallery".equals(normalized)) {
+            return "影像页背景图";
+        }
+        return "封面背景图";
+    }
+
     private String tencentStyleHint(String templateSceneCode, String styleCode) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "Elegant period-drama portrait, warm ink texture, realistic costume, restrained premium mood.";
+            return "古风电影感，暖象牙和墨绿为主，丝绸衣料、薄雾江南、木桥与竹影作为背景气氛。";
         }
         if (normalized.contains("urban")) {
-            return "Modern urban portrait, soft studio depth, polished fashion mood.";
+            return "都市时装感，深灰冷调，柔和城市或影棚深度，克制霓虹边光。";
         }
         if (normalized.contains("classic")) {
-            return "Clean studio portrait, bright neutral background, approachable and realistic.";
+            return "经典棚拍感，暖灰和米白为主，真实柔光，稳重干净。";
         }
-        return "Premium actor portrait, realistic and polished.";
+        if (normalized.contains("commercial")) {
+            return "商业棚拍感，明亮中性，清爽软盒光，现代广告气质。";
+        }
+        if (normalized.contains("artistic")) {
+            return "艺术电影感，画廊氛围、戏剧性阴影、低饱和石墨与橄榄调。";
+        }
+        return "高级演员资料册背景，真实、克制、干净。";
     }
 
     private String tencentBackgroundHint(String templateSceneCode, String styleCode, String background) {
         String normalized = (styleCode + " " + templateSceneCode).toLowerCase(Locale.ROOT);
         if (normalized.contains("costume")) {
-            return "warm ivory ink texture, misty garden depth, bridge and bamboo silhouettes, soft red accents";
+            return "暖象牙色的墨色纹理、薄雾山水和低饱和暖红抽象点缀。";
         }
         if (normalized.contains("urban")) {
-            return "soft city or studio depth, charcoal gradients, restrained cool rim light";
+            return "深灰、钢蓝和冷白的层次，带柔和城市或影棚深度。";
         }
         if (normalized.contains("commercial")) {
-            return "premium studio backdrop, soft grey or white gradients";
+            return "干净的白灰和浅香槟层次，保持明亮、通透、低噪点。";
         }
         if (normalized.contains("artistic")) {
-            return "textured gallery wall, controlled shadows, muted olive and rust accents";
+            return "画廊感的纹理墙面、克制阴影和低饱和色块。";
+        }
+        if (normalized.contains("classic")) {
+            return "暖灰、米白和淡香槟的柔和层次，带轻微胶片颗粒。";
         }
         if (StringUtils.hasText(background)) {
             return compactText(sanitizeForTencentPrompt(background), 130);
         }
-        return "warm studio texture, soft film grain, neutral matte surfaces";
+        return "低细节、全幅铺开的中性色背景，只保留连续氛围。";
     }
 
     private String sanitizeForTencentPrompt(String value) {

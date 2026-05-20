@@ -19,6 +19,22 @@ public class AiProfileCardPageRespDTO {
 
     private String generatedImageUrl;
 
+    private String promptLocale;
+
+    private String continuityMode;
+
+    private String continuityReferenceUrl;
+
+    private String continuityReferenceSourcePageType;
+
+    private Integer continuityReferenceSourcePageNo;
+
+    private Double continuityBandRatio;
+
+    private String continuityBandRect;
+
+    private String continuityFailureReason;
+
     private String failureReason;
 
     private LocalDateTime createTime;

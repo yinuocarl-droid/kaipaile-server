@@ -13,6 +13,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -24,6 +25,7 @@ public class AiProfileCardPromptAgent {
     private static final int PROVIDER_CANVAS_WIDTH = 2160;
     private static final int PROVIDER_CANVAS_HEIGHT = 3840;
     private static final String FULL_BLEED_BACKGROUND_POLICY = "full-bleed edge-to-edge background layer only; no visible frame, border, paper sheet edge, card outline, document page, scroll edge, poster mat, boxed background, corner bracket, corner ornament, or enclosing decorative box";
+    private static final double CONTINUITY_BAND_RATIO = 0.15d;
 
     private final ObjectMapper objectMapper;
     private final AiProfileImageProviderRegistry providerRegistry;
@@ -88,10 +90,11 @@ public class AiProfileCardPromptAgent {
         StyleBrief style = resolveStyle(templateSceneCode, resolvedStyleCode);
         PageBrief page = resolvePageBrief(style, pageType, pageNo);
         Map<String, Object> brief = new LinkedHashMap<>();
-        brief.put("task", isCoverPage(page) ? "image_to_image_actor_profile_card_album_cover_background" : "layout_only_actor_profile_card_album_page_background");
+        brief.put("task", isCoverPage(page) ? "image_to_image_actor_profile_card_album_cover_background" : "image_to_image_actor_profile_card_album_continuity_background");
         brief.put("modelCode", modelCode);
         brief.put("templateSceneCode", templateSceneCode);
         brief.put("styleCode", resolvedStyleCode);
+        brief.put("promptLocale", "zh-CN");
         brief.put("canvas", Map.of(
                 "ratio", "9:16 vertical",
                 "targetSize", "2160x3840",
@@ -113,6 +116,14 @@ public class AiProfileCardPromptAgent {
                         "subjectPolicy", page.subjectPolicy(),
                         "sourceImageMode", sourceImageMode(page, sourceImageUrl)
                 )
+        ));
+        brief.put("continuity", Map.of(
+                "mode", sourceImageMode(page, sourceImageUrl),
+                "bandRatio", CONTINUITY_BAND_RATIO,
+                "referencePolicy", isCoverPage(page)
+                        ? "cover uses the user source image as identity reference; reserve a quiet bottom transition band"
+                        : "resume/gallery use the previous page tail crop as background continuity only; never copy people, text, logos or foreground UI",
+                "hardTail", "Plain, unmarked, symbol-free."
         ));
         brief.put("referenceQuality", Map.of(
                 "benchmark", style.referenceBenchmark(),
@@ -138,7 +149,9 @@ public class AiProfileCardPromptAgent {
         if (isCoverPage(page)) {
             qualityChecklist.add("portrait identity is consistent with source image");
             qualityChecklist.add("hands, eyes, hairline, clothing edges are clean");
+            qualityChecklist.add("bottom 15% remains calm, low-detail and extendable for the next page tail reference");
         } else {
+            qualityChecklist.add("top 15% continues the previous page tail reference band in color, light, material and spatial direction");
             qualityChecklist.add("no actor portrait, no human face, no body, no silhouette and no duplicated cover subject");
             qualityChecklist.add("page reads as a clean editorial background surface for deterministic information modules");
         }
@@ -154,7 +167,7 @@ public class AiProfileCardPromptAgent {
         brief.put("qualityChecklist", qualityChecklist);
 
         String promptJson = writeJson(brief);
-        String promptText = buildPromptText(profile, style, page, templateSceneCode, resolvedStyleCode, sourceImageUrl, promptJson);
+        String promptText = buildPromptText(profile, style, page, templateSceneCode, resolvedStyleCode, sourceImageUrl);
         String negativePrompt = String.join(", ",
                 "readable text",
                 "Chinese characters",
@@ -208,15 +221,7 @@ public class AiProfileCardPromptAgent {
         if (!StringUtils.hasText(sourceImageUrl)) {
             return "";
         }
-        String normalizedPageType = normalizePageType(pageType);
-        if ("cover".equals(normalizedPageType)) {
-            return sourceImageUrl;
-        }
-        String normalizedProviderCode = StringUtils.hasText(providerCode) ? providerCode.trim() : "";
-        if ("openai".equals(normalizedProviderCode) || "kplyyk".equals(normalizedProviderCode)) {
-            return sourceImageUrl;
-        }
-        return "";
+        return sourceImageUrl.trim();
     }
 
     private String normalizePageType(String pageType) {
@@ -231,7 +236,7 @@ public class AiProfileCardPromptAgent {
         if (isCoverPage(page)) {
             return StringUtils.hasText(sourceImageUrl) ? "identity_reference" : "none";
         }
-        return StringUtils.hasText(sourceImageUrl) ? "loose_palette_reference_only_no_identity" : "none";
+        return StringUtils.hasText(sourceImageUrl) ? "tail_reference_only_no_identity" : "text_continuity_only";
     }
 
     private String buildPromptText(ActorProfileDTO profile,
@@ -239,78 +244,137 @@ public class AiProfileCardPromptAgent {
                                    PageBrief page,
                                    String templateSceneCode,
                                    String styleCode,
-                                   String sourceImageUrl,
-                                   String promptJson) {
+                                   String sourceImageUrl) {
         return """
-                Create a high-end vertical actor profile-card album background layer.
+                生成一张 9:16 全幅演员资料册背景图，输出 2160x3840。
+                页面：第%d/3页，%s。
                 %s
-
-                Fixed composition:
-                - Canvas: 9:16 vertical poster, target 2160x3840.
-                - Album page: pageNo=%d/3, pageType=%s, role=%s.
-                - Authoritative layout coordinate system: mini-program design canvas 750x1334. All safe zones below are designed in that coordinate system and scaled to the 2160x3840 provider output.
-                - This is only the visual background layer. Mini program native components will render all final text, photos, QR code and contact UI later.
-                - layoutPreset=%s, textTheme=%s, panelTheme=%s.
-                - Background boundary policy: %s.
-                - The image must read as one continuous full-screen scene behind mini-program foreground components, like the urban style reference, without any enclosing visual shell.
-                - Subject policy: %s.
-                - Keep the page safe areas clean for mini-program-rendered foreground modules: %s.
-                - Keep the deterministic content regions as %s:
-                  %s
-                - Page composition goal: %s.
-                - Do not draw hard information cards, final borders, section labels, rows, chip shapes, thumbnails, video-player UI or other foreground components. The mini program will render those deterministically.
-                - Background material: %s.
-                - Do not render any words, Chinese characters, letters, numbers, QR code, watermark, logo, contact info or UI labels inside the image.
-
-                Visual style:
-                templateSceneCode=%s, styleCode=%s
-                %s
-
-                Actor profile signals to guide styling, wardrobe and mood only, not as rendered text:
-                %s
-
-                Model-independent brief:
-                %s
+                构图：%s
+                页面职责：%s
+                风格：%s
+                背景：%s
+                人物气质参考：%s
+                安全要求：背景必须全幅铺满，底部保留安静过渡区，真实业务文字、照片、二维码、联系方式和前景组件都交给后续渲染。
+                不要可读文字、水印、Logo、标签、二维码或任何 UI 形状。
+                Plain, unmarked, symbol-free.
                 """.formatted(
-                sourceReferenceInstruction(page, sourceImageUrl),
                 page.pageNo(),
-                page.pageType(),
-                page.roleDescription(),
-                style.layoutPreset(),
-                style.textTheme(),
-                style.panelTheme(),
-                FULL_BLEED_BACKGROUND_POLICY,
-                page.subjectPolicy(),
-                page.identitySafeArea(),
-                page.safeSurfaceTone(),
-                buildReadableLayoutRegions(page),
-                page.composition(),
-                style.backgroundMaterial(),
-                templateSceneCode,
-                styleCode,
-                style.visualDirection(),
-                buildReadableProfileSignals(profile),
-                promptJson
+                chinesePageLabel(page.pageType()),
+                sourceReferenceInstruction(page, sourceImageUrl),
+                chinesePageComposition(page.pageType()),
+                chinesePageRole(page.pageType()),
+                chineseStyleHint(templateSceneCode, styleCode, style),
+                chineseBackgroundHint(templateSceneCode, styleCode, style.backgroundMaterial()),
+                buildChineseProfileSignals(profile)
         );
     }
 
     private String sourceReferenceInstruction(PageBrief page, String sourceImageUrl) {
         if (isCoverPage(page)) {
             if (!StringUtils.hasText(sourceImageUrl)) {
-                return "Create a realistic actor cover portrait with natural face detail and clean body proportion.";
+                return "当前没有可用身份参考图时，按封面人物气质生成，但不要加入可读文字、水印、Logo、标签、二维码或多余前景组件。";
             }
-            return """
-                    Use reference image #1 as the actor identity source: %s
-                    Preserve the actor's recognizable face, age impression, hairstyle direction, body proportion and natural skin texture.
-                    """.formatted(sourceImageUrl).trim();
+            return "参考图1是用户源图，只用于人物身份与自然气质参考，保留脸型、年龄感、发型方向和身体比例，不要复制背景文字、标签或版式。";
         }
         if (!StringUtils.hasText(sourceImageUrl)) {
-            return "This is a layout-only information page background. Do not create or place any actor portrait, human face, body, silhouette or duplicated cover subject.";
+            return "当前没有可用连续性参考带，仅按文字连续性生成背景气质，不要生成人物、文字、Logo、标签、二维码或卡片布局。";
         }
-        return """
-                Reference image #1 is only a loose palette and lighting reference, not an identity or subject to preserve: %s
-                Do not reproduce the actor. Remove all human face/body/silhouette cues and create an abstract editorial surface background only.
-                """.formatted(sourceImageUrl).trim();
+        return "参考图1是上一页底部裁切出的连续性参考带，只延续色彩、光线、材质和空间方向，不复制人物、文字、Logo、二维码或前景布局。";
+    }
+
+    private String chinesePageLabel(String pageType) {
+        return switch (normalizePageType(pageType)) {
+            case "resume" -> "履历页";
+            case "gallery" -> "影像页";
+            default -> "封面页";
+        };
+    }
+
+    private String chinesePageRole(String pageType) {
+        return switch (normalizePageType(pageType)) {
+            case "resume" -> "以履历信息背景承载为主，给标题、基本信息、技能、简介和工作经历模块留出安静底面";
+            case "gallery" -> "以照片墙和视频入口背景承载为主，给图片宫格、作品图和视频入口留出安静底面";
+            default -> "以演员身份主视觉为主，左侧留给后续信息层，底部预留连续过渡区";
+        };
+    }
+
+    private String chinesePageComposition(String pageType) {
+        return switch (normalizePageType(pageType)) {
+            case "resume" -> "顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，只延续背景氛围，不复制人物和文字；无人物主体，画面以资料背景为主。";
+            case "gallery" -> "顶部约 15% 延续上一页底部的色彩、光线、材质和空间方向，只延续背景氛围，不复制人物和文字；无人物主体，画面以照片墙和视频入口背景为主。";
+            default -> "演员位于右侧，左侧留空给后续信息层，页面底部保留一段安静、低细节、可继续延伸的过渡区。";
+        };
+    }
+
+    private String chineseStyleHint(String templateSceneCode, String styleCode, StyleBrief style) {
+        String normalized = ((styleCode == null ? "" : styleCode) + " " + (templateSceneCode == null ? "" : templateSceneCode))
+                .toLowerCase(Locale.ROOT);
+        if (normalized.contains("costume")) {
+            return "古风电影感，暖象牙和墨绿为主，丝绸衣料、薄雾江南、木桥与竹影作为背景气氛，整体克制而高级。";
+        }
+        if (normalized.contains("urban")) {
+            return "都市时装感，深灰冷调，柔和城市或影棚深度，克制霓虹边光，整体干净利落。";
+        }
+        if (normalized.contains("classic")) {
+            return "经典棚拍感，暖灰和米白为主，真实柔光，稳重干净，带一点胶片质感。";
+        }
+        if (normalized.contains("commercial")) {
+            return "商业棚拍感，明亮中性，清爽软盒光，现代广告气质，画面保持简洁。";
+        }
+        if (normalized.contains("artistic")) {
+            return "艺术电影感，画廊氛围、戏剧性阴影、低饱和石墨与橄榄调，表达克制。";
+        }
+        return StringUtils.hasText(style.title())
+                ? style.title() + "；保持真实、克制、干净的演员资料册背景气质。"
+                : "高级演员资料册背景，真实、克制、干净。";
+    }
+
+    private String chineseBackgroundHint(String templateSceneCode, String styleCode, String background) {
+        String normalized = ((styleCode == null ? "" : styleCode) + " " + (templateSceneCode == null ? "" : templateSceneCode))
+                .toLowerCase(Locale.ROOT);
+        if (normalized.contains("costume")) {
+            return "暖象牙色的墨色纹理、薄雾山水和低饱和暖红抽象点缀，背景要像同一本资料册里自然延续出来的场景。";
+        }
+        if (normalized.contains("urban")) {
+            return "深灰、钢蓝和冷白的层次，带柔和城市或影棚深度，避免厚重纸感和过多装饰。";
+        }
+        if (normalized.contains("classic")) {
+            return "暖灰、米白和淡香槟的柔和层次，带轻微胶片颗粒，背景要安静、自然、耐看。";
+        }
+        if (normalized.contains("commercial")) {
+            return "干净的白灰和浅香槟层次，保持明亮、通透、低噪点。";
+        }
+        if (normalized.contains("artistic")) {
+            return "画廊感的纹理墙面、克制阴影和低饱和色块，背景只保留气氛，不要装饰性文字。";
+        }
+        if (StringUtils.hasText(background)) {
+            return background.trim();
+        }
+        return "低细节、全幅铺开的中性色背景，只保留连续氛围。";
+    }
+
+    private String buildChineseProfileSignals(ActorProfileDTO profile) {
+        List<String> parts = new ArrayList<>();
+        addChinesePart(parts, "性别", profile.getGender());
+        addChinesePart(parts, "年龄", profile.getAge() == null ? null : String.valueOf(profile.getAge()));
+        addChinesePart(parts, "身高", profile.getHeight() == null ? null : profile.getHeight() + "cm");
+        addChinesePart(parts, "体重", profile.getWeight() == null ? null : profile.getWeight() + "kg");
+        addChinesePart(parts, "城市", profile.getCity());
+        addChinesePart(parts, "体型", profile.getBodyType());
+        addChinesePart(parts, "发型", profile.getHairStyle());
+        if (!safeList(profile.getSkillTypes()).isEmpty()) {
+            parts.add("技能=" + String.join("、", safeList(profile.getSkillTypes()).stream().limit(6).toList()));
+        }
+        if (!safeList(profile.getLanguages()).isEmpty()) {
+            parts.add("语言=" + String.join("、", safeList(profile.getLanguages()).stream().limit(4).toList()));
+        }
+        return parts.isEmpty() ? "专业演员气质" : String.join("；", parts);
+    }
+
+    private void addChinesePart(List<String> parts, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            parts.add(label + "=" + value.trim());
+        }
     }
 
     private Map<String, Object> buildFixedLayout(StyleBrief style, PageBrief page) {
@@ -326,8 +390,8 @@ public class AiProfileCardPromptAgent {
         fixedLayout.put("coordinatePolicy", "design coordinates are the single source of truth; provider coordinates are scaled descriptions only");
         fixedLayout.put("primaryReferenceSlot", isCoverPage(page)
                 ? "reference image #1 is the actor identity source; preserve facial identity and natural proportions"
-                : "information/gallery page background; no actor portrait, no human face/body/silhouette, and no duplicated cover subject");
-        fixedLayout.put("sourceImageMode", isCoverPage(page) ? "identity_reference" : "layout_background_only");
+                : "reference image #1 is the previous page tail continuity band; preserve only background color, light, material and direction, never identity or text");
+        fixedLayout.put("sourceImageMode", isCoverPage(page) ? "identity_reference" : "tail_reference_only_no_identity");
         fixedLayout.put("subjectBox", page.subjectPolicy());
         fixedLayout.put("identitySafeArea", page.identitySafeArea());
         fixedLayout.put("safeSurfaceTone", page.safeSurfaceTone());

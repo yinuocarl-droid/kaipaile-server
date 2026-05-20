@@ -31,6 +31,22 @@ public class ActorAiProfileCardPage extends BaseEntity {
 
     private String negativePrompt;
 
+    private String promptLocale;
+
+    private String continuityMode;
+
+    private String continuityReferenceUrl;
+
+    private String continuityReferenceSourcePageType;
+
+    private Integer continuityReferenceSourcePageNo;
+
+    private Double continuityBandRatio;
+
+    private String continuityBandRect;
+
+    private String continuityFailureReason;
+
     private String providerCode;
 
     private String modelCode;

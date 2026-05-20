@@ -12,7 +12,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -43,36 +46,33 @@ public class AiGeneratedImageStorage {
 
     public String uploadFromUrl(String imageUrl, String folder) {
         String normalizedUrl = requireHttpImageUrl(imageUrl);
+        DownloadedImage downloadedImage = downloadImage(normalizedUrl);
+        return upload(downloadedImage.bytes(), resolveDownloadedContentType(downloadedImage.contentType(), normalizedUrl), folder);
+    }
+
+    public CroppedImageBand uploadBottomBandFromUrl(String imageUrl, String folder, double bandRatio) {
+        String normalizedUrl = requireHttpImageUrl(imageUrl);
+        DownloadedImage downloadedImage = downloadImage(normalizedUrl);
         try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(DOWNLOAD_CONNECT_TIMEOUT)
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder(URI.create(normalizedUrl))
-                    .timeout(DOWNLOAD_READ_TIMEOUT)
-                    .GET()
-                    .build();
-            HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
-            byte[] bytes = response.body();
-            if (response.statusCode() < 200 || response.statusCode() >= 300 || bytes == null || bytes.length == 0) {
-                throw new BizException("生成图片下载失败：" + response.statusCode());
+            BufferedImage source = ImageIO.read(new ByteArrayInputStream(downloadedImage.bytes()));
+            if (source == null) {
+                throw new BizException("生成图片内容无法解析");
             }
-            if (bytes.length > MAX_GENERATED_IMAGE_BYTES) {
-                throw new BizException("生成图片不能超过25MB");
+            double normalizedBandRatio = clampBandRatio(bandRatio);
+            int cropHeight = Math.max(1, Math.min(source.getHeight(), (int) Math.round(source.getHeight() * normalizedBandRatio)));
+            int cropTop = Math.max(0, source.getHeight() - cropHeight);
+            BufferedImage band = source.getSubimage(0, cropTop, source.getWidth(), cropHeight);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            if (!ImageIO.write(band, "png", output)) {
+                throw new BizException("连续性参考带编码失败");
             }
-            String contentType = response.headers()
-                    .firstValue("content-type")
-                    .map(value -> value.split(";")[0].trim().toLowerCase(Locale.ROOT))
-                    .orElse("");
-            return upload(bytes, resolveDownloadedContentType(contentType, normalizedUrl), folder);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            throw new BizException("生成图片下载被中断");
+            String bandUrl = upload(output.toByteArray(), "image/png", folder);
+            return new CroppedImageBand(bandUrl, source.getWidth(), source.getHeight(), cropTop, cropHeight, normalizedBandRatio);
         } catch (BizException error) {
             throw error;
         } catch (Exception error) {
-            log.warn("AI 生成图片下载失败: {}", normalizedUrl, error);
-            throw new BizException("生成图片下载失败：" + error.getMessage());
+            log.warn("AI 生成图片连续性裁切失败: {}", normalizedUrl, error);
+            throw new BizException("连续性参考带生成失败：" + error.getMessage());
         }
     }
 
@@ -103,6 +103,40 @@ public class AiGeneratedImageStorage {
         } catch (CosClientException error) {
             log.error("AI 生成图片上传 COS 失败", error);
             throw new BizException(ResultCode.FILE_UPLOAD_FAILED);
+        }
+    }
+
+    private DownloadedImage downloadImage(String normalizedUrl) {
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(DOWNLOAD_CONNECT_TIMEOUT)
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build();
+            HttpRequest request = HttpRequest.newBuilder(URI.create(normalizedUrl))
+                    .timeout(DOWNLOAD_READ_TIMEOUT)
+                    .GET()
+                    .build();
+            HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            byte[] bytes = response.body();
+            if (response.statusCode() < 200 || response.statusCode() >= 300 || bytes == null || bytes.length == 0) {
+                throw new BizException("生成图片下载失败：" + response.statusCode());
+            }
+            if (bytes.length > MAX_GENERATED_IMAGE_BYTES) {
+                throw new BizException("生成图片不能超过25MB");
+            }
+            String contentType = response.headers()
+                    .firstValue("content-type")
+                    .map(value -> value.split(";")[0].trim().toLowerCase(Locale.ROOT))
+                    .orElse("");
+            return new DownloadedImage(bytes, contentType);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new BizException("生成图片下载被中断");
+        } catch (BizException error) {
+            throw error;
+        } catch (Exception error) {
+            log.warn("AI 生成图片下载失败: {}", normalizedUrl, error);
+            throw new BizException("生成图片下载失败：" + error.getMessage());
         }
     }
 
@@ -185,5 +219,32 @@ public class AiGeneratedImageStorage {
     private String buildUrlPrefix() {
         return String.format("https://%s.cos.%s.myqcloud.com/",
                 cosConfig.getBucketName(), cosConfig.getRegion());
+    }
+
+    private double clampBandRatio(double bandRatio) {
+        if (Double.isNaN(bandRatio) || Double.isInfinite(bandRatio)) {
+            return 0.15d;
+        }
+        return Math.max(0.12d, Math.min(0.15d, bandRatio));
+    }
+
+    public record CroppedImageBand(
+            String imageUrl,
+            int sourceWidth,
+            int sourceHeight,
+            int cropTop,
+            int cropHeight,
+            double ratio
+    ) {
+
+        public String bandRect() {
+            return "x=0,y=%d,w=%d,h=%d,ratio=%.4f".formatted(cropTop, sourceWidth, cropHeight, ratio);
+        }
+    }
+
+    private record DownloadedImage(
+            byte[] bytes,
+            String contentType
+    ) {
     }
 }
