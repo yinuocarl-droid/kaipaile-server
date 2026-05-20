@@ -27,6 +27,8 @@ public class AiProfileCardTaskRespDTO {
 
     private String generatedImageUrl;
 
+    private AiProfileCardThemeRespDTO theme;
+
     private String failureReason;
 
     private List<AiProfileCardPageRespDTO> pages = new ArrayList<>();

@@ -29,6 +29,8 @@ public class AiProfileCardArtifactRespDTO {
 
     private String generatedImageUrl;
 
+    private AiProfileCardThemeRespDTO theme;
+
     private List<AiProfileCardPageRespDTO> pages = new ArrayList<>();
 
     private LocalDateTime createTime;

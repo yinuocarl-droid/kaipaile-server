@@ -2,48 +2,45 @@ package com.kaipai.module.server.ai.service.impl;
 
 import com.kaipai.common.exception.BizException;
 import com.kaipai.module.model.actor.dto.ActorProfileDTO;
-import com.kaipai.module.model.ai.entity.ActorAiProfileCardPage;
-import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
-import com.kaipai.module.model.ai.dto.AiProfileCardPageRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
+import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
+import com.kaipai.module.model.card.dto.ActorCardConfigSaveDTO;
 import com.kaipai.module.model.card.dto.ActorMyShareCardItemDTO;
 import com.kaipai.module.server.actor.mapper.ActorProfileMapper;
 import com.kaipai.module.server.actor.service.ActorProfileService;
 import com.kaipai.module.server.ai.config.AiProfileCardProperties;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardPageMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
-import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage.CroppedImageBand;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspection;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspector;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
+import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
 import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import com.kaipai.module.server.card.service.ActorCardConfigService;
 import com.kaipai.module.server.card.service.UserShareCardService;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AiProfileCardServiceImplTest {
@@ -64,7 +61,7 @@ class AiProfileCardServiceImplTest {
     }
 
     @Test
-    void generateCoverPageShouldRetryWhenQualityGateRejectsFirstImage() {
+    void generateCoverImageWithQualityGateShouldRetryWhenFirstImageIsRejected() {
         AiProfileCardProperties properties = new AiProfileCardProperties();
         properties.setCoverQualityGateEnabled(true);
         properties.setCoverQualityMaxAttempts(2);
@@ -85,29 +82,17 @@ class AiProfileCardServiceImplTest {
                 qualityInspector));
         doReturn(true).when(service).updateById(any(ActorAiProfileCardTask.class));
 
-        ActorAiProfileCardTask task = new ActorAiProfileCardTask();
-        task.setTaskId("aipf_retry");
-        task.setProviderCode("tencent-hunyuan");
-        task.setTemplateSceneCode("costume");
-        task.setStyleCode("costume");
+        ActorAiProfileCardTask task = newTask();
         task.setSourceImageUrl("https://cdn.example.com/source.png");
 
-        ActorAiProfileCardPage page = new ActorAiProfileCardPage();
-        page.setPageId(7L);
-        page.setTaskId(task.getTaskId());
-        page.setPageType("cover");
-        page.setPageNo(1);
-
         AiProfileCardPrompt prompt = new AiProfileCardPrompt("{}", "prompt", "negative");
-        when(promptAgent.generatePage(
+        when(promptAgent.generate(
                 any(ActorProfileDTO.class),
                 anyString(),
                 eq("tencent-hunyuan"),
-                eq("costume"),
-                eq("costume"),
-                eq("https://cdn.example.com/source.png"),
-                eq("cover"),
-                eq(1)))
+                eq("classic"),
+                eq("classic"),
+                eq("https://cdn.example.com/source.png")))
                 .thenReturn(
                         new AiProfileCardGeneration(
                                 "tencent-hunyuan",
@@ -130,28 +115,24 @@ class AiProfileCardServiceImplTest {
 
         String imageUrl = ReflectionTestUtils.invokeMethod(
                 service,
-                "generateCoverPageWithQualityGate",
+                "generateCoverImageWithQualityGate",
                 new ActorProfileDTO(),
-                task,
-                page,
-                "cover",
-                1);
+                task);
 
         assertEquals("https://cos.example.com/good.png", imageUrl);
-        verify(promptAgent, times(2)).generatePage(
+        verify(promptAgent, times(2)).generate(
                 any(ActorProfileDTO.class),
                 anyString(),
                 eq("tencent-hunyuan"),
-                eq("costume"),
-                eq("costume"),
-                eq("https://cdn.example.com/source.png"),
-                eq("cover"),
-                eq(1));
+                eq("classic"),
+                eq("classic"),
+                eq("https://cdn.example.com/source.png"));
         verify(qualityInspector, times(2)).inspectCover(anyString(), eq("tencent-hunyuan"));
+        verifyNoInteractions(pageMapper);
     }
 
     @Test
-    void runGenerationShouldPassTailReferenceBetweenPagesAndSkipRendererForPageTwoAndThree() {
+    void runGenerationShouldGenerateOnlySingleCoverAndPersistThemeColors() {
         AiProfileCardProperties properties = new AiProfileCardProperties();
         properties.setCoverQualityGateEnabled(false);
         properties.setCoverQualityMaxAttempts(1);
@@ -186,154 +167,82 @@ class AiProfileCardServiceImplTest {
         profile.setSkillTypes(List.of("表演", "舞蹈"));
         when(actorProfileService.mine(7L)).thenReturn(profile);
 
-        when(pageMapper.selectList(any())).thenReturn(List.of(
-                newPage(1L, "aipf_flow", "cover"),
-                newPage(2L, "aipf_flow", "resume"),
-                newPage(3L, "aipf_flow", "gallery")));
-        when(pageMapper.updateById(any(ActorAiProfileCardPage.class))).thenReturn(1);
-        when(pageMapper.update(any(), any())).thenReturn(1);
-
-        String coverTailReferenceUrl = "https://cdn.example.com/crop/cover-tail.png";
-        String resumeTailReferenceUrl = "https://cdn.example.com/crop/resume-tail.png";
-        List<GenerationCall> calls = new ArrayList<>();
-        when(promptAgent.generatePage(
+        AiProfileCardPrompt prompt = new AiProfileCardPrompt("{\"flowTheme\":true}", "prompt", "negative");
+        when(promptAgent.generate(
                 any(ActorProfileDTO.class),
                 anyString(),
                 eq("tencent-hunyuan"),
                 eq("classic"),
                 eq("classic"),
-                anyString(),
-                anyString(),
-                anyInt()))
-                .thenAnswer(invocation -> {
-                    String sourceImageUrl = invocation.getArgument(5, String.class);
-                    String pageType = invocation.getArgument(6, String.class);
-                    int pageNo = invocation.getArgument(7, Integer.class);
-                    calls.add(new GenerationCall(pageType, pageNo, sourceImageUrl));
-                    String tempImageUrl = switch (pageType) {
-                        case "cover" -> "https://tmp.example.com/cover.png";
-                        case "resume" -> "https://tmp.example.com/resume.png";
-                        default -> "https://tmp.example.com/gallery.png";
-                    };
-                    return new AiProfileCardGeneration(
-                            "tencent-hunyuan",
-                            "hunyuan-image-3.0",
-                            new AiProfileCardPrompt("{}", "prompt", "negative"),
-                            AiProfileImageGenerationResult.imageUrl(tempImageUrl));
-                });
-        when(imageStorage.uploadFromUrl(anyString(), eq("ai-profile-card"))).thenAnswer(invocation -> {
-            String imageUrl = invocation.getArgument(0, String.class);
-            if ("https://tmp.example.com/cover.png".equals(imageUrl)) {
-                return "https://cdn.example.com/cover.png";
-            }
-            if ("https://tmp.example.com/resume.png".equals(imageUrl)) {
-                return "https://cdn.example.com/resume.png";
-            }
-            if ("https://tmp.example.com/gallery.png".equals(imageUrl)) {
-                return "https://cdn.example.com/gallery.png";
-            }
-            return "https://cdn.example.com/persisted.png";
-        });
-        when(imageStorage.uploadBottomBandFromUrl(anyString(), eq("ai-profile-card/continuity"), anyDouble()))
-                .thenAnswer(invocation -> {
-                    String imageUrl = invocation.getArgument(0, String.class);
-                    if ("https://cdn.example.com/cover.png".equals(imageUrl)) {
-                        return new CroppedImageBand(coverTailReferenceUrl, 2160, 3840, 3264, 576, 0.15d);
-                    }
-                    if ("https://cdn.example.com/resume.png".equals(imageUrl)) {
-                        return new CroppedImageBand(resumeTailReferenceUrl, 2160, 3840, 3264, 576, 0.15d);
-                    }
-                    return new CroppedImageBand("https://cdn.example.com/unused.png", 2160, 3840, 3264, 576, 0.15d);
-                });
+                eq("https://cdn.example.com/source.png")))
+                .thenReturn(new AiProfileCardGeneration(
+                        "tencent-hunyuan",
+                        "hunyuan-image-3.0",
+                        prompt,
+                        AiProfileImageGenerationResult.imageUrl("https://tmp.example.com/cover.png")));
+        when(imageStorage.uploadFromUrl("https://tmp.example.com/cover.png", "ai-profile-card"))
+                .thenReturn("https://cdn.example.com/cover.png");
 
         ActorMyShareCardItemDTO card = new ActorMyShareCardItemDTO();
         card.setCardId(88L);
         when(userShareCardService.createCard(eq(7L), any())).thenReturn(card);
 
-        initializePageTableInfo();
         ReflectionTestUtils.invokeMethod(service, "runGeneration", "aipf_flow");
 
-        assertEquals(List.of(
-                new GenerationCall("cover", 1, "https://cdn.example.com/source.png"),
-                new GenerationCall("resume", 2, coverTailReferenceUrl),
-                new GenerationCall("gallery", 3, resumeTailReferenceUrl)
-        ), calls);
-        verify(imageStorage, atLeastOnce()).uploadBottomBandFromUrl("https://cdn.example.com/cover.png", "ai-profile-card/continuity", 0.15d);
-        verify(imageStorage, atLeastOnce()).uploadBottomBandFromUrl("https://cdn.example.com/resume.png", "ai-profile-card/continuity", 0.15d);
+        verify(promptAgent, times(1)).generate(
+                any(ActorProfileDTO.class),
+                anyString(),
+                eq("tencent-hunyuan"),
+                eq("classic"),
+                eq("classic"),
+                eq("https://cdn.example.com/source.png"));
+        verify(imageStorage, never()).uploadBottomBandFromUrl(anyString(), anyString(), anyDouble());
+        verifyNoInteractions(pageMapper);
+
+        ArgumentCaptor<ActorCardConfigSaveDTO> configCaptor = ArgumentCaptor.forClass(ActorCardConfigSaveDTO.class);
+        verify(actorCardConfigService).saveActorConfig(eq(7L), configCaptor.capture());
+        ActorCardConfigSaveDTO config = configCaptor.getValue();
+        assertEquals(88L, config.getShareCardId());
+        assertEquals("#eee3cf", config.getBackgroundColor());
+        assertEquals("#8c6f4f", config.getPrimaryColor());
+        assertEquals("#eadfce", config.getAccentColor());
+        assertEquals(List.of("https://cdn.example.com/cover.png", "https://cdn.example.com/source.png"), config.getHighlightedPhotos());
     }
 
     @Test
-    void taskShouldExposeContinuityFieldsOnReturnedPages() {
-        AiProfileCardProperties properties = new AiProfileCardProperties();
-        ActorProfileService actorProfileService = mock(ActorProfileService.class);
-        ActorProfileMapper actorProfileMapper = mock(ActorProfileMapper.class);
-        AiImageProviderConfigService aiImageProviderConfigService = mock(AiImageProviderConfigService.class);
-        AiProfileCardPromptAgent promptAgent = mock(AiProfileCardPromptAgent.class);
-        UserShareCardService userShareCardService = mock(UserShareCardService.class);
-        ActorCardConfigService actorCardConfigService = mock(ActorCardConfigService.class);
+    void taskShouldExposeThemeAndEmptyPagesForSingleCoverFlow() {
         AiGeneratedImageStorage imageStorage = mock(AiGeneratedImageStorage.class);
         ActorAiProfileCardPageMapper pageMapper = mock(ActorAiProfileCardPageMapper.class);
-        AiProfileCardImageQualityInspector qualityInspector = mock(AiProfileCardImageQualityInspector.class);
         AiProfileCardServiceImpl service = spy(new AiProfileCardServiceImpl(
-                actorProfileService,
-                actorProfileMapper,
-                properties,
-                aiImageProviderConfigService,
-                promptAgent,
-                userShareCardService,
-                actorCardConfigService,
+                null,
+                null,
+                new AiProfileCardProperties(),
+                null,
+                null,
+                null,
+                null,
                 imageStorage,
                 pageMapper,
-                qualityInspector));
-        doReturn(newTask()).when(service).getById("aipf_flow");
+                null));
 
-        ActorAiProfileCardPage cover = newPage(1L, "aipf_flow", "cover");
-        cover.setStatus("success");
-        cover.setGeneratedImageUrl("https://cdn.example.com/cover.png");
-        cover.setContinuityMode("identity_reference");
-        cover.setContinuityReferenceUrl("https://cdn.example.com/source.png");
-
-        ActorAiProfileCardPage resume = newPage(2L, "aipf_flow", "resume");
-        resume.setStatus("success");
-        resume.setGeneratedImageUrl("https://cdn.example.com/resume.png");
-        resume.setContinuityMode("tail_reference");
-        resume.setContinuityReferenceUrl("https://cdn.example.com/crop/cover-tail.png");
-        resume.setContinuityReferenceSourcePageType("cover");
-        resume.setContinuityReferenceSourcePageNo(1);
-        resume.setContinuityBandRatio(0.15d);
-        resume.setContinuityBandRect("x=0-2160 y=3264-3840");
-
-        ActorAiProfileCardPage gallery = newPage(3L, "aipf_flow", "gallery");
-        gallery.setStatus("success");
-        gallery.setGeneratedImageUrl("https://cdn.example.com/gallery.png");
-        gallery.setContinuityMode("tail_reference");
-        gallery.setContinuityReferenceUrl("https://cdn.example.com/crop/resume-tail.png");
-        gallery.setContinuityReferenceSourcePageType("resume");
-        gallery.setContinuityReferenceSourcePageNo(2);
-        gallery.setContinuityBandRatio(0.15d);
-        gallery.setContinuityBandRect("x=0-2160 y=3264-3840");
-
-        when(pageMapper.selectList(any())).thenReturn(List.of(cover, resume, gallery));
-        when(pageMapper.updateById(any(ActorAiProfileCardPage.class))).thenReturn(1);
-        when(pageMapper.update(any(), any())).thenReturn(1);
+        ActorAiProfileCardTask task = newTask();
+        task.setStatus("success");
+        task.setTemplateSceneCode("urban");
+        task.setStyleCode("urban");
+        task.setShareCardId(88L);
+        task.setGeneratedImageUrl("https://cdn.example.com/cover.png");
+        when(imageStorage.isManagedUrl("https://cdn.example.com/cover.png")).thenReturn(true);
+        doReturn(task).when(service).getById("aipf_flow");
 
         AiProfileCardTaskRespDTO dto = service.task(7L, "aipf_flow");
 
-        assertEquals(3, dto.getPages().size());
-        AiProfileCardPageRespDTO resumeDto = dto.getPages().get(1);
-        assertEquals("tail_reference", resumeDto.getContinuityMode());
-        assertEquals("https://cdn.example.com/crop/cover-tail.png", resumeDto.getContinuityReferenceUrl());
-        assertEquals("cover", resumeDto.getContinuityReferenceSourcePageType());
-        assertEquals(1, resumeDto.getContinuityReferenceSourcePageNo());
-        assertEquals(0.15d, resumeDto.getContinuityBandRatio());
-        assertEquals("x=0-2160 y=3264-3840", resumeDto.getContinuityBandRect());
-        AiProfileCardPageRespDTO galleryDto = dto.getPages().get(2);
-        assertEquals("tail_reference", galleryDto.getContinuityMode());
-        assertEquals("https://cdn.example.com/crop/resume-tail.png", galleryDto.getContinuityReferenceUrl());
-        assertEquals("resume", galleryDto.getContinuityReferenceSourcePageType());
-        assertEquals(2, galleryDto.getContinuityReferenceSourcePageNo());
-        assertEquals(0.15d, galleryDto.getContinuityBandRatio());
-        assertEquals("x=0-2160 y=3264-3840", galleryDto.getContinuityBandRect());
+        assertEquals("aipf_flow", dto.getTaskId());
+        assertEquals("https://cdn.example.com/cover.png", dto.getGeneratedImageUrl());
+        assertNotNull(dto.getTheme());
+        assertEquals("#0f1115", dto.getTheme().getBackgroundColor());
+        assertEquals("#181d24", dto.getTheme().getSurfaceColor());
+        assertTrue(dto.getPages().isEmpty());
+        verifyNoInteractions(pageMapper);
     }
 
     private ActorAiProfileCardTask newTask() {
@@ -341,29 +250,11 @@ class AiProfileCardServiceImplTest {
         task.setTaskId("aipf_flow");
         task.setUserId(7L);
         task.setProviderCode("tencent-hunyuan");
+        task.setModelCode("hunyuan-image-3.0");
         task.setTemplateSceneCode("classic");
         task.setStyleCode("classic");
         task.setSourceImageUrl("https://cdn.example.com/source.png");
         task.setStatus("pending");
         return task;
-    }
-
-    private ActorAiProfileCardPage newPage(Long pageId, String taskId, String pageType) {
-        ActorAiProfileCardPage page = new ActorAiProfileCardPage();
-        page.setPageId(pageId);
-        page.setTaskId(taskId);
-        page.setPageType(pageType);
-        page.setPageNo(pageId.intValue());
-        page.setProviderCode("tencent-hunyuan");
-        page.setModelCode("hunyuan-image-3.0");
-        page.setStatus("pending");
-        return page;
-    }
-
-    private void initializePageTableInfo() {
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), "test"), ActorAiProfileCardPage.class);
-    }
-
-    private record GenerationCall(String pageType, int pageNo, String sourceImageUrl) {
     }
 }

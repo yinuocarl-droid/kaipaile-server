@@ -11,7 +11,7 @@ import com.kaipai.module.model.actor.entity.ActorProfile;
 import com.kaipai.module.model.ai.dto.AiProfileCardArtifactRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardGenerateRespDTO;
-import com.kaipai.module.model.ai.dto.AiProfileCardPageRespDTO;
+import com.kaipai.module.model.ai.dto.AiProfileCardThemeRespDTO;
 import com.kaipai.module.model.ai.dto.AiProfileCardTaskRespDTO;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardPage;
 import com.kaipai.module.model.ai.entity.ActorAiProfileCardTask;
@@ -25,13 +25,13 @@ import com.kaipai.module.server.ai.config.AiProfileCardProperties;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardPageMapper;
 import com.kaipai.module.server.ai.mapper.ActorAiProfileCardTaskMapper;
 import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
-import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage.CroppedImageBand;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardGeneration;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspection;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardImageQualityInspector;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPrompt;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardPromptAgent;
 import com.kaipai.module.server.ai.profilecard.AiProfileCardProviderDescriptor;
+import com.kaipai.module.server.ai.profilecard.AiProfileCardThemeResolver;
 import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
 import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
 import com.kaipai.module.server.ai.service.AiProfileCardService;
@@ -62,18 +62,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
     private static final String STATUS_RUNNING = "running";
     private static final String STATUS_SUCCESS = "success";
     private static final String STATUS_FAILED = "failed";
-    private static final String PROMPT_LOCALE_ZH_CN = "zh-CN";
-    private static final String CONTINUITY_MODE_IDENTITY = "identity_reference";
-    private static final String CONTINUITY_MODE_TAIL = "tail_reference";
-    private static final String CONTINUITY_MODE_TEXT_ONLY = "text_only";
-    private static final double CONTINUITY_BAND_RATIO = 0.15d;
-    private static final String CONTINUITY_BAND_FOLDER = "ai-profile-card/continuity";
-    private static final List<AlbumPageDef> ALBUM_PAGE_DEFS = List.of(
-            new AlbumPageDef(1, "cover"),
-            new AlbumPageDef(2, "resume"),
-            new AlbumPageDef(3, "gallery")
-    );
-
     private final ActorProfileService actorProfileService;
     private final ActorProfileMapper actorProfileMapper;
     private final AiProfileCardProperties properties;
@@ -110,7 +98,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         task.setGenerationMode(defaultText(properties.getGenerationMode(), "image_to_image"));
         task.setStatus(STATUS_PENDING);
         save(task);
-        createInitialPages(task);
 
         aiProfileCardTaskExecutor.execute(() -> runGeneration(task.getTaskId()));
 
@@ -209,63 +196,9 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         markRunning(taskId);
         try {
             ActorProfileDTO profile = actorProfileService.mine(task.getUserId());
-            List<ActorAiProfileCardPage> pages = ensurePages(task);
-            String generatedImageUrl = "";
-            for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
-                ActorAiProfileCardPage page = findPage(pages, pageDef);
-                ContinuityReference continuity = resolvePageContinuityReference(task, pages, page, pageDef);
-                try {
-                    String pageImageUrl;
-                    if (isRealGeneratedPage(page, task.getSourceImageUrl())) {
-                        pageImageUrl = page.getGeneratedImageUrl();
-                    } else {
-                        markPageRunning(page);
-                        if ("cover".equals(pageDef.pageType())) {
-                            pageImageUrl = generateCoverPageWithQualityGate(
-                                    profile,
-                                    task,
-                                    page,
-                                    pageDef,
-                                    continuity.referenceUrl());
-                        } else {
-                            AiProfileCardGeneration generation = promptAgent.generatePage(
-                                    profile,
-                                    taskId + "_" + pageDef.pageType(),
-                                    task.getProviderCode(),
-                                    task.getTemplateSceneCode(),
-                                    task.getStyleCode(),
-                                    continuity.referenceUrl(),
-                                    pageDef.pageType(),
-                                    pageDef.pageNo());
-                            savePagePrompt(page, generation.prompt());
-                            savePrompt(taskId, generation.prompt());
-                            pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), continuity.referenceUrl());
-                        }
-                        markPageSuccess(page, pageImageUrl);
-                        page.setStatus(STATUS_SUCCESS);
-                        page.setGeneratedImageUrl(pageImageUrl);
-                    }
-                    if ("cover".equals(pageDef.pageType())) {
-                        generatedImageUrl = pageImageUrl;
-                    }
-                    prepareNextPageContinuityReference(pages, page, pageDef);
-                } catch (Exception error) {
-                    markPageFailed(page, error.getMessage());
-                    throw error;
-                }
-            }
-
-            if (!StringUtils.hasText(generatedImageUrl)) {
-                generatedImageUrl = loadPages(taskId).stream()
-                        .filter(page -> "cover".equals(page.getPageType()))
-                        .filter(page -> isRealGeneratedPage(page, task.getSourceImageUrl()))
-                        .map(ActorAiProfileCardPage::getGeneratedImageUrl)
-                        .findFirst()
-                        .orElseThrow(() -> new BizException("AI 分享图封面页生成失败"));
-            }
+            String generatedImageUrl = generateCoverImageWithQualityGate(profile, task);
             ActorMyShareCardItemDTO card = createOrGetGeneratedShareCard(task);
             saveGeneratedShareCardConfig(task, profile, card, generatedImageUrl);
-            markPagesShareCardId(taskId, card.getCardId());
             markSuccess(taskId, card.getCardId(), generatedImageUrl);
         } catch (Exception error) {
             log.warn("AI profile card generation failed, taskId={}", taskId, error);
@@ -273,28 +206,21 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         }
     }
 
-    private String generateCoverPageWithQualityGate(ActorProfileDTO profile,
-                                                    ActorAiProfileCardTask task,
-                                                    ActorAiProfileCardPage page,
-                                                    AlbumPageDef pageDef,
-                                                    String sourceImageUrl) {
+    private String generateCoverImageWithQualityGate(ActorProfileDTO profile,
+                                                     ActorAiProfileCardTask task) {
         int maxAttempts = Math.max(1, properties.getCoverQualityMaxAttempts());
         RuntimeException lastError = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            markPageRunning(page);
             try {
-                AiProfileCardGeneration generation = promptAgent.generatePage(
+                AiProfileCardGeneration generation = promptAgent.generate(
                         profile,
-                        task.getTaskId() + "_" + pageDef.pageType() + "_try" + attempt,
+                        task.getTaskId() + "_cover_try" + attempt,
                         task.getProviderCode(),
                         task.getTemplateSceneCode(),
                         task.getStyleCode(),
-                        sourceImageUrl,
-                        pageDef.pageType(),
-                        pageDef.pageNo());
-                savePagePrompt(page, generation.prompt());
+                        task.getSourceImageUrl());
                 savePrompt(task.getTaskId(), generation.prompt());
-                String pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), sourceImageUrl);
+                String pageImageUrl = resolveGeneratedImageUrl(generation.imageResult(), task.getSourceImageUrl());
                 if (properties.isCoverQualityGateEnabled()) {
                     AiProfileCardImageQualityInspection inspection = imageQualityInspector.inspectCover(
                             pageImageUrl,
@@ -306,27 +232,17 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 return pageImageUrl;
             } catch (RuntimeException error) {
                 lastError = error;
-                markPageFailed(page, buildCoverRetryFailureReason(attempt, maxAttempts, error.getMessage()));
                 if (attempt >= maxAttempts) {
                     throw error;
                 }
             } catch (Exception error) {
                 lastError = new BizException(error.getMessage());
-                markPageFailed(page, buildCoverRetryFailureReason(attempt, maxAttempts, error.getMessage()));
                 if (attempt >= maxAttempts) {
                     throw lastError;
                 }
             }
         }
         throw lastError == null ? new BizException("AI 分享图封面页生成失败") : lastError;
-    }
-
-    private String generateCoverPageWithQualityGate(ActorProfileDTO profile,
-                                                    ActorAiProfileCardTask task,
-                                                    ActorAiProfileCardPage page,
-                                                    String pageType,
-                                                    int pageNo) {
-        return generateCoverPageWithQualityGate(profile, task, page, new AlbumPageDef(pageNo, pageType), task.getSourceImageUrl());
     }
 
     private String buildCoverRetryFailureReason(int attempt, int maxAttempts, String detail) {
@@ -337,198 +253,23 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         return "封面成图质检未通过，已自动重试（" + attempt + "/" + maxAttempts + "）：" + reason;
     }
 
-    private ContinuityReference resolvePageContinuityReference(ActorAiProfileCardTask task,
-                                                               List<ActorAiProfileCardPage> pages,
-                                                               ActorAiProfileCardPage page,
-                                                               AlbumPageDef pageDef) {
-        if ("cover".equals(pageDef.pageType())) {
-            ContinuityReference continuity = ContinuityReference.identity(task.getSourceImageUrl());
-            savePageContinuity(page, continuity);
-            return continuity;
-        }
-
-        ContinuityReference existing = continuityFromPage(page);
-        if (StringUtils.hasText(existing.referenceUrl())) {
-            return existing;
-        }
-
-        ActorAiProfileCardPage previousPage = findPageByNo(pages, pageDef.pageNo() - 1);
-        if (previousPage == null || !StringUtils.hasText(previousPage.getGeneratedImageUrl())) {
-            ContinuityReference continuity = ContinuityReference.textOnly("上一页连续性参考带缺失");
-            savePageContinuity(page, continuity);
-            return continuity;
-        }
-
-        try {
-            CroppedImageBand band = generatedImageStorage.uploadBottomBandFromUrl(
-                    previousPage.getGeneratedImageUrl(),
-                    CONTINUITY_BAND_FOLDER,
-                    CONTINUITY_BAND_RATIO);
-            ContinuityReference continuity = ContinuityReference.tail(
-                    band.imageUrl(),
-                    previousPage.getPageNo(),
-                    previousPage.getPageType(),
-                    band.ratio(),
-                    band.bandRect());
-            savePageContinuity(page, continuity);
-            return continuity;
-        } catch (Exception error) {
-            ContinuityReference continuity = ContinuityReference.textOnly("连续性参考带裁切失败：" + defaultText(error.getMessage(), ""));
-            savePageContinuity(page, continuity);
-            return continuity;
-        }
-    }
-
-    private void prepareNextPageContinuityReference(List<ActorAiProfileCardPage> pages,
-                                                    ActorAiProfileCardPage sourcePage,
-                                                    AlbumPageDef sourcePageDef) {
-        AlbumPageDef nextPageDef = nextPageDef(sourcePageDef);
-        if (nextPageDef == null || sourcePage == null || !StringUtils.hasText(sourcePage.getGeneratedImageUrl())) {
-            return;
-        }
-        ActorAiProfileCardPage nextPage = findPageByNo(pages, nextPageDef.pageNo());
-        if (nextPage == null || STATUS_SUCCESS.equals(nextPage.getStatus())) {
-            return;
-        }
-        try {
-            CroppedImageBand band = generatedImageStorage.uploadBottomBandFromUrl(
-                    sourcePage.getGeneratedImageUrl(),
-                    CONTINUITY_BAND_FOLDER,
-                    CONTINUITY_BAND_RATIO);
-            savePageContinuity(nextPage, ContinuityReference.tail(
-                    band.imageUrl(),
-                    sourcePage.getPageNo(),
-                    sourcePage.getPageType(),
-                    band.ratio(),
-                    band.bandRect()));
-        } catch (Exception error) {
-            savePageContinuity(nextPage, ContinuityReference.textOnly("连续性参考带裁切失败：" + defaultText(error.getMessage(), "")));
-        }
-    }
-
-    private ContinuityReference continuityFromPage(ActorAiProfileCardPage page) {
-        if (page == null) {
-            return ContinuityReference.textOnly("页面连续性元数据缺失");
-        }
-        return new ContinuityReference(
-                defaultText(page.getContinuityMode(), CONTINUITY_MODE_TEXT_ONLY),
-                defaultText(page.getContinuityReferenceUrl(), ""),
-                page.getContinuityReferenceSourcePageNo(),
-                defaultText(page.getContinuityReferenceSourcePageType(), ""),
-                page.getContinuityBandRatio(),
-                defaultText(page.getContinuityBandRect(), ""),
-                defaultText(page.getContinuityFailureReason(), ""));
-    }
-
-    private void savePageContinuity(ActorAiProfileCardPage page, ContinuityReference continuity) {
-        if (page == null || page.getPageId() == null || continuity == null) {
-            return;
-        }
-        actorAiProfileCardPageMapper.update(new ActorAiProfileCardPage(), new LambdaUpdateWrapper<ActorAiProfileCardPage>()
-                .eq(ActorAiProfileCardPage::getPageId, page.getPageId())
-                .set(ActorAiProfileCardPage::getPromptLocale, PROMPT_LOCALE_ZH_CN)
-                .set(ActorAiProfileCardPage::getContinuityMode, continuity.mode())
-                .set(ActorAiProfileCardPage::getContinuityReferenceUrl, continuity.referenceUrl())
-                .set(ActorAiProfileCardPage::getContinuityReferenceSourcePageNo, continuity.sourcePageNo())
-                .set(ActorAiProfileCardPage::getContinuityReferenceSourcePageType, continuity.sourcePageType())
-                .set(ActorAiProfileCardPage::getContinuityBandRatio, continuity.bandRatio())
-                .set(ActorAiProfileCardPage::getContinuityBandRect, continuity.bandRect())
-                .set(ActorAiProfileCardPage::getContinuityFailureReason, continuity.failureReason()));
-        page.setPromptLocale(PROMPT_LOCALE_ZH_CN);
-        page.setContinuityMode(continuity.mode());
-        page.setContinuityReferenceUrl(continuity.referenceUrl());
-        page.setContinuityReferenceSourcePageNo(continuity.sourcePageNo());
-        page.setContinuityReferenceSourcePageType(continuity.sourcePageType());
-        page.setContinuityBandRatio(continuity.bandRatio());
-        page.setContinuityBandRect(continuity.bandRect());
-        page.setContinuityFailureReason(continuity.failureReason());
-    }
-
-    private ActorAiProfileCardPage findPageByNo(List<ActorAiProfileCardPage> pages, int pageNo) {
-        return safeList(pages).stream()
-                .filter(page -> page.getPageNo() != null && page.getPageNo() == pageNo)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private AlbumPageDef nextPageDef(AlbumPageDef pageDef) {
-        if (pageDef == null) {
-            return null;
-        }
-        return ALBUM_PAGE_DEFS.stream()
-                .filter(candidate -> candidate.pageNo() == pageDef.pageNo() + 1)
-                .findFirst()
-                .orElse(null);
-    }
-
     private ActorMyShareCardItemDTO createOrGetGeneratedShareCard(ActorAiProfileCardTask task) {
         CreateShareCardDTO createDto = new CreateShareCardDTO();
         createDto.setTemplateSceneCode(task.getTemplateSceneCode());
         return userShareCardService.createCard(task.getUserId(), createDto);
     }
 
-    private void createInitialPages(ActorAiProfileCardTask task) {
-        for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
-            ActorAiProfileCardPage page = new ActorAiProfileCardPage();
-            page.setTaskId(task.getTaskId());
-            page.setPageNo(pageDef.pageNo());
-            page.setPageType(pageDef.pageType());
-            page.setProviderCode(task.getProviderCode());
-            page.setModelCode(task.getModelCode());
-            page.setStatus(STATUS_PENDING);
-            actorAiProfileCardPageMapper.insert(page);
-        }
-    }
-
-    private List<ActorAiProfileCardPage> ensurePages(ActorAiProfileCardTask task) {
-        List<ActorAiProfileCardPage> pages = loadPages(task.getTaskId());
-        if (pages.size() >= ALBUM_PAGE_DEFS.size()) {
-            return pages;
-        }
-        for (AlbumPageDef pageDef : ALBUM_PAGE_DEFS) {
-            boolean exists = pages.stream().anyMatch(page -> pageDef.matches(page));
-            if (exists) {
-                continue;
-            }
-            ActorAiProfileCardPage page = new ActorAiProfileCardPage();
-            page.setTaskId(task.getTaskId());
-            page.setShareCardId(task.getShareCardId());
-            page.setPageNo(pageDef.pageNo());
-            page.setPageType(pageDef.pageType());
-            page.setProviderCode(task.getProviderCode());
-            page.setModelCode(task.getModelCode());
-            page.setStatus(STATUS_PENDING);
-            actorAiProfileCardPageMapper.insert(page);
-        }
-        return loadPages(task.getTaskId());
-    }
-
-    private ActorAiProfileCardPage findPage(List<ActorAiProfileCardPage> pages, AlbumPageDef pageDef) {
-        return pages.stream()
-                .filter(page -> pageDef.matches(page))
-                .findFirst()
-                .orElseThrow(() -> new BizException("AI 分享图页面任务缺失：" + pageDef.pageType()));
-    }
-
-    private List<ActorAiProfileCardPage> loadPages(String taskId) {
-        if (!StringUtils.hasText(taskId)) {
-            return Collections.emptyList();
-        }
-        return actorAiProfileCardPageMapper.selectList(new LambdaQueryWrapper<ActorAiProfileCardPage>()
-                .eq(ActorAiProfileCardPage::getTaskId, taskId)
-                .orderByAsc(ActorAiProfileCardPage::getPageNo));
-    }
-
     private void saveGeneratedShareCardConfig(ActorAiProfileCardTask task,
                                               ActorProfileDTO profile,
                                               ActorMyShareCardItemDTO card,
                                               String generatedImageUrl) {
+        AiProfileCardThemeResolver.Theme theme = AiProfileCardThemeResolver.resolve(task.getTemplateSceneCode(), task.getStyleCode());
         ActorCardConfigSaveDTO config = new ActorCardConfigSaveDTO();
         config.setShareCardId(card.getCardId());
         config.setLayoutVariant(defaultText(card.getLayoutVariant(), defaultLayoutVariant(task.getTemplateSceneCode())));
-        config.setPrimaryColor(defaultText(card.getPrimaryColor(), "#8c6f4f"));
-        config.setAccentColor(defaultText(card.getAccentColor(), "#d4b896"));
-        config.setBackgroundColor(defaultText(card.getBackgroundColor(), "#f5f3ee"));
+        config.setPrimaryColor(defaultText(card.getPrimaryColor(), theme.accentColor()));
+        config.setAccentColor(defaultText(card.getAccentColor(), theme.surfaceStrongColor()));
+        config.setBackgroundColor(defaultText(card.getBackgroundColor(), theme.backgroundColor()));
         config.setHighlightedExperiences(Collections.emptyList());
         config.setHighlightedPhotos(buildHighlightedPhotos(generatedImageUrl, task.getSourceImageUrl()));
         config.setTagOrder(buildTagOrder(profile));
@@ -634,16 +375,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         updateById(update);
     }
 
-    private void markPageRunning(ActorAiProfileCardPage page) {
-        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
-        update.setPageId(page.getPageId());
-        update.setStatus(STATUS_RUNNING);
-        update.setStartedAt(LocalDateTime.now());
-        update.setFailureReason("");
-        actorAiProfileCardPageMapper.updateById(update);
-        page.setStatus(STATUS_RUNNING);
-    }
-
     private void savePrompt(String taskId, AiProfileCardPrompt prompt) {
         ActorAiProfileCardTask update = new ActorAiProfileCardTask();
         update.setTaskId(taskId);
@@ -651,49 +382,6 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         update.setPromptText(prompt.promptText());
         update.setNegativePrompt(prompt.negativePrompt());
         updateById(update);
-    }
-
-    private void savePagePrompt(ActorAiProfileCardPage page, AiProfileCardPrompt prompt) {
-        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
-        update.setPageId(page.getPageId());
-        update.setPromptJson(prompt.promptJson());
-        update.setPromptText(prompt.promptText());
-        update.setNegativePrompt(prompt.negativePrompt());
-        update.setPromptLocale(PROMPT_LOCALE_ZH_CN);
-        actorAiProfileCardPageMapper.updateById(update);
-        page.setPromptJson(prompt.promptJson());
-        page.setPromptText(prompt.promptText());
-        page.setNegativePrompt(prompt.negativePrompt());
-        page.setPromptLocale(PROMPT_LOCALE_ZH_CN);
-    }
-
-    private void markPageSuccess(ActorAiProfileCardPage page, String generatedImageUrl) {
-        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
-        update.setPageId(page.getPageId());
-        update.setStatus(STATUS_SUCCESS);
-        update.setGeneratedImageUrl(generatedImageUrl);
-        update.setFailureReason("");
-        update.setCompletedAt(LocalDateTime.now());
-        actorAiProfileCardPageMapper.updateById(update);
-    }
-
-    private void markPageFailed(ActorAiProfileCardPage page, String failureReason) {
-        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
-        update.setPageId(page.getPageId());
-        update.setStatus(STATUS_FAILED);
-        update.setFailureReason(truncateFailure(failureReason));
-        update.setCompletedAt(LocalDateTime.now());
-        actorAiProfileCardPageMapper.updateById(update);
-    }
-
-    private void markPagesShareCardId(String taskId, Long shareCardId) {
-        if (!StringUtils.hasText(taskId) || shareCardId == null || shareCardId <= 0) {
-            return;
-        }
-        ActorAiProfileCardPage update = new ActorAiProfileCardPage();
-        update.setShareCardId(shareCardId);
-        actorAiProfileCardPageMapper.update(update, new LambdaUpdateWrapper<ActorAiProfileCardPage>()
-                .eq(ActorAiProfileCardPage::getTaskId, taskId));
     }
 
     private void markSuccess(String taskId, Long shareCardId, String generatedImageUrl) {
@@ -727,8 +415,8 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setShareCardId(task.getShareCardId());
         dto.setSourceImageUrl(task.getSourceImageUrl());
         dto.setGeneratedImageUrl(isRealGeneratedImageTask(task) ? task.getGeneratedImageUrl() : null);
+        dto.setTheme(resolveTheme(task));
         dto.setFailureReason(task.getFailureReason());
-        dto.setPages(toPageRespList(task));
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
         return dto;
@@ -747,37 +435,9 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         dto.setShareCardId(task.getShareCardId());
         dto.setSourceImageUrl(task.getSourceImageUrl());
         dto.setGeneratedImageUrl(task.getGeneratedImageUrl());
-        dto.setPages(toPageRespList(task));
+        dto.setTheme(resolveTheme(task));
         dto.setCreateTime(task.getCreateTime());
         dto.setLastUpdate(task.getLastUpdate());
-        return dto;
-    }
-
-    private List<AiProfileCardPageRespDTO> toPageRespList(ActorAiProfileCardTask task) {
-        return loadPages(task.getTaskId()).stream()
-                .map(page -> toPageResp(page, task.getSourceImageUrl()))
-                .toList();
-    }
-
-    private AiProfileCardPageRespDTO toPageResp(ActorAiProfileCardPage page, String sourceImageUrl) {
-        AiProfileCardPageRespDTO dto = new AiProfileCardPageRespDTO();
-        dto.setPageNo(page.getPageNo());
-        dto.setPageType(page.getPageType());
-        dto.setStatus(page.getStatus());
-        dto.setProviderCode(page.getProviderCode());
-        dto.setModelCode(page.getModelCode());
-        dto.setGeneratedImageUrl(isRealGeneratedPage(page, sourceImageUrl) ? page.getGeneratedImageUrl() : null);
-        dto.setPromptLocale(page.getPromptLocale());
-        dto.setContinuityMode(page.getContinuityMode());
-        dto.setContinuityReferenceUrl(page.getContinuityReferenceUrl());
-        dto.setContinuityReferenceSourcePageType(page.getContinuityReferenceSourcePageType());
-        dto.setContinuityReferenceSourcePageNo(page.getContinuityReferenceSourcePageNo());
-        dto.setContinuityBandRatio(page.getContinuityBandRatio());
-        dto.setContinuityBandRect(page.getContinuityBandRect());
-        dto.setContinuityFailureReason(page.getContinuityFailureReason());
-        dto.setFailureReason(page.getFailureReason());
-        dto.setCreateTime(page.getCreateTime());
-        dto.setLastUpdate(page.getLastUpdate());
         return dto;
     }
 
@@ -789,12 +449,19 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                 && !sameMediaUrl(task.getGeneratedImageUrl(), task.getSourceImageUrl());
     }
 
-    private boolean isRealGeneratedPage(ActorAiProfileCardPage page, String sourceImageUrl) {
-        return page != null
-                && STATUS_SUCCESS.equals(page.getStatus())
-                && StringUtils.hasText(page.getGeneratedImageUrl())
-                && !"mock".equalsIgnoreCase(defaultText(page.getProviderCode(), ""))
-                && !sameMediaUrl(page.getGeneratedImageUrl(), sourceImageUrl);
+    private AiProfileCardThemeRespDTO resolveTheme(ActorAiProfileCardTask task) {
+        AiProfileCardThemeResolver.Theme theme = AiProfileCardThemeResolver.resolve(
+                task == null ? "" : task.getTemplateSceneCode(),
+                task == null ? "" : task.getStyleCode());
+        AiProfileCardThemeRespDTO dto = new AiProfileCardThemeRespDTO();
+        dto.setBackgroundColor(theme.backgroundColor());
+        dto.setSurfaceColor(theme.surfaceColor());
+        dto.setSurfaceStrongColor(theme.surfaceStrongColor());
+        dto.setAccentColor(theme.accentColor());
+        dto.setTextColor(theme.textColor());
+        dto.setMutedTextColor(theme.mutedTextColor());
+        dto.setBorderColor(theme.borderColor());
+        return dto;
     }
 
     private boolean sameMediaUrl(String left, String right) {
@@ -917,75 +584,4 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         return values == null ? Collections.emptyList() : values;
     }
 
-    private record ContinuityReference(
-            String mode,
-            String referenceUrl,
-            Integer sourcePageNo,
-            String sourcePageType,
-            Double bandRatio,
-            String bandRect,
-            String failureReason
-    ) {
-
-        private static ContinuityReference identity(String referenceUrl) {
-            return new ContinuityReference(
-                    CONTINUITY_MODE_IDENTITY,
-                    normalize(referenceUrl),
-                    null,
-                    "",
-                    null,
-                    "",
-                    "");
-        }
-
-        private static ContinuityReference tail(String referenceUrl,
-                                                Integer sourcePageNo,
-                                                String sourcePageType,
-                                                Double bandRatio,
-                                                String bandRect) {
-            return new ContinuityReference(
-                    CONTINUITY_MODE_TAIL,
-                    normalize(referenceUrl),
-                    sourcePageNo,
-                    normalize(sourcePageType),
-                    bandRatio,
-                    normalize(bandRect),
-                    "");
-        }
-
-        private static ContinuityReference textOnly(String reason) {
-            return new ContinuityReference(
-                    CONTINUITY_MODE_TEXT_ONLY,
-                    "",
-                    null,
-                    "",
-                    null,
-                    "",
-                    normalize(reason, "文字 continuity only"));
-        }
-
-        private boolean hasReferenceUrl() {
-            return StringUtils.hasText(referenceUrl);
-        }
-
-        private static String normalize(String value) {
-            return StringUtils.hasText(value) ? value.trim() : "";
-        }
-
-        private static String normalize(String value, String fallback) {
-            return StringUtils.hasText(value) ? value.trim() : fallback;
-        }
-    }
-
-    private record AlbumPageDef(
-            int pageNo,
-            String pageType
-    ) {
-
-        private boolean matches(ActorAiProfileCardPage page) {
-            return page != null
-                    && pageNo == (page.getPageNo() == null ? 0 : page.getPageNo())
-                    && pageType.equals(page.getPageType());
-        }
-    }
 }
