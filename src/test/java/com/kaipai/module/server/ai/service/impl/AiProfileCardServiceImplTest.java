@@ -31,12 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -196,7 +194,6 @@ class AiProfileCardServiceImplTest {
                 eq("classic"),
                 eq("classic"),
                 eq("https://cdn.example.com/source.png"));
-        verify(imageStorage, never()).uploadBottomBandFromUrl(anyString(), anyString(), anyDouble());
         verifyNoInteractions(pageMapper);
 
         ArgumentCaptor<ActorCardConfigSaveDTO> configCaptor = ArgumentCaptor.forClass(ActorCardConfigSaveDTO.class);

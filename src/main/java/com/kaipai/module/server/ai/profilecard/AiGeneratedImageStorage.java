@@ -12,10 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -48,37 +45,6 @@ public class AiGeneratedImageStorage {
         String normalizedUrl = requireHttpImageUrl(imageUrl);
         DownloadedImage downloadedImage = downloadImage(normalizedUrl);
         return upload(downloadedImage.bytes(), resolveDownloadedContentType(downloadedImage.contentType(), normalizedUrl), folder);
-    }
-
-    /**
-     * Legacy helper for the retired multi-page album continuity flow.
-     * Current AI profile-card generation uploads only the single provider cover image.
-     */
-    @Deprecated(since = "Phase 5", forRemoval = false)
-    public CroppedImageBand uploadBottomBandFromUrl(String imageUrl, String folder, double bandRatio) {
-        String normalizedUrl = requireHttpImageUrl(imageUrl);
-        DownloadedImage downloadedImage = downloadImage(normalizedUrl);
-        try {
-            BufferedImage source = ImageIO.read(new ByteArrayInputStream(downloadedImage.bytes()));
-            if (source == null) {
-                throw new BizException("生成图片内容无法解析");
-            }
-            double normalizedBandRatio = clampBandRatio(bandRatio);
-            int cropHeight = Math.max(1, Math.min(source.getHeight(), (int) Math.round(source.getHeight() * normalizedBandRatio)));
-            int cropTop = Math.max(0, source.getHeight() - cropHeight);
-            BufferedImage band = source.getSubimage(0, cropTop, source.getWidth(), cropHeight);
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            if (!ImageIO.write(band, "png", output)) {
-                throw new BizException("连续性参考带编码失败");
-            }
-            String bandUrl = upload(output.toByteArray(), "image/png", folder);
-            return new CroppedImageBand(bandUrl, source.getWidth(), source.getHeight(), cropTop, cropHeight, normalizedBandRatio);
-        } catch (BizException error) {
-            throw error;
-        } catch (Exception error) {
-            log.warn("AI 生成图片连续性裁切失败: {}", normalizedUrl, error);
-            throw new BizException("连续性参考带生成失败：" + error.getMessage());
-        }
     }
 
     public boolean isManagedUrl(String imageUrl) {
@@ -224,31 +190,6 @@ public class AiGeneratedImageStorage {
     private String buildUrlPrefix() {
         return String.format("https://%s.cos.%s.myqcloud.com/",
                 cosConfig.getBucketName(), cosConfig.getRegion());
-    }
-
-    private double clampBandRatio(double bandRatio) {
-        if (Double.isNaN(bandRatio) || Double.isInfinite(bandRatio)) {
-            return 0.15d;
-        }
-        return Math.max(0.12d, Math.min(0.15d, bandRatio));
-    }
-
-    /**
-     * Legacy metadata for continuity reference bands in the retired multi-page album flow.
-     */
-    @Deprecated(since = "Phase 5", forRemoval = false)
-    public record CroppedImageBand(
-            String imageUrl,
-            int sourceWidth,
-            int sourceHeight,
-            int cropTop,
-            int cropHeight,
-            double ratio
-    ) {
-
-        public String bandRect() {
-            return "x=0,y=%d,w=%d,h=%d,ratio=%.4f".formatted(cropTop, sourceWidth, cropHeight, ratio);
-        }
     }
 
     private record DownloadedImage(
