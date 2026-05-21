@@ -109,9 +109,7 @@ public class AliyunQwenImageProfileImageProvider implements AiProfileImageProvid
         if (StringUtils.hasText(config.getSize())) {
             parameters.put("size", config.getSize().trim().replace("x", "*"));
         }
-        if (config.getWatermark() != null) {
-            parameters.put("watermark", config.getWatermark());
-        }
+        parameters.put("watermark", false);
         if (StringUtils.hasText(config.getResponseFormat())) {
             parameters.put("response_format", config.getResponseFormat().trim());
         }

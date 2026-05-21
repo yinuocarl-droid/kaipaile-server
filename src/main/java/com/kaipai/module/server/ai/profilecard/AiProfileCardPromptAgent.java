@@ -25,6 +25,7 @@ public class AiProfileCardPromptAgent {
     private static final int PROVIDER_CANVAS_WIDTH = 2160;
     private static final int PROVIDER_CANVAS_HEIGHT = 3840;
     private static final String FULL_BLEED_BACKGROUND_POLICY = "full-bleed edge-to-edge background layer only; no visible frame, border, paper sheet edge, card outline, document page, scroll edge, poster mat, boxed background, corner bracket, corner ornament, or enclosing decorative box";
+    private static final String TEXT_FREE_BACKGROUND_POLICY = "no typography anywhere: no Chinese characters, English letters, numbers, captions, labels, AI-generated disclosure, signature, seal text, calligraphy, poster title, placeholder text, watermark, logo, QR code, or UI words";
 
     private final ObjectMapper objectMapper;
     private final AiProfileImageProviderRegistry providerRegistry;
@@ -85,13 +86,13 @@ public class AiProfileCardPromptAgent {
                 "designCanvas", designCanvas(),
                 "providerCanvas", providerCanvas(),
                 "coordinatePolicy", "750x1334 is the authoritative mini-program design coordinate system; scale every fixed region proportionally to 2160x3840 provider pixels",
-                "renderIntent", "visual background asset for mini program native actor detail rendering",
+                "renderIntent", "text-free visual background asset for mini program native actor detail rendering",
                 "layoutPreset", style.layoutPreset()
         ));
         brief.put("singleCover", Map.of(
                 "pageType", "cover",
-                "role", "single generated cover background for the first screen; all later profile sections use deterministic native content flow",
-                "composition", "actor identity cover only; bottom and outer edges must naturally settle into the fixed theme background color",
+                "role", "single generated text-free cover background for the first screen; all later profile sections use deterministic native content flow",
+                "composition", "actor identity background plate only; bottom and outer edges must naturally settle into the fixed theme background color",
                 "subjectPolicy", style.subjectBox(),
                 "sourceImageMode", sourceImageMode(sourceImageUrl)
         ));
@@ -112,6 +113,7 @@ public class AiProfileCardPromptAgent {
                 "layoutCompliance", "quiet render-safe zones are mandatory in every style; do not draw hard business panels, final section titles, rows, thumbnails or UI components that frontend content must align to"
         ));
         brief.put("backgroundFramePolicy", FULL_BLEED_BACKGROUND_POLICY);
+        brief.put("textFreePolicy", TEXT_FREE_BACKGROUND_POLICY);
         brief.put("fixedLayout", buildFixedLayout(style, flowTheme, sourceImageUrl));
         brief.put("moduleAesthetics", style.moduleAesthetics());
         brief.put("profileSignals", buildProfileSignals(profile));
@@ -130,11 +132,11 @@ public class AiProfileCardPromptAgent {
         qualityChecklist.add("hands, eyes, hairline, clothing edges are clean");
         qualityChecklist.add("cover bottom and outer edges naturally transition into the fixed theme background color " + flowTheme.backgroundColor());
         qualityChecklist.addAll(List.of(
-                "no readable words, phone numbers, QR codes, logos or watermarks",
+                TEXT_FREE_BACKGROUND_POLICY,
                 "single cover role is followed: the generated asset is only the first-screen background",
                 "all fixed layout regions remain open for deterministic mini-program component rendering",
                 style.subjectBox(),
-                "lower profile-card sections stay calm, low contrast, and readable",
+                "lower native content sections stay calm, low contrast, and readable",
                 "style-specific texture and visual details are premium but never compete with native foreground panels",
                 "background stays full-bleed from edge to edge with no frame, border, card shell, page edge or corner ornament"
         ));
@@ -145,11 +147,31 @@ public class AiProfileCardPromptAgent {
         String negativePrompt = String.join(", ",
                 "readable text",
                 "Chinese characters",
+                "Chinese text",
+                "可识别汉字",
+                "中文字符",
                 "English letters",
+                "英文字母",
+                "numbers",
+                "数字",
+                "typography",
+                "caption",
+                "subtitle",
+                "poster title",
+                "海报标题",
+                "姓名文字",
                 "phone number",
                 "QR code",
                 "watermark",
+                "图片由AI生成",
+                "AI生成",
+                "AI generated",
+                "AI GENERATED SHARE",
                 "brand logo",
+                "signature",
+                "seal text",
+                "印章文字",
+                "书法字",
                 "extra face",
                 "distorted face",
                 "deformed hands",
@@ -157,7 +179,7 @@ public class AiProfileCardPromptAgent {
                 "over-smoothed plastic skin",
                 "cropped head",
                 "subject outside hero-right layout box",
-                "busy profile-card text regions",
+                "busy native content regions",
                 "low-contrast blocks behind native text regions",
                 "visible frame",
                 "outer border",
@@ -171,7 +193,7 @@ public class AiProfileCardPromptAgent {
                 "corner ornament",
                 "decorative border",
                 "hard information card frames",
-                "bordered lower profile-card modules",
+                "bordered lower native content modules",
                 "drawn thumbnail frames",
                 "drawn video player",
                 "full-bleed photo covering information modules",
@@ -204,15 +226,15 @@ public class AiProfileCardPromptAgent {
                                    String sourceImageUrl,
                                    AiProfileCardThemeResolver.Theme flowTheme) {
         return """
-                生成一张 9:16 全幅演员分享封面背景图，输出 2160x3840。
+                生成一张 9:16 全幅无字演员详情页背景底图，输出 2160x3840。
                 %s
-                构图：演员位于右侧，左侧留空给后续信息层；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
-                页面职责：只做第一屏封面背景；姓名、资料、照片、视频入口和后续内容全部由小程序原生组件渲染。
+                构图：演员位于右侧，左侧保持干净、低细节、无字符的纹理背景；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
+                页面职责：只提供第一屏视觉背景底图；姓名、资料、照片、视频入口和后续内容全部由小程序原生组件渲染，图片内不要预留、书写或模拟任何文字区域。
                 风格：%s
                 背景：%s
-                人物气质参考：%s
-                安全要求：背景必须全幅铺满，不要边框、纸张边缘、卡片壳、假 UI、可读文字、水印、Logo、标签、二维码、联系方式或任何前景组件。
-                Plain, unmarked, symbol-free.
+                人物气质参考（仅用于人物外观，不得写入画面）：%s
+                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI 或任何前景组件。
+                Plain background image only, no typography, no captions, no watermark, no logo.
                 """.formatted(
                 sourceReferenceInstruction(sourceImageUrl),
                 flowTheme.backgroundColor(),
@@ -224,9 +246,9 @@ public class AiProfileCardPromptAgent {
 
     private String sourceReferenceInstruction(String sourceImageUrl) {
         if (!StringUtils.hasText(sourceImageUrl)) {
-            return "当前没有可用身份参考图时，按封面人物气质生成，但不要加入可读文字、水印、Logo、标签、二维码或多余前景组件。";
+            return "当前没有可用身份参考图时，按封面人物气质生成，但不要加入任何文字、数字、水印、Logo、标签、二维码或多余前景组件。";
         }
-        return "参考图1是用户源图，只用于人物身份与自然气质参考，保留脸型、年龄感、发型方向和身体比例，不要复制背景文字、标签或版式。";
+        return "参考图1是用户源图，只用于人物身份与自然气质参考，保留脸型、年龄感、发型方向和身体比例，不要复制或生成背景文字、标签、水印或版式。";
     }
 
     private String chineseStyleHint(String templateSceneCode, String styleCode, StyleBrief style) {
@@ -248,8 +270,8 @@ public class AiProfileCardPromptAgent {
             return "艺术电影感，画廊氛围、戏剧性阴影、低饱和石墨与橄榄调，表达克制。";
         }
         return StringUtils.hasText(style.title())
-                ? style.title() + "；保持真实、克制、干净的演员分享封面背景气质。"
-                : "高级演员分享封面背景，真实、克制、干净。";
+                ? style.title() + "；保持真实、克制、干净的演员详情页背景底图气质。"
+                : "高级演员详情页背景底图，真实、克制、干净。";
     }
 
     private String chineseBackgroundHint(String templateSceneCode, String styleCode, String background) {
@@ -320,9 +342,10 @@ public class AiProfileCardPromptAgent {
         fixedLayout.put("safeSurfaceTone", style.safeSurfaceTone());
         fixedLayout.put("flowBackgroundColor", flowTheme.backgroundColor());
         fixedLayout.put("backgroundFramePolicy", FULL_BLEED_BACKGROUND_POLICY);
+        fixedLayout.put("textFreePolicy", TEXT_FREE_BACKGROUND_POLICY);
         fixedLayout.put("regions", style.layoutRegions());
         fixedLayout.put("background", style.backgroundMaterial());
-        fixedLayout.put("finalTextPolicy", "do not render final business text, labels, rows, thumbnails, video controls, QR code, phone, contact UI, or fake app components");
+        fixedLayout.put("finalTextPolicy", "do not render any final business text, Chinese characters, English letters, numbers, labels, captions, signatures, seal text, watermarks, AI-generated disclosure, rows, thumbnails, video controls, QR code, phone, contact UI, or fake app components");
         return fixedLayout;
     }
 
@@ -390,7 +413,7 @@ public class AiProfileCardPromptAgent {
     private StyleBrief resolveStyle(String templateSceneCode, String styleCode) {
         if ("costume_actor_profile_full_card".equals(styleCode)) {
             return styleBrief(
-                    "古风演员资料长图",
+                    "古风演员背景底图",
                     "premium Chinese period actor full-bleed background layer: right-side realistic actor portrait in elegant Han/Tang costume, warm ivory ink-wash atmosphere, misty Jiangnan mountains and bridge, subtle pavilion and bamboo silhouettes, soft abstract warm-red motifs, calm lower render-safe matte surfaces, no visible frame, no border, no card shell, no readable text",
                     "warm ivory atmosphere, dark ink green-black, antique gold linework, muted cinnabar accent, pale jade-grey washes, soft tea-stained matte texture",
                     "soft cinematic daylight, gentle rim light on hair and robe, translucent ink-wash haze, low contrast inside native render-safe zones, crisp face detail",
@@ -399,7 +422,7 @@ public class AiProfileCardPromptAgent {
                     "paper-dark",
                     "period-paper",
                     "premium period actor full-bleed background with refined ink-wash depth, realistic portrait, and calm lower safe zones without any enclosing frame",
-                    "commercial casting finish, crisp facial realism, restrained antique-gold atmosphere, elegant empty surfaces, no cheap fantasy poster effects, no page or card edge",
+                    "commercial casting finish, crisp facial realism, restrained antique-gold atmosphere, elegant empty surfaces, no cheap fantasy graphics, no page or card edge",
                     "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must stay inside this box; costume silhouette may overlap softly into the center but never cover the left overlay-safe area",
                     "hero left side, x=120-1080, y=120-1320 must remain clean warm ink-wash empty overlay space",
                     "warm low-detail ink-wash matte safe surfaces for deterministic native panels",
@@ -409,7 +432,7 @@ public class AiProfileCardPromptAgent {
         }
         return switch (templateSceneCode) {
             case "costume" -> styleBrief(
-                    "古风演员资料长图",
+                    "古风演员背景底图",
                     "cinematic Chinese period-drama actor full-bleed background layer, elegant Han/Tang inspired wardrobe, refined fabric texture, ink-wash atmospheric depth, palace corridor or misty garden background, premium realistic portrait, calm warm lower render-safe surfaces, no visible frame, no border, no page edge, no fantasy exaggeration",
                     "warm ivory, dark ink, warm red, antique gold, jade green",
                     "soft directional key light, gentle rim light on hair and shoulders, calm lower-section lighting",
@@ -426,8 +449,8 @@ public class AiProfileCardPromptAgent {
                     periodModuleAesthetics()
             );
             case "urban" -> styleBrief(
-                    "都市演员资料长图",
-                    "modern cinematic actor profile-card background, quiet city or studio hero scene, polished fashion editorial tone, confident natural expression, realistic face detail, dark low-detail render-safe lower regions compatible with glass panels",
+                    "都市演员背景底图",
+                    "modern cinematic actor background layer, quiet city or studio hero scene, polished fashion editorial tone, confident natural expression, realistic face detail, dark low-detail render-safe lower regions compatible with native glass panels",
                     "charcoal, steel blue, porcelain white, restrained neon accent, soft grey",
                     "large softbox key light with cool rim light, dim but readable lower safe zones, no bright parchment surfaces",
                     "modern fitted coat or clean fashion styling",
@@ -449,7 +472,7 @@ public class AiProfileCardPromptAgent {
                     )
             );
             case "classic" -> styleBrief(
-                    "经典演员资料长图",
+                    "经典演员背景底图",
                     "timeless film-still actor full-bleed background layer, warm studio hero backdrop, analog cinema texture, elegant facial lighting, professional casting atmosphere, clean lower render-safe matte surfaces, no visible frame, no border, no document page",
                     "warm grey, sepia brown, ivory, muted black, champagne",
                     "classic three-point portrait lighting, soft falloff, readable lower safe-zone lighting",
@@ -458,7 +481,7 @@ public class AiProfileCardPromptAgent {
                     "paper-dark",
                     "paper",
                     "premium classic actor full-bleed background with warm studio texture, realistic portrait, and clean light lower safe zones without any enclosing frame",
-                    "timeless film-still finish, crisp facial realism, restrained warm matte surfaces, no cheap poster effects, no page or card edge",
+                    "timeless film-still finish, crisp facial realism, restrained warm matte surfaces, no cheap graphic effects, no page or card edge",
                     "hero right side, x=1120-2050, y=120-1420; face center near x=1580,y=520; upper body must not cover the left overlay-safe area",
                     "hero left side, x=120-1080, y=120-1320 must remain warm low-detail studio empty space",
                     "warm low-detail studio matte safe surfaces for deterministic native panels",
@@ -472,8 +495,8 @@ public class AiProfileCardPromptAgent {
                     )
             );
             case "commercial" -> styleBrief(
-                    "商业演员资料长图",
-                    "clean commercial actor profile-card background, bright premium studio hero scene, approachable expression, polished natural skin texture, advertising-ready composition, lower render-safe regions clean and minimal",
+                    "商业演员背景底图",
+                    "clean commercial actor background layer, bright premium studio hero scene, approachable expression, polished natural skin texture, advertising-ready composition, lower render-safe regions clean and minimal",
                     "white, graphite, muted champagne, soft blue, silver",
                     "bright clean softbox lighting, low-contrast lower panels",
                     "minimal contemporary wardrobe",
@@ -495,8 +518,8 @@ public class AiProfileCardPromptAgent {
                     )
             );
             case "artistic" -> styleBrief(
-                    "艺术演员资料长图",
-                    "art-house actor profile-card background, cinematic shadow in hero area, expressive but realistic mood, textured backdrop, restrained gallery poster feeling, calm lower render-safe surfaces",
+                    "艺术演员背景底图",
+                    "art-house actor background layer, cinematic shadow in hero area, expressive but realistic mood, textured backdrop, restrained gallery mood, calm lower render-safe surfaces",
                     "off-white, ink black, olive grey, muted rust, stone grey",
                     "controlled dramatic side light, readable lower-panel falloff",
                     "minimal expressive wardrobe with texture",
@@ -504,7 +527,7 @@ public class AiProfileCardPromptAgent {
                     "cinema-light",
                     "gallery-glass",
                     "premium art-house casting profile background with expressive portrait, controlled shadows, and gallery-like readable safe zones",
-                    "restrained gallery poster finish, realistic face detail, textured but quiet surfaces, no overdecorated poster graphics",
+                    "restrained gallery finish, realistic face detail, textured but quiet surfaces, no overdecorated graphics",
                     "hero right side, x=1080-2050, y=120-1480; face center near x=1580,y=560; expressive shadow must not cover the left overlay-safe area",
                     "hero left side, x=100-1060, y=120-1320 must remain low-detail gallery wall or shadow gradient for light native text",
                     "muted dark/gallery low-detail safe surfaces for deterministic glass panels and light native text",
@@ -518,8 +541,8 @@ public class AiProfileCardPromptAgent {
                     )
             );
             default -> styleBrief(
-                    "演员资料长图",
-                    "premium cinematic actor full-bleed background layer, realistic face, professional share poster composition, clean lower render-safe regions",
+                    "演员背景底图",
+                    "premium cinematic actor full-bleed background layer, realistic face, professional casting composition, clean lower render-safe regions",
                     "neutral warm palette, ivory, graphite",
                     "soft professional portrait lighting with readable lower regions",
                     "clean actor wardrobe",

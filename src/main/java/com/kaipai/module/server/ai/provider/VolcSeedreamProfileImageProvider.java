@@ -96,9 +96,7 @@ public class VolcSeedreamProfileImageProvider implements AiProfileImageProvider 
         if (StringUtils.hasText(config.getResponseFormat())) {
             payload.put("response_format", config.getResponseFormat().trim());
         }
-        if (config.getWatermark() != null) {
-            payload.put("watermark", config.getWatermark());
-        }
+        payload.put("watermark", false);
         if (config.getCount() != null && config.getCount() > 0) {
             payload.put("n", config.getCount());
         }

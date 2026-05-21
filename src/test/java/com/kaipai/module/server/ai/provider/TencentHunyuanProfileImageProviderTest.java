@@ -139,7 +139,7 @@ class TencentHunyuanProfileImageProviderTest {
             String prompt = payload.path("Prompt").asText();
             assertFalse(payload.has("Images"));
             assertEquals(0, payload.path("LogoAdd").asInt());
-            assertEquals(1, payload.path("Revise").asInt());
+            assertEquals(0, payload.path("Revise").asInt());
             assertSingleCoverPrompt(prompt);
             assertFalse(prompt.contains("上一页"));
             assertFalse(prompt.contains("resume"));
@@ -212,6 +212,8 @@ class TencentHunyuanProfileImageProviderTest {
         publicConfig.setModelVersion("2022-12-29");
         publicConfig.setResolution("720:1280");
         publicConfig.setCount(1);
+        publicConfig.setWatermark(true);
+        publicConfig.setPromptRewrite(true);
         publicConfig.setConnectTimeoutMs(2000);
         publicConfig.setReadTimeoutMs(5000);
         publicConfig.setPollIntervalMs(1);
@@ -274,15 +276,19 @@ class TencentHunyuanProfileImageProviderTest {
     }
 
     private void assertSingleCoverPrompt(String prompt) {
-        assertTrue(prompt.contains("封面背景图"));
+        assertTrue(prompt.contains("背景底图"));
         assertTrue(prompt.contains("9:16"));
         assertTrue(prompt.contains("2160x3840"));
         assertTrue(prompt.contains("参考图1是用户源图") || prompt.contains("当前没有可用身份参考图"));
         assertTrue(prompt.contains("固定主题背景色"));
-        assertTrue(prompt.contains("只做第一屏封面背景"));
+        assertTrue(prompt.contains("只提供第一屏视觉背景底图"));
         assertTrue(prompt.contains("姓名、资料、照片、视频入口和后续内容"));
-        assertTrue(prompt.contains("Plain, unmarked, symbol-free"));
-        assertTrue(prompt.trim().endsWith("Plain, unmarked, symbol-free."));
+        assertTrue(prompt.contains("禁止出现任何可读字符"));
+        assertTrue(prompt.contains("图片由AI生成"));
+        assertTrue(prompt.contains("Plain background image only, no typography, no captions, no watermark, no logo."));
+        assertTrue(prompt.trim().endsWith("Plain background image only, no typography, no captions, no watermark, no logo."));
+        assertFalse(prompt.contains("分享封面"));
+        assertFalse(prompt.contains("演员分享"));
         assertFalse(prompt.contains("上一页"));
         assertFalse(prompt.contains("resume"));
         assertFalse(prompt.contains("gallery"));

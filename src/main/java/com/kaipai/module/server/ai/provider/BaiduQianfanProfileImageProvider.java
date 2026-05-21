@@ -92,9 +92,7 @@ public class BaiduQianfanProfileImageProvider implements AiProfileImageProvider 
         if (config.getCount() != null && config.getCount() > 0) {
             payload.put("n", config.getCount());
         }
-        if (config.getWatermark() != null) {
-            payload.put("watermark", config.getWatermark());
-        }
+        payload.put("watermark", false);
         payload.putAll(extraParams(config.getExtraParamsJson()));
         return payload;
     }

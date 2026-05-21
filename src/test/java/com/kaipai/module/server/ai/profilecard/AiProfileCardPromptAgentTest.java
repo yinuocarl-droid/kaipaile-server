@@ -45,8 +45,13 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().promptText().contains("9:16"));
         assertTrue(generation.prompt().promptText().contains("2160x3840"));
         assertTrue(generation.prompt().promptText().contains("固定主题背景色"));
-        assertTrue(generation.prompt().promptText().contains("只做第一屏封面背景"));
+        assertTrue(generation.prompt().promptText().contains("只提供第一屏视觉背景底图"));
         assertTrue(generation.prompt().negativePrompt().contains("watermark"));
+        assertTrue(generation.prompt().negativePrompt().contains("图片由AI生成"));
+        assertTrue(generation.prompt().negativePrompt().contains("AI GENERATED SHARE"));
+        assertTrue(generation.prompt().negativePrompt().contains("海报标题"));
+        assertTrue(generation.prompt().negativePrompt().contains("姓名文字"));
+        assertTrue(generation.prompt().negativePrompt().contains("typography"));
         assertTrue(generation.prompt().negativePrompt().contains("random readable calligraphy"));
         assertTrue(generation.prompt().negativePrompt().contains("filled profile text"));
         assertTrue(generation.prompt().negativePrompt().contains("hard information card frames"));
@@ -68,6 +73,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"referenceQuality\""));
         assertTrue(request.promptJson().contains("\"layoutCompliance\""));
         assertTrue(request.promptJson().contains("\"backgroundFramePolicy\""));
+        assertTrue(request.promptJson().contains("\"textFreePolicy\""));
         assertTrue(request.promptJson().contains("\"sourceImageMode\":\"identity_reference\""));
         assertTrue(request.promptJson().contains("\"layoutPreset\":\"costume_profile_v3\""));
         assertTrue(request.promptJson().contains("\"panelTheme\":\"period-paper\""));
@@ -76,6 +82,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"flowTheme\""));
         assertTrue(request.promptJson().contains("\"backgroundColor\":\"#efe0c4\""));
         assertTrue(request.promptJson().contains("full-bleed edge-to-edge background layer only"));
+        assertTrue(request.promptJson().contains("no typography anywhere"));
         assertTrue(request.promptJson().contains("quiet render-safe zones are mandatory in every style"));
         assertTrue(request.promptJson().contains("\"facts\""));
         assertTrue(request.promptJson().contains("\"video\""));
@@ -90,6 +97,8 @@ class AiProfileCardPromptAgentTest {
         assertFalse(request.promptText().contains("resume"));
         assertFalse(request.promptText().contains("gallery"));
         assertFalse(request.promptText().contains("连续性"));
+        assertFalse(request.promptText().contains("演员分享"));
+        assertFalse(request.promptText().contains("分享封面"));
     }
 
     @Test
@@ -134,6 +143,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(request.promptJson().contains("\"panelTheme\":\"" + panelTheme + "\""));
         assertTrue(request.promptJson().contains("\"sourceImageMode\":\"identity_reference\""));
         assertTrue(request.promptJson().contains("\"backgroundFramePolicy\""));
+        assertTrue(request.promptJson().contains("\"textFreePolicy\""));
         assertTrue(request.promptJson().contains("\"designCanvas\""));
         assertTrue(request.promptJson().contains("\"providerCanvas\""));
         assertTrue(request.promptJson().contains("\"singleCover\""));
@@ -154,36 +164,42 @@ class AiProfileCardPromptAgentTest {
     private void assertChinesePromptContract(String promptText) {
         assertNotNull(promptText);
         assertTrue(promptText.contains("9:16"));
-        assertTrue(promptText.contains("封面背景图"));
+        assertTrue(promptText.contains("背景底图"));
         assertTrue(promptText.contains("构图"));
         assertTrue(promptText.contains("风格"));
         assertTrue(promptText.contains("背景"));
         assertTrue(promptText.contains("人物气质参考"));
         assertTrue(promptText.contains("固定主题背景色"));
-        assertTrue(promptText.contains("不要边框") || promptText.contains("不要可读文字"));
+        assertTrue(promptText.contains("禁止出现任何可读字符"));
+        assertTrue(promptText.contains("中文"));
+        assertTrue(promptText.contains("英文"));
+        assertTrue(promptText.contains("数字"));
+        assertTrue(promptText.contains("图片由AI生成"));
         assertTrue(promptText.contains("水印"));
         assertTrue(promptText.contains("Logo") || promptText.contains("logo"));
         assertTrue(promptText.contains("标签"));
         assertTrue(promptText.contains("二维码"));
         assertTrue(promptText.contains("UI") || promptText.contains("前景组件"));
-        assertTrue(promptText.trim().endsWith("Plain, unmarked, symbol-free."));
+        assertTrue(promptText.trim().endsWith("Plain background image only, no typography, no captions, no watermark, no logo."));
     }
 
     private void assertCoverPromptContract(String promptText) {
         assertChinesePromptContract(promptText);
-        assertTrue(promptText.contains("第一屏封面背景") || promptText.contains("封面背景"));
-        assertTrue(promptText.contains("左侧留空给后续信息层"));
+        assertTrue(promptText.contains("第一屏视觉背景底图"));
+        assertTrue(promptText.contains("左侧保持干净、低细节、无字符"));
         assertTrue(promptText.contains("自然过渡到固定主题背景色"));
         assertTrue(promptText.contains("姓名、资料、照片、视频入口和后续内容"));
         assertTrue(promptText.contains("小程序原生组件"));
         assertTrue(promptText.contains("全幅铺满"));
-        assertTrue(promptText.contains("无边框") || promptText.contains("不要边框"));
+        assertTrue(promptText.contains("禁止出现任何可读字符"));
         assertFalse(promptText.contains("第1/3"));
         assertFalse(promptText.contains("上一页"));
         assertFalse(promptText.contains("resume"));
         assertFalse(promptText.contains("gallery"));
         assertFalse(promptText.contains("连续性"));
         assertFalse(promptText.contains("tail_reference"));
+        assertFalse(promptText.contains("分享封面背景"));
+        assertFalse(promptText.contains("演员分享"));
     }
 
     private static final class CapturingProvider implements AiProfileImageProvider {

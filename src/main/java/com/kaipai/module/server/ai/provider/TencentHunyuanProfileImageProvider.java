@@ -104,8 +104,8 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         if (hasSourceImage) {
             payload.put("Images", List.of(sourceImageUrl));
         }
-        payload.put("LogoAdd", runtime.watermark(false) ? 1 : 0);
-        payload.put("Revise", Boolean.FALSE.equals(runtime.publicConfig().getPromptRewrite()) ? 0 : 1);
+        payload.put("LogoAdd", 0);
+        payload.put("Revise", 0);
         return payload;
     }
 
@@ -121,17 +121,17 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 layoutText(fixedLayout, "flowBackgroundColor", "#eee3cf"));
         String background = tencentBackgroundHint(templateSceneCode, styleCode, layoutText(fixedLayout, "background", ""));
         String referenceInstruction = hasSourceImage
-                ? "参考图1是用户源图，只用于人物身份与自然气质参考，不要复制背景文字、标签或版式。"
-                : "当前没有可用身份参考图，按封面人物气质生成。";
+                ? "参考图1是用户源图，只用于人物身份与自然气质参考，不要复制或生成背景文字、标签、水印或版式。"
+                : "当前没有可用身份参考图，按封面人物气质生成，但不要加入任何文字、数字、水印、Logo、标签或二维码。";
         String prompt = """
-                生成一张 9:16 全幅演员分享封面背景图，输出 2160x3840。
+                生成一张 9:16 全幅无字演员详情页背景底图，输出 2160x3840。
                 %s
-                构图：演员位于右侧，左侧留空给后续信息层；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
-                页面职责：只做第一屏封面背景；姓名、资料、照片、视频入口和后续内容由小程序原生组件渲染。
+                构图：演员位于右侧，左侧保持干净、低细节、无字符的纹理背景；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
+                页面职责：只提供第一屏视觉背景底图；姓名、资料、照片、视频入口和后续内容由小程序原生组件渲染，图片内不要预留、书写或模拟任何文字区域。
                 风格：%s
                 背景：%s
-                安全要求：背景必须全幅铺满，不要边框、纸张边缘、卡片壳、假 UI、可读文字、水印、Logo、标签、二维码、联系方式或任何前景组件。
-                Plain, unmarked, symbol-free.
+                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI 或任何前景组件。
+                Plain background image only, no typography, no captions, no watermark, no logo.
                 """.formatted(
                 referenceInstruction,
                 flowBackgroundColor,
@@ -185,7 +185,7 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
         if (normalized.contains("artistic")) {
             return "艺术电影感，画廊氛围、戏剧性阴影、低饱和石墨与橄榄调。";
         }
-        return "高级演员分享封面背景，真实、克制、干净。";
+        return "高级演员详情页背景底图，真实、克制、干净。";
     }
 
     private String tencentBackgroundHint(String templateSceneCode, String styleCode, String background) {
@@ -220,11 +220,14 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 .replace("title-safe", "top overlay")
                 .replace("abstract seal accents", "abstract warm-red motifs")
                 .replace("abstract seal shapes", "abstract warm-red motifs")
-                .replace("seal-script", "decorative")
-                .replace("calligraphy", "decorative strokes")
-                .replace("stamp marks", "marked emblems")
+                .replace("seal-script", "abstract motifs")
+                .replace("calligraphy", "ink texture")
+                .replace("stamp marks", "abstract color marks")
                 .replace("readable characters", "recognizable symbols")
                 .replace("readable text", "recognizable typography")
+                .replace("profile-card", "background")
+                .replace("poster", "background")
+                .replace("share", "casting")
                 .replaceAll("\\s+", " ");
     }
 
