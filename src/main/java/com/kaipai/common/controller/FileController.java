@@ -1,6 +1,8 @@
 package com.kaipai.common.controller;
 
+import com.kaipai.common.dto.PdfUploadRespDTO;
 import com.kaipai.common.result.R;
+import com.kaipai.common.service.PdfUploadService;
 import com.kaipai.common.util.CosUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -16,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class FileController {
 
     private final CosUtil cosUtil;
+    private final PdfUploadService pdfUploadService;
 
     @Operation(summary = "上传头像", description = "支持 jpg/png/webp，建议不超过 2MB")
     @PostMapping("/upload/avatar")
@@ -36,6 +39,13 @@ public class FileController {
     public R<String> uploadVideo(
             @Parameter(description = "视频文件") @RequestParam("file") MultipartFile file) {
         return R.ok(cosUtil.uploadVideo(file, "video"));
+    }
+
+    @Operation(summary = "上传 PDF 简历", description = "支持 pdf，建议不超过 20MB，页数不超过 20 页")
+    @PostMapping("/upload/pdf")
+    public R<PdfUploadRespDTO> uploadPdf(
+            @Parameter(description = "PDF 简历文件") @RequestParam("file") MultipartFile file) {
+        return R.ok(pdfUploadService.uploadResumePdf(file));
     }
 
     @Operation(summary = "上传营业执照", description = "支持 jpg/png，建议不超过 5MB")

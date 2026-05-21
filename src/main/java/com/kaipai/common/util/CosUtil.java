@@ -12,7 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
@@ -31,6 +33,7 @@ public class CosUtil {
     private static final long PHOTO_MAX_SIZE = 5 * MB;
     private static final long LICENSE_MAX_SIZE = 5 * MB;
     private static final long VIDEO_MAX_SIZE = 100 * MB;
+    private static final long PDF_MAX_SIZE = 20 * MB;
 
     /** 允许上传的图片类型 */
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
@@ -40,6 +43,11 @@ public class CosUtil {
     /** 允许上传的视频类型 */
     private static final List<String> ALLOWED_VIDEO_TYPES = Arrays.asList(
             "video/mp4", "video/quicktime", "video/x-msvideo"
+    );
+
+    /** 允许上传的 PDF 类型；部分小程序会以 octet-stream 发送，最终仍以扩展名和文件头校验为准 */
+    private static final List<String> ALLOWED_PDF_TYPES = Arrays.asList(
+            "application/pdf", "application/x-pdf", "application/octet-stream"
     );
 
     /**
@@ -69,6 +77,42 @@ public class CosUtil {
     }
 
     /**
+     * 上传 PDF 文件，返回访问 URL
+     *
+     * @param file   PDF 文件
+     * @param folder 存储目录
+     * @return 访问 URL
+     */
+    public String uploadPdf(MultipartFile file, String folder) {
+        validatePdfFile(file);
+        validateFileSize(file, PDF_MAX_SIZE, "PDF 简历不能超过20MB");
+        return upload(file, folder, "application/pdf", ".pdf");
+    }
+
+    /**
+     * 上传服务端生成的二进制文件，返回访问 URL
+     */
+    public String uploadBytes(byte[] bytes, String contentType, String folder, String extension) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BizException(ResultCode.FILE_UPLOAD_FAILED.getCode(), "生成文件为空");
+        }
+        String normalizedExtension = normalizeExtension(extension);
+        String key = buildKey(folder, normalizedExtension);
+        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes)) {
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentLength(bytes.length);
+            metadata.setContentType(contentType);
+            PutObjectRequest request = new PutObjectRequest(
+                    cosConfig.getBucketName(), key, inputStream, metadata);
+            cosClient.putObject(request);
+            return buildUrl(key);
+        } catch (IOException | CosClientException e) {
+            log.error("COS 生成文件上传失败", e);
+            throw new BizException(ResultCode.FILE_UPLOAD_FAILED);
+        }
+    }
+
+    /**
      * 删除文件
      *
      * @param fileUrl 文件完整 URL
@@ -85,20 +129,20 @@ public class CosUtil {
     }
 
     private String upload(MultipartFile file, String folder) {
+        return upload(file, folder, file.getContentType(), null);
+    }
+
+    private String upload(MultipartFile file, String folder, String contentType, String fallbackExtension) {
         String originalName = file.getOriginalFilename();
         String ext = originalName != null && originalName.contains(".")
                 ? originalName.substring(originalName.lastIndexOf("."))
-                : "";
+                : normalizeExtension(fallbackExtension);
         // key 格式: folder/yyyy/MM/dd/uuid.ext
-        String key = String.format("%s/%s/%s%s",
-                folder,
-                LocalDate.now().toString().replace("-", "/"),
-                UUID.randomUUID().toString().replace("-", ""),
-                ext);
+        String key = buildKey(folder, ext);
         try {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(file.getSize());
-            metadata.setContentType(file.getContentType());
+            metadata.setContentType(contentType);
             PutObjectRequest request = new PutObjectRequest(
                     cosConfig.getBucketName(), key, file.getInputStream(), metadata);
             cosClient.putObject(request);
@@ -122,6 +166,30 @@ public class CosUtil {
         }
     }
 
+    private void validatePdfFile(MultipartFile file) {
+        String originalName = file.getOriginalFilename();
+        String contentType = file.getContentType();
+        boolean namedPdf = originalName != null && originalName.toLowerCase().endsWith(".pdf");
+        boolean supportedType = contentType == null || ALLOWED_PDF_TYPES.contains(contentType);
+        if (!namedPdf || !supportedType || !hasPdfMagic(file)) {
+            throw new BizException(ResultCode.FILE_TYPE_NOT_ALLOWED);
+        }
+    }
+
+    private boolean hasPdfMagic(MultipartFile file) {
+        try (InputStream inputStream = file.getInputStream()) {
+            byte[] header = inputStream.readNBytes(5);
+            return header.length == 5
+                    && header[0] == '%'
+                    && header[1] == 'P'
+                    && header[2] == 'D'
+                    && header[3] == 'F'
+                    && header[4] == '-';
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
+
     private long imageMaxSize(String folder) {
         return switch (folder) {
             case "avatar" -> AVATAR_MAX_SIZE;
@@ -138,6 +206,21 @@ public class CosUtil {
             case "photo" -> "作品图片不能超过5MB";
             default -> "图片大小不能超过5MB";
         };
+    }
+
+    private String buildKey(String folder, String extension) {
+        return String.format("%s/%s/%s%s",
+                folder,
+                LocalDate.now().toString().replace("-", "/"),
+                UUID.randomUUID().toString().replace("-", ""),
+                normalizeExtension(extension));
+    }
+
+    private String normalizeExtension(String extension) {
+        if (extension == null || extension.isBlank()) {
+            return "";
+        }
+        return extension.startsWith(".") ? extension : "." + extension;
     }
 
     private String buildUrl(String key) {

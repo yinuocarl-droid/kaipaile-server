@@ -94,7 +94,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         profile.setExperienceDesc(writeExperienceSummary(dto.getWorkExperiences()));
         profile.setPhone(firstNonBlank(dto.getContactPhone(), user.getPhone(), null));
         profile.setIsCertified(user.getRealAuthStatus() != null && user.getRealAuthStatus() == 2);
-        profile.setExtendedField(writeJson(buildProfileExtras(dto)));
+        profile.setExtendedField(writeJson(buildProfileExtras(dto, readProfileExtras(profile.getExtendedField()))));
 
         if (creating) {
             save(profile);
@@ -181,6 +181,10 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         dto.setBodyType(extras.bodyType);
         dto.setHairStyle(extras.hairStyle);
         dto.setLanguages(extras.languages == null ? new ArrayList<>() : extras.languages);
+        dto.setResumePdfUrl(extras.resumePdfUrl);
+        dto.setResumePdfName(extras.resumePdfName);
+        dto.setResumePdfPageCount(extras.resumePdfPageCount);
+        dto.setResumePdfPageImageUrls(extras.resumePdfPageImageUrls == null ? new ArrayList<>() : extras.resumePdfPageImageUrls);
         String contactPhone = firstNonBlank(profile == null ? null : profile.getPhone(), user.getPhone(), "");
         dto.setHasContactPhone(StringUtils.hasText(contactPhone));
         dto.setContactPhone(includePrivate ? contactPhone : null);
@@ -302,12 +306,16 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         return user.getRealAuthStatus() != null && user.getRealAuthStatus() == 2;
     }
 
-    private ProfileExtras buildProfileExtras(ActorProfileSaveDTO dto) {
+    private ProfileExtras buildProfileExtras(ActorProfileSaveDTO dto, ProfileExtras existing) {
         ProfileExtras extras = new ProfileExtras();
-        extras.photoCategories = dto.getPhotoCategories() == null ? new ActorPhotoCategoriesDTO() : dto.getPhotoCategories();
-        extras.bodyType = trimToNull(dto.getBodyType());
-        extras.hairStyle = trimToNull(dto.getHairStyle());
-        extras.languages = safeList(dto.getLanguages());
+        extras.photoCategories = dto.getPhotoCategories() == null ? existing.photoCategories : dto.getPhotoCategories();
+        extras.bodyType = dto.getBodyType() == null ? existing.bodyType : trimToNull(dto.getBodyType());
+        extras.hairStyle = dto.getHairStyle() == null ? existing.hairStyle : trimToNull(dto.getHairStyle());
+        extras.languages = dto.getLanguages() == null ? existing.languages : safeList(dto.getLanguages());
+        extras.resumePdfUrl = dto.getResumePdfUrl() == null ? existing.resumePdfUrl : trimToNull(dto.getResumePdfUrl());
+        extras.resumePdfName = dto.getResumePdfName() == null ? existing.resumePdfName : trimToNull(dto.getResumePdfName());
+        extras.resumePdfPageCount = dto.getResumePdfPageCount() == null ? existing.resumePdfPageCount : dto.getResumePdfPageCount();
+        extras.resumePdfPageImageUrls = dto.getResumePdfPageImageUrls() == null ? existing.resumePdfPageImageUrls : safeList(dto.getResumePdfPageImageUrls());
         return extras;
     }
 
@@ -503,6 +511,10 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         public String bodyType;
         public String hairStyle;
         public List<String> languages = new ArrayList<>();
+        public String resumePdfUrl;
+        public String resumePdfName;
+        public Integer resumePdfPageCount;
+        public List<String> resumePdfPageImageUrls = new ArrayList<>();
     }
 
     private static class ExperienceExtras {

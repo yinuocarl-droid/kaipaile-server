@@ -47,6 +47,14 @@ public class ActorProfileDTO {
 
     private List<String> languages = new ArrayList<>();
 
+    private String resumePdfUrl;
+
+    private String resumePdfName;
+
+    private Integer resumePdfPageCount;
+
+    private List<String> resumePdfPageImageUrls = new ArrayList<>();
+
     private String contactPhone;
 
     private Boolean hasContactPhone;
