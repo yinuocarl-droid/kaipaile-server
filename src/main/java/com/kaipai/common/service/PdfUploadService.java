@@ -39,6 +39,10 @@ public class PdfUploadService {
     private static final String PDF_FOLDER = "actor-resume-pdf";
     private static final String PDF_PAGE_FOLDER = "actor-resume-pdf-pages";
 
+    static {
+        ImageIO.scanForPlugins();
+    }
+
     private final CosUtil cosUtil;
 
     public PdfUploadRespDTO uploadResumePdf(MultipartFile file) {
