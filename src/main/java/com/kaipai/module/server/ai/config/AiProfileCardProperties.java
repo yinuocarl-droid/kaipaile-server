@@ -15,7 +15,7 @@ public class AiProfileCardProperties {
 
     private int estimatedReadyMinutes = 10;
 
-    private boolean coverQualityGateEnabled = false;
+    private boolean coverQualityGateEnabled = true;
 
     private int coverQualityMaxAttempts = 3;
 

@@ -51,6 +51,8 @@ kaipai:
       provider-code: ${AI_PROFILE_CARD_PROVIDER_CODE:kplyyk}
       generation-mode: image_to_image
       estimated-ready-minutes: 10
+      cover-quality-gate-enabled: ${AI_PROFILE_CARD_COVER_QUALITY_GATE_ENABLED:true}
+      cover-quality-max-attempts: ${AI_PROFILE_CARD_COVER_QUALITY_MAX_ATTEMPTS:3}
       kplyyk:
         endpoint: ${AI_PROFILE_CARD_KPLYYK_ENDPOINT:http://kplyyk.com/v0/management/image-generation/test}
         auth-header: ${AI_PROFILE_CARD_KPLYYK_AUTH_HEADER:Authorization}

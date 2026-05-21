@@ -25,7 +25,7 @@ public class AiProfileCardPromptAgent {
     private static final int PROVIDER_CANVAS_WIDTH = 2160;
     private static final int PROVIDER_CANVAS_HEIGHT = 3840;
     private static final String FULL_BLEED_BACKGROUND_POLICY = "full-bleed edge-to-edge background layer only; no visible frame, border, paper sheet edge, card outline, document page, scroll edge, poster mat, boxed background, corner bracket, corner ornament, or enclosing decorative box";
-    private static final String TEXT_FREE_BACKGROUND_POLICY = "no typography anywhere: no Chinese characters, English letters, numbers, captions, labels, AI-generated disclosure, signature, seal text, calligraphy, poster title, placeholder text, watermark, logo, QR code, or UI words";
+    private static final String TEXT_FREE_BACKGROUND_POLICY = "no typography anywhere: no Chinese characters, English letters, numbers, captions, labels, AI-generated disclosure, signature, seal text, calligraphy, poster title, placeholder text, watermark, logo, QR code, UI words, lower-third text blocks, article snippets, headline bars, or pseudo-writing";
 
     private final ObjectMapper objectMapper;
     private final AiProfileImageProviderRegistry providerRegistry;
@@ -160,6 +160,10 @@ public class AiProfileCardPromptAgent {
                 "poster title",
                 "海报标题",
                 "姓名文字",
+                "text blocks",
+                "headline bars",
+                "article snippets",
+                "lower-third copy",
                 "phone number",
                 "QR code",
                 "watermark",
@@ -233,7 +237,7 @@ public class AiProfileCardPromptAgent {
                 风格：%s
                 背景：%s
                 人物气质参考（仅用于人物外观，不得写入画面）：%s
-                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI 或任何前景组件。
+                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI、文章片段、标题栏、文字块、底部文案或任何前景组件。
                 Plain background image only, no typography, no captions, no watermark, no logo.
                 """.formatted(
                 sourceReferenceInstruction(sourceImageUrl),
