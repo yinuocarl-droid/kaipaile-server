@@ -133,14 +133,14 @@ public class TencentHunyuanProfileImageProvider implements AiProfileImageProvide
                 生成一张 9:16 全幅无字演员详情页背景底图，输出 2160x3840。
                 %s
                 构图：演员位于右侧，左侧保持干净、低细节、无字符的纹理背景；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
-                页面职责：只提供第一屏视觉背景底图；姓名、资料、照片、视频入口和后续内容由小程序原生组件渲染，图片内不要预留、书写或模拟任何文字区域。
+                页面职责：只提供第一屏视觉背景底图；图中不要出现姓名、资料、标签、按钮、卡片、列表、排版块或任何假 UI。
                 风格：%s
                 背景：%s
                 版式禁区：%s
                 质检标准：%s
                 安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI、文章片段、标题栏、文字块、底部文案或任何前景组件。
-                特别注意：画面下半屏、底部留白、边角和纹理区域也不能出现文字块、文章片段、书页印字、招牌、标签、哈希标签、字幕条或任何像字的笔画。
-                Plain background image only, no typography, no captions, no watermark, no logo, no pseudo-text.
+                特别注意：画面下半屏、底部留白、边角和纹理区域只能是空背景或抽象纹理，不能出现文字块、文章片段、书页印字、招牌、标签、哈希标签、字幕条或任何像字的笔画。
+                Plain background image only, no typography, no captions, no watermark, no logo.
                 """.formatted(
                 referenceInstruction,
                 flowBackgroundColor,

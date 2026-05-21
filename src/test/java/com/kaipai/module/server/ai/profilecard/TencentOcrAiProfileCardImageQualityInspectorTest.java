@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class TencentOcrAiProfileCardImageQualityInspectorTest {
 
     @Test
-    void inspectCoverShouldSkipWhenTencentOcrIsNotConfigured() {
+    void inspectCoverShouldReportUnavailableWhenTencentOcrIsNotConfigured() {
         AiImageProviderConfigService configService = mock(AiImageProviderConfigService.class);
         when(configService.findRuntimeConfig("tencent-hunyuan")).thenReturn(Optional.empty());
         TencentOcrAiProfileCardImageQualityInspector inspector = new TencentOcrAiProfileCardImageQualityInspector(
@@ -27,8 +27,9 @@ class TencentOcrAiProfileCardImageQualityInspectorTest {
                 "https://example.com/generated.png",
                 "tencent-hunyuan");
 
-        assertTrue(inspection.accepted());
-        assertTrue(inspection.reason().contains("跳过"));
+        assertFalse(inspection.accepted());
+        assertFalse(inspection.retryable());
+        assertTrue(inspection.reason().contains("无法执行"));
     }
 
     @Test
@@ -47,7 +48,7 @@ class TencentOcrAiProfileCardImageQualityInspectorTest {
     }
 
     @Test
-    void ocrUnavailableErrorShouldBeTreatedAsSkip() {
+    void ocrUnavailableErrorShouldBeTreatedAsUnavailable() {
         TencentOcrAiProfileCardImageQualityInspector inspector = new TencentOcrAiProfileCardImageQualityInspector(
                 mock(AiImageProviderConfigService.class),
                 new ObjectMapper());

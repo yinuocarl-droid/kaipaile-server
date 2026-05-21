@@ -58,6 +58,10 @@ class AiProfileCardPromptAgentTest {
         assertTrue(generation.prompt().negativePrompt().contains("paper sheet edge"));
         assertTrue(generation.prompt().negativePrompt().contains("corner ornament"));
         assertTrue(generation.prompt().negativePrompt().contains("drawn video player"));
+        assertFalse(generation.prompt().promptText().contains("性别="));
+        assertFalse(generation.prompt().promptText().contains("年龄="));
+        assertFalse(generation.prompt().promptText().contains("城市="));
+        assertFalse(generation.prompt().promptText().contains("技能="));
 
         AiProfileImageGenerationRequest request = provider.lastRequest.get();
         assertNotNull(request);
@@ -168,7 +172,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(promptText.contains("构图"));
         assertTrue(promptText.contains("风格"));
         assertTrue(promptText.contains("背景"));
-        assertTrue(promptText.contains("人物气质参考"));
+        assertTrue(promptText.contains("图中不要出现姓名、资料、标签、按钮、卡片、列表、排版块或任何假 UI"));
         assertTrue(promptText.contains("固定主题背景色"));
         assertTrue(promptText.contains("禁止出现任何可读字符"));
         assertTrue(promptText.contains("中文"));
@@ -188,8 +192,7 @@ class AiProfileCardPromptAgentTest {
         assertTrue(promptText.contains("第一屏视觉背景底图"));
         assertTrue(promptText.contains("左侧保持干净、低细节、无字符"));
         assertTrue(promptText.contains("自然过渡到固定主题背景色"));
-        assertTrue(promptText.contains("姓名、资料、照片、视频入口和后续内容"));
-        assertTrue(promptText.contains("小程序原生组件"));
+        assertTrue(promptText.contains("图中不要出现姓名、资料、标签、按钮、卡片、列表、排版块或任何假 UI"));
         assertTrue(promptText.contains("全幅铺满"));
         assertTrue(promptText.contains("禁止出现任何可读字符"));
         assertFalse(promptText.contains("第1/3"));

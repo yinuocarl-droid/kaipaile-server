@@ -48,7 +48,7 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
         if (runtime == null) {
             String message = "腾讯 OCR 未配置，封面质检无法执行";
             log.warn(message);
-            return AiProfileCardImageQualityInspection.skipped(message);
+            return AiProfileCardImageQualityInspection.unavailable(message);
         }
 
         String secretId = runtime.secret("secretId");
@@ -72,7 +72,7 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
             if (isOcrUnavailable(error)) {
                 String message = "腾讯 OCR 服务不可用，封面质检无法执行";
                 log.warn(message + ": {}", truncate(error.getMessage()));
-                return AiProfileCardImageQualityInspection.skipped(message);
+                return AiProfileCardImageQualityInspection.unavailable(message);
             }
             throw error;
         } catch (Exception error) {

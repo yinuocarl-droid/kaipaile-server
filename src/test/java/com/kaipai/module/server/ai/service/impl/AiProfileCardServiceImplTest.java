@@ -130,6 +130,68 @@ class AiProfileCardServiceImplTest {
     }
 
     @Test
+    void generateCoverImageWithQualityGateShouldNotRetryWhenInspectionIsUnavailable() {
+        AiProfileCardProperties properties = new AiProfileCardProperties();
+        properties.setCoverQualityGateEnabled(true);
+        properties.setCoverQualityMaxAttempts(3);
+        AiProfileCardPromptAgent promptAgent = mock(AiProfileCardPromptAgent.class);
+        AiGeneratedImageStorage imageStorage = mock(AiGeneratedImageStorage.class);
+        ActorAiProfileCardPageMapper pageMapper = mock(ActorAiProfileCardPageMapper.class);
+        AiProfileCardImageQualityInspector qualityInspector = mock(AiProfileCardImageQualityInspector.class);
+        AiProfileCardServiceImpl service = spy(new AiProfileCardServiceImpl(
+                null,
+                null,
+                properties,
+                null,
+                promptAgent,
+                null,
+                null,
+                imageStorage,
+                pageMapper,
+                qualityInspector));
+        doReturn(true).when(service).updateById(any(ActorAiProfileCardTask.class));
+
+        ActorAiProfileCardTask task = newTask();
+        task.setSourceImageUrl("https://cdn.example.com/source.png");
+
+        AiProfileCardPrompt prompt = new AiProfileCardPrompt("{}", "prompt", "negative");
+        when(promptAgent.generate(
+                any(ActorProfileDTO.class),
+                anyString(),
+                eq("tencent-hunyuan"),
+                eq("classic"),
+                eq("classic"),
+                eq("https://cdn.example.com/source.png")))
+                .thenReturn(
+                        new AiProfileCardGeneration(
+                                "tencent-hunyuan",
+                                "hunyuan-image",
+                                prompt,
+                                AiProfileImageGenerationResult.imageUrl("https://tmp.example.com/unavailable.png")));
+        when(imageStorage.uploadFromUrl("https://tmp.example.com/unavailable.png", "ai-profile-card"))
+                .thenReturn("https://cos.example.com/unavailable.png");
+        when(qualityInspector.inspectCover("https://cos.example.com/unavailable.png", "tencent-hunyuan"))
+                .thenReturn(AiProfileCardImageQualityInspection.unavailable("腾讯 OCR 服务不可用，封面质检无法执行"));
+
+        RuntimeException error = assertThrows(RuntimeException.class, () -> ReflectionTestUtils.invokeMethod(
+                service,
+                "generateCoverImageWithQualityGate",
+                new ActorProfileDTO(),
+                task));
+
+        assertEquals("腾讯 OCR 服务不可用，封面质检无法执行", error.getMessage());
+        verify(promptAgent, times(1)).generate(
+                any(ActorProfileDTO.class),
+                anyString(),
+                eq("tencent-hunyuan"),
+                eq("classic"),
+                eq("classic"),
+                eq("https://cdn.example.com/source.png"));
+        verify(qualityInspector, times(1)).inspectCover(anyString(), eq("tencent-hunyuan"));
+        verifyNoInteractions(pageMapper);
+    }
+
+    @Test
     void runGenerationShouldGenerateOnlySingleCoverAndPersistThemeColors() {
         AiProfileCardProperties properties = new AiProfileCardProperties();
         properties.setCoverQualityGateEnabled(false);

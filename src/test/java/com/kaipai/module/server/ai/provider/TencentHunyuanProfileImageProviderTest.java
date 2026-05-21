@@ -282,7 +282,7 @@ class TencentHunyuanProfileImageProviderTest {
         assertTrue(prompt.contains("参考图1是用户源图") || prompt.contains("当前没有可用身份参考图"));
         assertTrue(prompt.contains("固定主题背景色"));
         assertTrue(prompt.contains("只提供第一屏视觉背景底图"));
-        assertTrue(prompt.contains("姓名、资料、照片、视频入口和后续内容"));
+        assertTrue(prompt.contains("图中不要出现姓名、资料、标签、按钮、卡片、列表、排版块或任何假 UI"));
         assertTrue(prompt.contains("禁止出现任何可读字符"));
         assertTrue(prompt.contains("图片由AI生成"));
         assertTrue(prompt.contains("Plain background image only, no typography, no captions, no watermark, no logo."));

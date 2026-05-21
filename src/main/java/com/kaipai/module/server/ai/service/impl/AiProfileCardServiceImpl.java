@@ -226,10 +226,15 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
                             pageImageUrl,
                             task.getProviderCode());
                     if (!inspection.accepted()) {
+                        if (!inspection.retryable()) {
+                            throw new NonRetryableQualityInspectionException(inspection.reason());
+                        }
                         throw new BizException(inspection.reason());
                     }
                 }
                 return pageImageUrl;
+            } catch (NonRetryableQualityInspectionException error) {
+                throw error;
             } catch (RuntimeException error) {
                 lastError = error;
                 if (attempt >= maxAttempts) {
@@ -243,6 +248,12 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
             }
         }
         throw lastError == null ? new BizException("AI 分享图封面页生成失败") : lastError;
+    }
+
+    private static final class NonRetryableQualityInspectionException extends RuntimeException {
+        private NonRetryableQualityInspectionException(String message) {
+            super(message);
+        }
     }
 
     private String buildCoverRetryFailureReason(int attempt, int maxAttempts, String detail) {

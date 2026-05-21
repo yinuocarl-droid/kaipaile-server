@@ -134,16 +134,14 @@ public class AiProfileCardPromptAgent {
         qualityChecklist.addAll(List.of(
                 TEXT_FREE_BACKGROUND_POLICY,
                 "single cover role is followed: the generated asset is only the first-screen background",
-                "all fixed layout regions remain open for deterministic mini-program component rendering",
-                style.subjectBox(),
-                "lower native content sections stay calm, low contrast, and readable",
-                "style-specific texture and visual details are premium but never compete with native foreground panels",
+                "lower edge and outer edge remain clean, low-detail, and text-free background texture only",
+                "style-specific texture and visual details are premium but never become typography, captions, labels, cards, rows, thumbnails, or video controls",
                 "background stays full-bleed from edge to edge with no frame, border, card shell, page edge or corner ornament"
         ));
         brief.put("qualityChecklist", qualityChecklist);
 
         String promptJson = writeJson(brief);
-        String promptText = buildPromptText(profile, style, templateSceneCode, resolvedStyleCode, sourceImageUrl, flowTheme);
+        String promptText = buildPromptText(style, templateSceneCode, resolvedStyleCode, sourceImageUrl, flowTheme);
         String negativePrompt = String.join(", ",
                 "readable text",
                 "Chinese characters",
@@ -223,8 +221,7 @@ public class AiProfileCardPromptAgent {
         return StringUtils.hasText(sourceImageUrl) ? "identity_reference" : "none";
     }
 
-    private String buildPromptText(ActorProfileDTO profile,
-                                   StyleBrief style,
+    private String buildPromptText(StyleBrief style,
                                    String templateSceneCode,
                                    String styleCode,
                                    String sourceImageUrl,
@@ -233,18 +230,16 @@ public class AiProfileCardPromptAgent {
                 生成一张 9:16 全幅无字演员详情页背景底图，输出 2160x3840。
                 %s
                 构图：演员位于右侧，左侧保持干净、低细节、无字符的纹理背景；封面底部和外侧边缘自然过渡到固定主题背景色 %s，方便下方资料内容继续延展。
-                页面职责：只提供第一屏视觉背景底图；姓名、资料、照片、视频入口和后续内容全部由小程序原生组件渲染，图片内不要预留、书写或模拟任何文字区域。
+                页面职责：只提供第一屏视觉背景底图；图中不要出现姓名、资料、标签、按钮、卡片、列表、排版块或任何假 UI。
                 风格：%s
                 背景：%s
-                人物气质参考（仅用于人物外观，不得写入画面）：%s
-                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI、文章片段、标题栏、文字块、底部文案或任何前景组件。
+                安全要求：背景必须全幅铺满；全图禁止出现任何可读字符或疑似字符，包括中文、英文、数字、标题、姓名、海报字、书法字、印章字、签名、AI生成/图片由AI生成、Logo、水印、标签、二维码、联系方式、假 UI、文章片段、标题栏、文字块、底部文案或任何前景组件；画面下半屏、底部留白、边角和纹理区域也不能出现像字的笔画或伪文字。
                 Plain background image only, no typography, no captions, no watermark, no logo.
                 """.formatted(
                 sourceReferenceInstruction(sourceImageUrl),
                 flowTheme.backgroundColor(),
                 chineseStyleHint(templateSceneCode, styleCode, style),
-                chineseBackgroundHint(templateSceneCode, styleCode, style.backgroundMaterial()),
-                buildChineseProfileSignals(profile)
+                chineseBackgroundHint(templateSceneCode, styleCode, style.backgroundMaterial())
         );
     }
 
@@ -300,30 +295,6 @@ public class AiProfileCardPromptAgent {
             return background.trim();
         }
         return "低细节、全幅铺开的中性色背景，只保留稳定氛围。";
-    }
-
-    private String buildChineseProfileSignals(ActorProfileDTO profile) {
-        List<String> parts = new ArrayList<>();
-        addChinesePart(parts, "性别", profile.getGender());
-        addChinesePart(parts, "年龄", profile.getAge() == null ? null : String.valueOf(profile.getAge()));
-        addChinesePart(parts, "身高", profile.getHeight() == null ? null : profile.getHeight() + "cm");
-        addChinesePart(parts, "体重", profile.getWeight() == null ? null : profile.getWeight() + "kg");
-        addChinesePart(parts, "城市", profile.getCity());
-        addChinesePart(parts, "体型", profile.getBodyType());
-        addChinesePart(parts, "发型", profile.getHairStyle());
-        if (!safeList(profile.getSkillTypes()).isEmpty()) {
-            parts.add("技能=" + String.join("、", safeList(profile.getSkillTypes()).stream().limit(6).toList()));
-        }
-        if (!safeList(profile.getLanguages()).isEmpty()) {
-            parts.add("语言=" + String.join("、", safeList(profile.getLanguages()).stream().limit(4).toList()));
-        }
-        return parts.isEmpty() ? "专业演员气质" : String.join("；", parts);
-    }
-
-    private void addChinesePart(List<String> parts, String label, String value) {
-        if (StringUtils.hasText(value)) {
-            parts.add(label + "=" + value.trim());
-        }
     }
 
     private Map<String, Object> buildFixedLayout(StyleBrief style,

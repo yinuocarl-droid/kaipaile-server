@@ -4,19 +4,28 @@ import org.springframework.util.StringUtils;
 
 public record AiProfileCardImageQualityInspection(
         boolean accepted,
-        String reason
+        String reason,
+        boolean retryable
 ) {
 
+    public AiProfileCardImageQualityInspection(boolean accepted, String reason) {
+        this(accepted, reason, !accepted);
+    }
+
     public static AiProfileCardImageQualityInspection accept() {
-        return new AiProfileCardImageQualityInspection(true, "");
+        return new AiProfileCardImageQualityInspection(true, "", false);
     }
 
     public static AiProfileCardImageQualityInspection skipped(String reason) {
-        return new AiProfileCardImageQualityInspection(true, normalizeReason(reason, "AI 分享图成图质检已跳过"));
+        return unavailable(reason);
+    }
+
+    public static AiProfileCardImageQualityInspection unavailable(String reason) {
+        return new AiProfileCardImageQualityInspection(false, normalizeReason(reason, "AI 分享图成图质检无法执行"), false);
     }
 
     public static AiProfileCardImageQualityInspection rejected(String reason) {
-        return new AiProfileCardImageQualityInspection(false, normalizeReason(reason, "AI 分享图成图质检未通过"));
+        return new AiProfileCardImageQualityInspection(false, normalizeReason(reason, "AI 分享图成图质检未通过"), true);
     }
 
     private static String normalizeReason(String reason, String fallback) {
