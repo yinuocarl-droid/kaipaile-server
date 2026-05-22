@@ -17,6 +17,9 @@ public class LoginRespDTO {
     @Schema(description = "用户ID")
     private Long userId;
 
+    @Schema(description = "手机号")
+    private String phone;
+
     @Schema(description = "用户类型: 1=演员, 2=剧组/团队")
     private Integer userType;
 

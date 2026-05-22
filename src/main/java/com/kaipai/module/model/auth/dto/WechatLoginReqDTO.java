@@ -9,7 +9,7 @@ import lombok.Data;
 public class WechatLoginReqDTO {
 
     @NotBlank(message = "微信手机号授权 code 不能为空")
-    @Schema(description = "微信 getPhoneNumber 返回的 code", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "微信 getPhoneNumber 返回的手机号授权 code", requiredMode = Schema.RequiredMode.REQUIRED)
     private String code;
 
     @Schema(description = "邀请码（首次自动注册时生效）", example = "KM7P4A")

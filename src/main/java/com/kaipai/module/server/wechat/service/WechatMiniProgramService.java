@@ -6,5 +6,7 @@ public interface WechatMiniProgramService {
 
     String getAccessToken();
 
+    String getPhoneNumber(String code);
+
     byte[] getUnlimitedQrCode(String scene, String page, Integer width, boolean checkPath);
 }

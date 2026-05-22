@@ -1,10 +1,5 @@
 package com.kaipai.module.server.auth.service.impl;
 
-import cn.hutool.http.ContentType;
-import cn.hutool.http.HttpRequest;
-import cn.hutool.http.HttpUtil;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
@@ -22,11 +17,9 @@ import com.kaipai.module.server.wechat.service.WechatMiniProgramService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.Random;
@@ -46,6 +39,7 @@ public class AuthServiceImpl implements AuthService {
 
     private static final String SMS_CODE_PREFIX = "sms:code:";
     private static final long SMS_CODE_EXPIRE_MINUTES = 5;
+    private static final int USER_TYPE_ACTOR = 1;
     private static final int REGISTER_SOURCE_WECHAT_MINIAPP = 3;
 
     @Override
@@ -144,7 +138,7 @@ public class AuthServiceImpl implements AuthService {
         user.setAccount(phone);
         user.setPassword("");
         user.setUserName("开拍用户" + phone.substring(Math.max(0, phone.length() - 4)));
-        user.setUserType(0);
+        user.setUserType(USER_TYPE_ACTOR);
         user.setRegisterSource(REGISTER_SOURCE_WECHAT_MINIAPP);
         user.setRealAuthStatus(0);
         user.setValidInviteCount(0);
@@ -175,27 +169,7 @@ public class AuthServiceImpl implements AuthService {
         if (!wechatMiniProgramService.isConfigured()) {
             throw new BizException("微信登录未配置小程序 appId/appSecret");
         }
-        String accessToken = wechatMiniProgramService.getAccessToken();
-        String body = HttpRequest.post("https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=" + accessToken)
-                .contentType(ContentType.JSON.getValue())
-                .body(JSONUtil.createObj().set("code", code.trim()).toString())
-                .timeout(8000)
-                .execute()
-                .body();
-        JSONObject response = JSONUtil.parseObj(body);
-        Integer errCode = response.getInt("errcode");
-        if (errCode != null && errCode != 0) {
-            throw new BizException("微信手机号换取失败：" + response.getStr("errmsg", "unknown_error"));
-        }
-        JSONObject phoneInfo = response.getJSONObject("phone_info");
-        String phone = phoneInfo == null ? null : phoneInfo.getStr("purePhoneNumber");
-        if (!StringUtils.hasText(phone)) {
-            phone = phoneInfo == null ? null : phoneInfo.getStr("phoneNumber");
-        }
-        if (!StringUtils.hasText(phone)) {
-            throw new BizException("微信未返回可用手机号");
-        }
-        return phone.trim();
+        return wechatMiniProgramService.getPhoneNumber(code);
     }
 
     private LoginRespDTO buildLoginResp(User user) {
@@ -206,6 +180,7 @@ public class AuthServiceImpl implements AuthService {
         return LoginRespDTO.builder()
                 .token(token)
                 .userId(user.getUserId())
+                .phone(user.getPhone())
                 .userType(user.getUserType())
                 .nickName(user.getUserName())
                 .avatarUrl(user.getAvatarUrl())

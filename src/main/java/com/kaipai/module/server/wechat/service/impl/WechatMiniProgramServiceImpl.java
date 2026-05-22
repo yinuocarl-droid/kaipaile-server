@@ -24,6 +24,7 @@ public class WechatMiniProgramServiceImpl implements WechatMiniProgramService {
     private static final String WECHAT_ACCESS_TOKEN_CACHE_KEY = "wechat:miniapp:access-token";
     private static final String ACCESS_TOKEN_API = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s";
     private static final String UNLIMITED_QR_CODE_API = "https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=%s";
+    private static final String PHONE_NUMBER_API = "https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=%s";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -68,6 +69,33 @@ public class WechatMiniProgramServiceImpl implements WechatMiniProgramService {
                 TimeUnit.SECONDS
         );
         return accessToken.trim();
+    }
+
+    @Override
+    public String getPhoneNumber(String code) {
+        if (!StringUtils.hasText(code)) {
+            throw new BizException("微信手机号授权 code 不能为空");
+        }
+        String body = HttpRequest.post(String.format(PHONE_NUMBER_API, getAccessToken()))
+                .contentType(ContentType.JSON.getValue())
+                .body(JSONUtil.createObj().set("code", code.trim()).toString())
+                .timeout(8000)
+                .execute()
+                .body();
+        JSONObject response = JSONUtil.parseObj(body);
+        Integer errCode = response.getInt("errcode");
+        if (errCode != null && errCode != 0) {
+            throw new BizException("微信手机号换取失败：" + response.getStr("errmsg", "unknown_error"));
+        }
+        JSONObject phoneInfo = response.getJSONObject("phone_info");
+        String phone = phoneInfo == null ? null : phoneInfo.getStr("purePhoneNumber");
+        if (!StringUtils.hasText(phone)) {
+            phone = phoneInfo == null ? null : phoneInfo.getStr("phoneNumber");
+        }
+        if (!StringUtils.hasText(phone)) {
+            throw new BizException("微信未返回可用手机号");
+        }
+        return phone.trim();
     }
 
     @Override
