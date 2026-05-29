@@ -10,6 +10,10 @@ import com.kaipai.module.model.auth.dto.RegisterReqDTO;
 import com.kaipai.module.model.auth.dto.WechatLoginReqDTO;
 import com.kaipai.module.model.referral.entity.InviteCode;
 import com.kaipai.module.server.auth.service.AuthService;
+import com.kaipai.module.server.auth.sms.SmsCodeSendCommand;
+import com.kaipai.module.server.auth.sms.SmsCodeSendResult;
+import com.kaipai.module.server.auth.sms.SmsCodeSender;
+import com.kaipai.module.server.auth.sms.SmsProperties;
 import com.kaipai.module.model.user.entity.User;
 import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.referral.service.ReferralRegistrationService;
@@ -36,19 +40,30 @@ public class AuthServiceImpl implements AuthService {
     private final ReferralRegistrationService referralRegistrationService;
     private final ReferralRecordService referralRecordService;
     private final WechatMiniProgramService wechatMiniProgramService;
+    private final SmsCodeSender smsCodeSender;
+    private final SmsProperties smsProperties;
 
     private static final String SMS_CODE_PREFIX = "sms:code:";
-    private static final long SMS_CODE_EXPIRE_MINUTES = 5;
     private static final int USER_TYPE_ACTOR = 1;
     private static final int REGISTER_SOURCE_WECHAT_MINIAPP = 3;
 
     @Override
     public String sendCode(String phone) {
         String code = String.format("%06d", new Random().nextInt(1000000));
-        redisTemplate.opsForValue().set(SMS_CODE_PREFIX + phone, code, SMS_CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
-        // 开发阶段直接返回验证码，上线前替换为真实短信 SDK
-        log.info("【开发模式】手机号 {} 验证码: {}", phone, code);
-        return code;
+        long expireMinutes = Math.max(1, smsProperties.getCodeExpireMinutes());
+        redisTemplate.opsForValue().set(SMS_CODE_PREFIX + phone, code, expireMinutes, TimeUnit.MINUTES);
+        try {
+            SmsCodeSendResult result = smsCodeSender.sendCode(new SmsCodeSendCommand(phone, code, expireMinutes, "login"));
+            log.info("验证码发送完成 provider={}, requestId={}, serialNo={}, phone={}",
+                    result.providerCode(),
+                    result.requestId(),
+                    result.serialNo(),
+                    maskPhone(phone));
+            return result.exposeCodeToClient() ? code : null;
+        } catch (RuntimeException error) {
+            redisTemplate.delete(SMS_CODE_PREFIX + phone);
+            throw error;
+        }
     }
 
     @Override
@@ -189,5 +204,12 @@ public class AuthServiceImpl implements AuthService {
                 .invitedByUserId(user.getInvitedByUserId())
                 .validInviteCount(validInviteCount)
                 .build();
+    }
+
+    private String maskPhone(String phone) {
+        if (phone == null || phone.length() < 7) {
+            return "***";
+        }
+        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 }
