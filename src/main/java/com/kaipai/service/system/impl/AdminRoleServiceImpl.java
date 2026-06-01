@@ -1,0 +1,595 @@
+package com.kaipai.service.system.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
+import com.kaipai.common.exception.BizException;
+import com.kaipai.common.result.PageResult;
+import com.kaipai.model.system.dto.AdminRoleAiGovernanceMatrixItemDTO;
+import com.kaipai.model.system.dto.AdminRoleAiGovernanceMatrixRespDTO;
+import com.kaipai.model.system.dto.AdminRoleCopyDTO;
+import com.kaipai.model.system.dto.AdminRoleQueryDTO;
+import com.kaipai.model.system.dto.AdminRoleRecruitGovernanceMatrixItemDTO;
+import com.kaipai.model.system.dto.AdminRoleRecruitGovernanceMatrixRespDTO;
+import com.kaipai.model.system.dto.AdminRoleRespDTO;
+import com.kaipai.model.system.dto.AdminRoleSaveDTO;
+import com.kaipai.model.system.dto.AdminRoleStatusChangeDTO;
+import com.kaipai.model.system.entity.AdminRole;
+import com.kaipai.model.system.entity.AdminUserRole;
+import com.kaipai.mapper.system.AdminRoleMapper;
+import com.kaipai.service.system.AdminRoleService;
+import com.kaipai.service.system.AdminUserRoleService;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.BeanUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+@Service
+@RequiredArgsConstructor
+public class AdminRoleServiceImpl extends ServiceImpl<AdminRoleMapper, AdminRole> implements AdminRoleService {
+
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+    private static final String AI_GOVERNANCE_PAGE_PERMISSION = "page.system.ai-resume-governance";
+    private static final String OPERATION_LOGS_PAGE_PERMISSION = "page.system.operation-logs";
+    private static final String AI_REVIEW_ACTION_PERMISSION = "action.system.ai-resume.review";
+    private static final String AI_RESOLVE_ACTION_PERMISSION = "action.system.ai-resume.resolve";
+    private static final String RECRUIT_PROJECTS_PAGE_PERMISSION = "page.recruit.projects";
+    private static final String RECRUIT_ROLES_PAGE_PERMISSION = "page.recruit.roles";
+    private static final String RECRUIT_APPLIES_PAGE_PERMISSION = "page.recruit.applies";
+    private static final String RECRUIT_PROJECT_STATUS_ACTION_PERMISSION = "action.recruit.project.status";
+    private static final String RECRUIT_ROLE_STATUS_ACTION_PERMISSION = "action.recruit.role.status";
+    private static final String ADMIN_USERS_PAGE_PERMISSION = "page.system.admin-users";
+    private static final String REMOVED_RECRUIT_MENU_PERMISSION = "menu." + "recruit";
+
+    private final ObjectMapper objectMapper;
+    private final AdminOperationLogger adminOperationLogger;
+    private final AdminUserRoleService adminUserRoleService;
+
+    @Override
+    public PageResult<AdminRoleRespDTO> adminRoleList(AdminRoleQueryDTO query) {
+        Page<AdminRole> page = new Page<>(query.getPageNo(), query.getPageSize());
+        LambdaQueryWrapper<AdminRole> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(query.getRoleCode())) {
+            wrapper.like(AdminRole::getRoleCode, query.getRoleCode().trim());
+        }
+        if (StringUtils.hasText(query.getRoleName())) {
+            wrapper.like(AdminRole::getRoleName, query.getRoleName().trim());
+        }
+        if (query.getStatus() != null) {
+            wrapper.eq(AdminRole::getStatus, query.getStatus());
+        }
+        wrapper.orderByDesc(AdminRole::getCreateTime).orderByDesc(AdminRole::getAdminRoleId);
+
+        Page<AdminRole> result = page(page, wrapper);
+        List<AdminRoleRespDTO> list = result.getRecords().stream().map(this::toResp).toList();
+        return new PageResult<>(result.getTotal(), list);
+    }
+
+    @Override
+    public AdminRoleRespDTO adminRoleDetail(Long adminRoleId) {
+        AdminRole role = getById(adminRoleId);
+        if (role == null) {
+            throw new BizException("后台角色不存在");
+        }
+        return toResp(role);
+    }
+
+    @Override
+    public AdminRoleAiGovernanceMatrixRespDTO aiGovernanceMatrix() {
+        List<AdminRole> roles = list(new LambdaQueryWrapper<AdminRole>()
+                .orderByDesc(AdminRole::getStatus)
+                .orderByAsc(AdminRole::getRoleCode)
+                .orderByAsc(AdminRole::getAdminRoleId));
+        Map<Long, Long> boundUserCountMap = adminUserRoleService.list().stream()
+                .collect(Collectors.groupingBy(AdminUserRole::getAdminRoleId,
+                        Collectors.mapping(AdminUserRole::getAdminUserId,
+                                Collectors.collectingAndThen(Collectors.toSet(), userIds -> (long) userIds.size()))));
+
+        List<AdminRoleAiGovernanceMatrixItemDTO> items = roles.stream()
+                .map(role -> toAiGovernanceMatrixItem(role, boundUserCountMap.getOrDefault(role.getAdminRoleId(), 0L)))
+                .sorted(Comparator.comparingInt(this::aiGovernanceStageRank)
+                        .thenComparing(AdminRoleAiGovernanceMatrixItemDTO::getBoundUserCount, Comparator.reverseOrder())
+                        .thenComparing(AdminRoleAiGovernanceMatrixItemDTO::getRoleCode, Comparator.nullsLast(String::compareTo)))
+                .toList();
+
+        long enabledRoleCount = items.stream().filter(this::isEnabledRole).count();
+        long aiReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getAiReady()))
+                .count();
+        long operationLogsPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
+                .count();
+        long pendingRoleCount = items.stream()
+                .filter(item -> isEnabledRole(item)
+                        && !Boolean.TRUE.equals(item.getAiReady())
+                        && !Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
+                .count();
+        long operationLogsPermissionGapBoundUserCount = items.stream()
+                .filter(item -> isEnabledRole(item) && Boolean.TRUE.equals(item.getOperationLogsPermissionGap()))
+                .mapToLong(item -> item.getBoundUserCount() == null ? 0L : item.getBoundUserCount())
+                .sum();
+
+        AdminRoleAiGovernanceMatrixRespDTO dto = new AdminRoleAiGovernanceMatrixRespDTO();
+        dto.setTotalRoleCount(items.size());
+        dto.setEnabledRoleCount((int) enabledRoleCount);
+        dto.setAiReadyRoleCount((int) aiReadyRoleCount);
+        dto.setOperationLogsPermissionGapRoleCount((int) operationLogsPermissionGapRoleCount);
+        dto.setPendingRoleCount((int) pendingRoleCount);
+        dto.setOperationLogsPermissionGapBoundUserCount(operationLogsPermissionGapBoundUserCount);
+        dto.setOperationLogsPermissionGapCleared(operationLogsPermissionGapRoleCount == 0 && operationLogsPermissionGapBoundUserCount == 0);
+        dto.setList(items);
+        return dto;
+    }
+
+    @Override
+    public AdminRoleRecruitGovernanceMatrixRespDTO recruitGovernanceMatrix() {
+        List<AdminRole> roles = list(new LambdaQueryWrapper<AdminRole>()
+                .orderByDesc(AdminRole::getStatus)
+                .orderByAsc(AdminRole::getRoleCode)
+                .orderByAsc(AdminRole::getAdminRoleId));
+        Map<Long, Long> boundUserCountMap = adminUserRoleService.list().stream()
+                .collect(Collectors.groupingBy(AdminUserRole::getAdminRoleId,
+                        Collectors.mapping(AdminUserRole::getAdminUserId,
+                                Collectors.collectingAndThen(Collectors.toSet(), userIds -> (long) userIds.size()))));
+
+        List<AdminRoleRecruitGovernanceMatrixItemDTO> items = roles.stream()
+                .map(role -> toRecruitGovernanceMatrixItem(role, boundUserCountMap.getOrDefault(role.getAdminRoleId(), 0L)))
+                .sorted(Comparator.comparingInt(this::recruitGovernanceStageRank)
+                        .thenComparing(AdminRoleRecruitGovernanceMatrixItemDTO::getBoundUserCount, Comparator.reverseOrder())
+                        .thenComparing(AdminRoleRecruitGovernanceMatrixItemDTO::getRoleCode, Comparator.nullsLast(String::compareTo)))
+                .toList();
+
+        long enabledRoleCount = items.stream().filter(this::isEnabledRecruitRole).count();
+        long recruitReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitReady()))
+                .count();
+        long pageReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getPageReady()))
+                .count();
+        long actionReadyRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getActionReady()))
+                .count();
+        long recruitPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitPermissionGap()))
+                .count();
+        long pagePermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getPagePermissionGap()))
+                .count();
+        long actionPermissionGapRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getActionPermissionGap()))
+                .count();
+        long pendingRoleCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item)
+                        && !Boolean.TRUE.equals(item.getRecruitReady())
+                        && !Boolean.TRUE.equals(item.getRecruitPermissionGap()))
+                .count();
+        long recruitPermissionGapBoundUserCount = items.stream()
+                .filter(item -> isEnabledRecruitRole(item) && Boolean.TRUE.equals(item.getRecruitPermissionGap()))
+                .mapToLong(item -> item.getBoundUserCount() == null ? 0L : item.getBoundUserCount())
+                .sum();
+
+        AdminRoleRecruitGovernanceMatrixRespDTO dto = new AdminRoleRecruitGovernanceMatrixRespDTO();
+        dto.setTotalRoleCount(items.size());
+        dto.setEnabledRoleCount((int) enabledRoleCount);
+        dto.setRecruitReadyRoleCount((int) recruitReadyRoleCount);
+        dto.setPageReadyRoleCount((int) pageReadyRoleCount);
+        dto.setActionReadyRoleCount((int) actionReadyRoleCount);
+        dto.setRecruitPermissionGapRoleCount((int) recruitPermissionGapRoleCount);
+        dto.setPagePermissionGapRoleCount((int) pagePermissionGapRoleCount);
+        dto.setActionPermissionGapRoleCount((int) actionPermissionGapRoleCount);
+        dto.setPendingRoleCount((int) pendingRoleCount);
+        dto.setRecruitPermissionGapBoundUserCount(recruitPermissionGapBoundUserCount);
+        dto.setPagePermissionGapCleared(pagePermissionGapRoleCount == 0);
+        dto.setActionPermissionGapCleared(actionPermissionGapRoleCount == 0);
+        dto.setRecruitPermissionGapCleared(recruitPermissionGapRoleCount == 0 && recruitPermissionGapBoundUserCount == 0);
+        dto.setList(items);
+        return dto;
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO createRole(AdminRoleSaveDTO dto) {
+        ensureRoleCodeUnique(dto.getRoleCode(), null);
+        AdminRole role = new AdminRole();
+        applySaveDto(role, dto);
+        if (role.getStatus() == null) {
+            role.setStatus(1);
+        }
+        save(role);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("create")
+                .targetType("admin_role")
+                .targetId(role.getAdminRoleId())
+                .afterSnapshot(snapshot(role))
+                .extraContext(snapshot(role))
+                .operationResult(1)
+                .build());
+        return toResp(role);
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO updateRole(Long adminRoleId, AdminRoleSaveDTO dto) {
+        AdminRole role = getById(adminRoleId);
+        if (role == null) {
+            throw new BizException("后台角色不存在");
+        }
+        ensureRoleCodeUnique(dto.getRoleCode(), adminRoleId);
+        AdminRole beforeRole = copyRole(role);
+        applySaveDto(role, dto);
+        updateById(role);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("edit")
+                .targetType("admin_role")
+                .targetId(role.getAdminRoleId())
+                .beforeSnapshot(snapshot(beforeRole))
+                .afterSnapshot(snapshot(role))
+                .extraContext(snapshot(role))
+                .operationResult(1)
+                .build());
+        return toResp(getById(adminRoleId));
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO changeRoleStatus(AdminRoleStatusChangeDTO dto) {
+        AdminRole role = getById(dto.getAdminRoleId());
+        if (role == null) {
+            throw new BizException("后台角色不存在");
+        }
+        Integer beforeStatus = role.getStatus();
+        Integer targetStatus = dto.getStatus();
+        if (targetStatus == null || !List.of(1, 2).contains(targetStatus)) {
+            throw new BizException("角色状态不合法");
+        }
+        if (beforeStatus != null && beforeStatus.equals(targetStatus)) {
+            throw new BizException("角色当前状态已是目标状态");
+        }
+        AdminRole beforeRole = copyRole(role);
+        role.setStatus(targetStatus);
+        role.setRemark(dto.getReason());
+        updateById(role);
+        long boundCount = adminUserRoleService.lambdaQuery()
+                .eq(AdminUserRole::getAdminRoleId, role.getAdminRoleId())
+                .count();
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode(targetStatus == 1 ? "enable" : "disable")
+                .targetType("admin_role")
+                .targetId(role.getAdminRoleId())
+                .beforeSnapshot(snapshot(beforeRole))
+                .afterSnapshot(snapshot(role))
+                .extraContext(buildStatusContext(role, beforeStatus, targetStatus, boundCount, dto.getReason()))
+                .operationResult(1)
+                .build());
+        return toResp(getById(role.getAdminRoleId()));
+    }
+
+    @Override
+    @Transactional
+    public AdminRoleRespDTO copyRole(AdminRoleCopyDTO dto) {
+        AdminRole source = getById(dto.getSourceRoleId());
+        if (source == null) {
+            throw new BizException("源角色不存在");
+        }
+        ensureRoleCodeUnique(dto.getRoleCode(), null);
+        AdminRole copy = new AdminRole();
+        copy.setRoleCode(dto.getRoleCode().trim());
+        copy.setRoleName(dto.getRoleName().trim());
+        copy.setRemark(dto.getRemark());
+        copy.setStatus(1);
+        copy.setMenuPermissionsJson(writeMenuPermissions(readPermissions(source.getMenuPermissionsJson())));
+        copy.setPagePermissionsJson(source.getPagePermissionsJson());
+        copy.setActionPermissionsJson(source.getActionPermissionsJson());
+        save(copy);
+        adminOperationLogger.log(AdminOperationLogCommand.builder()
+                .moduleCode("system")
+                .operationCode("copy")
+                .targetType("admin_role")
+                .targetId(copy.getAdminRoleId())
+                .afterSnapshot(snapshot(copy))
+                .extraContext(buildCopyContext(source, copy))
+                .operationResult(1)
+                .build());
+        return toResp(copy);
+    }
+
+    private void ensureRoleCodeUnique(String roleCode, Long excludeRoleId) {
+        LambdaQueryWrapper<AdminRole> wrapper = new LambdaQueryWrapper<AdminRole>()
+                .eq(AdminRole::getRoleCode, roleCode.trim());
+        if (excludeRoleId != null) {
+            wrapper.ne(AdminRole::getAdminRoleId, excludeRoleId);
+        }
+        if (count(wrapper) > 0) {
+            throw new BizException("角色编码已存在");
+        }
+    }
+
+    private void applySaveDto(AdminRole role, AdminRoleSaveDTO dto) {
+        role.setRoleCode(dto.getRoleCode().trim());
+        role.setRoleName(dto.getRoleName().trim());
+        role.setStatus(dto.getStatus());
+        role.setRemark(dto.getRemark());
+        role.setMenuPermissionsJson(writeMenuPermissions(dto.getMenuPermissions()));
+        role.setPagePermissionsJson(writePermissions(dto.getPagePermissions()));
+        role.setActionPermissionsJson(writePermissions(dto.getActionPermissions()));
+    }
+
+    private AdminRoleRespDTO toResp(AdminRole role) {
+        AdminRoleRespDTO dto = new AdminRoleRespDTO();
+        BeanUtils.copyProperties(role, dto);
+        dto.setMenuPermissions(readPermissions(role.getMenuPermissionsJson()));
+        dto.setPagePermissions(readPermissions(role.getPagePermissionsJson()));
+        dto.setActionPermissions(readPermissions(role.getActionPermissionsJson()));
+        return dto;
+    }
+
+    private List<String> readPermissions(String permissionsJson) {
+        if (!StringUtils.hasText(permissionsJson)) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(permissionsJson, STRING_LIST_TYPE);
+        } catch (JsonProcessingException ex) {
+            throw new BizException("角色权限数据格式异常");
+        }
+    }
+
+    private String writePermissions(List<String> permissions) {
+        List<String> safePermissions = permissions == null ? Collections.emptyList() : permissions;
+        try {
+            return objectMapper.writeValueAsString(safePermissions);
+        } catch (JsonProcessingException ex) {
+            throw new BizException("角色权限数据序列化失败");
+        }
+    }
+
+    private String writeMenuPermissions(List<String> permissions) {
+        List<String> safePermissions = permissions == null ? Collections.emptyList() : permissions;
+        if (safePermissions.contains(REMOVED_RECRUIT_MENU_PERMISSION)) {
+            throw new BizException("菜单权限不允许写入");
+        }
+        return writePermissions(safePermissions);
+    }
+
+    private AdminRoleAiGovernanceMatrixItemDTO toAiGovernanceMatrixItem(AdminRole role, long boundUserCount) {
+        List<String> pagePermissions = readPermissions(role.getPagePermissionsJson());
+        List<String> actionPermissions = readPermissions(role.getActionPermissionsJson());
+        boolean hasAiGovernancePage = pagePermissions.contains(AI_GOVERNANCE_PAGE_PERMISSION);
+        boolean hasOperationLogsPage = pagePermissions.contains(OPERATION_LOGS_PAGE_PERMISSION);
+        boolean hasAiReviewAction = actionPermissions.contains(AI_REVIEW_ACTION_PERMISSION);
+        boolean hasAiResolveAction = actionPermissions.contains(AI_RESOLVE_ACTION_PERMISSION);
+        boolean aiReady = hasAiGovernancePage && hasAiReviewAction && hasAiResolveAction;
+        boolean operationLogsPermissionGap = hasOperationLogsPage && !aiReady;
+        boolean hasAnyAiPermission = hasAiGovernancePage || hasAiReviewAction || hasAiResolveAction;
+
+        AdminRoleAiGovernanceMatrixItemDTO dto = new AdminRoleAiGovernanceMatrixItemDTO();
+        dto.setAdminRoleId(role.getAdminRoleId());
+        dto.setRoleCode(role.getRoleCode());
+        dto.setRoleName(role.getRoleName());
+        dto.setStatus(role.getStatus());
+        dto.setBoundUserCount(boundUserCount);
+        dto.setHasAiGovernancePage(hasAiGovernancePage);
+        dto.setHasOperationLogsPage(hasOperationLogsPage);
+        dto.setHasAiReviewAction(hasAiReviewAction);
+        dto.setHasAiResolveAction(hasAiResolveAction);
+        dto.setAiReady(aiReady);
+        dto.setOperationLogsPermissionGap(operationLogsPermissionGap);
+        dto.setPermissionStage(resolveAiGovernanceStage(aiReady, operationLogsPermissionGap, hasOperationLogsPage, hasAnyAiPermission));
+        dto.setMissingPermissions(buildMissingPermissions(hasAiGovernancePage, hasAiReviewAction, hasAiResolveAction));
+        return dto;
+    }
+
+    private AdminRoleRecruitGovernanceMatrixItemDTO toRecruitGovernanceMatrixItem(AdminRole role, long boundUserCount) {
+        List<String> pagePermissions = readPermissions(role.getPagePermissionsJson());
+        List<String> actionPermissions = readPermissions(role.getActionPermissionsJson());
+        boolean hasRecruitProjectsPage = pagePermissions.contains(RECRUIT_PROJECTS_PAGE_PERMISSION);
+        boolean hasRecruitRolesPage = pagePermissions.contains(RECRUIT_ROLES_PAGE_PERMISSION);
+        boolean hasRecruitAppliesPage = pagePermissions.contains(RECRUIT_APPLIES_PAGE_PERMISSION);
+        boolean hasRecruitProjectStatusAction = actionPermissions.contains(RECRUIT_PROJECT_STATUS_ACTION_PERMISSION);
+        boolean hasRecruitRoleStatusAction = actionPermissions.contains(RECRUIT_ROLE_STATUS_ACTION_PERMISSION);
+        boolean hasAdminUsersPage = pagePermissions.contains(ADMIN_USERS_PAGE_PERMISSION);
+        boolean pageReady = hasRecruitProjectsPage
+                && hasRecruitRolesPage
+                && hasRecruitAppliesPage;
+        boolean actionReady = hasRecruitProjectStatusAction
+                && hasRecruitRoleStatusAction;
+        boolean recruitReady = pageReady
+                && actionReady;
+        boolean hasAnyRecruitRuntimePermission = hasRecruitProjectsPage
+                || hasRecruitRolesPage
+                || hasRecruitAppliesPage
+                || hasRecruitProjectStatusAction
+                || hasRecruitRoleStatusAction;
+        boolean pagePermissionGap = hasAdminUsersPage && !pageReady;
+        boolean actionPermissionGap = hasAdminUsersPage && !actionReady;
+        boolean recruitPermissionGap = pagePermissionGap || actionPermissionGap;
+
+        AdminRoleRecruitGovernanceMatrixItemDTO dto = new AdminRoleRecruitGovernanceMatrixItemDTO();
+        dto.setAdminRoleId(role.getAdminRoleId());
+        dto.setRoleCode(role.getRoleCode());
+        dto.setRoleName(role.getRoleName());
+        dto.setStatus(role.getStatus());
+        dto.setBoundUserCount(boundUserCount);
+        dto.setHasRecruitProjectsPage(hasRecruitProjectsPage);
+        dto.setHasRecruitRolesPage(hasRecruitRolesPage);
+        dto.setHasRecruitAppliesPage(hasRecruitAppliesPage);
+        dto.setHasRecruitProjectStatusAction(hasRecruitProjectStatusAction);
+        dto.setHasRecruitRoleStatusAction(hasRecruitRoleStatusAction);
+        dto.setHasAdminUsersPage(hasAdminUsersPage);
+        dto.setPageReady(pageReady);
+        dto.setActionReady(actionReady);
+        dto.setPagePermissionGap(pagePermissionGap);
+        dto.setActionPermissionGap(actionPermissionGap);
+        dto.setRecruitReady(recruitReady);
+        dto.setRecruitPermissionGap(recruitPermissionGap);
+        dto.setPermissionStage(resolveRecruitGovernanceStage(recruitReady, recruitPermissionGap, hasAdminUsersPage, hasAnyRecruitRuntimePermission));
+        dto.setMissingPermissions(buildRecruitMissingPermissions(
+                hasRecruitProjectsPage,
+                hasRecruitRolesPage,
+                hasRecruitAppliesPage,
+                hasRecruitProjectStatusAction,
+                hasRecruitRoleStatusAction));
+        return dto;
+    }
+
+    private List<String> buildMissingPermissions(boolean hasAiGovernancePage, boolean hasAiReviewAction,
+                                                 boolean hasAiResolveAction) {
+        List<String> missingPermissions = new ArrayList<>();
+        if (!hasAiGovernancePage) {
+            missingPermissions.add(AI_GOVERNANCE_PAGE_PERMISSION);
+        }
+        if (!hasAiReviewAction) {
+            missingPermissions.add(AI_REVIEW_ACTION_PERMISSION);
+        }
+        if (!hasAiResolveAction) {
+            missingPermissions.add(AI_RESOLVE_ACTION_PERMISSION);
+        }
+        return missingPermissions;
+    }
+
+    private String resolveAiGovernanceStage(boolean aiReady, boolean operationLogsPermissionGap, boolean hasOperationLogsPage,
+                                            boolean hasAnyAiPermission) {
+        if (aiReady) {
+            return "ai_ready";
+        }
+        if (operationLogsPermissionGap && hasAnyAiPermission) {
+            return "permission_review";
+        }
+        if (operationLogsPermissionGap) {
+            return "permission_review";
+        }
+        if (hasOperationLogsPage) {
+            return "permission_review";
+        }
+        if (hasAnyAiPermission) {
+            return "ai_partial";
+        }
+        return "unassigned";
+    }
+
+    private List<String> buildRecruitMissingPermissions(boolean hasRecruitProjectsPage,
+                                                        boolean hasRecruitRolesPage, boolean hasRecruitAppliesPage,
+                                                        boolean hasRecruitProjectStatusAction,
+                                                        boolean hasRecruitRoleStatusAction) {
+        List<String> missingPermissions = new ArrayList<>();
+        if (!hasRecruitProjectsPage) {
+            missingPermissions.add(RECRUIT_PROJECTS_PAGE_PERMISSION);
+        }
+        if (!hasRecruitRolesPage) {
+            missingPermissions.add(RECRUIT_ROLES_PAGE_PERMISSION);
+        }
+        if (!hasRecruitAppliesPage) {
+            missingPermissions.add(RECRUIT_APPLIES_PAGE_PERMISSION);
+        }
+        if (!hasRecruitProjectStatusAction) {
+            missingPermissions.add(RECRUIT_PROJECT_STATUS_ACTION_PERMISSION);
+        }
+        if (!hasRecruitRoleStatusAction) {
+            missingPermissions.add(RECRUIT_ROLE_STATUS_ACTION_PERMISSION);
+        }
+        return missingPermissions;
+    }
+
+    private String resolveRecruitGovernanceStage(boolean recruitReady, boolean recruitPermissionGap, boolean hasAdminUsersPage,
+                                                 boolean hasAnyRecruitRuntimePermission) {
+        if (recruitReady) {
+            return "recruit_ready";
+        }
+        if (recruitPermissionGap && hasAnyRecruitRuntimePermission) {
+            return "permission_review";
+        }
+        if (recruitPermissionGap) {
+            return "permission_review";
+        }
+        if (hasAdminUsersPage) {
+            return "permission_review";
+        }
+        if (hasAnyRecruitRuntimePermission) {
+            return "recruit_partial";
+        }
+        return "unassigned";
+    }
+
+    private int aiGovernanceStageRank(AdminRoleAiGovernanceMatrixItemDTO item) {
+        return switch (item.getPermissionStage()) {
+            case "permission_review" -> 0;
+            case "ai_partial" -> 1;
+            case "unassigned" -> 2;
+            case "ai_ready" -> 3;
+            default -> 5;
+        };
+    }
+
+    private int recruitGovernanceStageRank(AdminRoleRecruitGovernanceMatrixItemDTO item) {
+        return switch (item.getPermissionStage()) {
+            case "permission_review" -> 0;
+            case "recruit_partial" -> 1;
+            case "unassigned" -> 2;
+            case "recruit_ready" -> 3;
+            default -> 5;
+        };
+    }
+
+    private boolean isEnabledRole(AdminRoleAiGovernanceMatrixItemDTO item) {
+        return Integer.valueOf(1).equals(item.getStatus());
+    }
+
+    private boolean isEnabledRecruitRole(AdminRoleRecruitGovernanceMatrixItemDTO item) {
+        return Integer.valueOf(1).equals(item.getStatus());
+    }
+
+    private AdminRole copyRole(AdminRole role) {
+        AdminRole copy = new AdminRole();
+        BeanUtils.copyProperties(role, copy);
+        return copy;
+    }
+
+    private AdminRoleRespDTO snapshot(AdminRole role) {
+        return toResp(role);
+    }
+
+    private Map<String, Object> buildStatusContext(AdminRole role, Integer before, Integer after,
+                                                   long boundCount, String reason) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("role_id", role.getAdminRoleId());
+        context.put("role_code", role.getRoleCode());
+        context.put("status_before", before);
+        context.put("status_after", after);
+        context.put("bound_admin_user_count", boundCount);
+        context.put("reason", reason);
+        context.put("menu_permissions_snapshot", role.getMenuPermissionsJson());
+        context.put("page_permissions_snapshot", role.getPagePermissionsJson());
+        context.put("action_permissions_snapshot", role.getActionPermissionsJson());
+        return context;
+    }
+
+    private Map<String, Object> buildCopyContext(AdminRole source, AdminRole copy) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("source_role_id", source.getAdminRoleId());
+        context.put("source_role_code", source.getRoleCode());
+        context.put("new_role_id", copy.getAdminRoleId());
+        context.put("new_role_code", copy.getRoleCode());
+        context.put("menu_permissions_snapshot", copy.getMenuPermissionsJson());
+        context.put("page_permissions_snapshot", copy.getPagePermissionsJson());
+        context.put("action_permissions_snapshot", copy.getActionPermissionsJson());
+        return context;
+    }
+}
+
+

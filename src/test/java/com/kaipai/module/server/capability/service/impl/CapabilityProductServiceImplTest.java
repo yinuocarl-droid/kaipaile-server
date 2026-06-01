@@ -1,13 +1,13 @@
-package com.kaipai.module.server.capability.service.impl;
+package com.kaipai.service.capability.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.auth.AdminOperationLogCommand;
 import com.kaipai.common.auth.AdminOperationLogger;
-import com.kaipai.module.model.capability.dto.AdminCapabilityBenefitOverviewDTO;
-import com.kaipai.module.model.capability.dto.CapabilityBenefitQueryDTO;
-import com.kaipai.module.model.capability.dto.CapabilityBenefitSaveDTO;
-import com.kaipai.module.model.capability.entity.CapabilityProduct;
+import com.kaipai.model.capability.dto.AdminCapabilityBenefitOverviewDTO;
+import com.kaipai.model.capability.dto.CapabilityBenefitQueryDTO;
+import com.kaipai.model.capability.dto.CapabilityBenefitSaveDTO;
+import com.kaipai.model.capability.entity.CapabilityProduct;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

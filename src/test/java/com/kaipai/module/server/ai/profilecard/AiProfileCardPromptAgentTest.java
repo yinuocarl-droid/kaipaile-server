@@ -1,9 +1,9 @@
-package com.kaipai.module.server.ai.profilecard;
+package com.kaipai.service.ai.profilecard;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kaipai.module.model.actor.dto.ActorProfileDTO;
-import com.kaipai.module.server.ai.provider.AiProfileImageProvider;
-import com.kaipai.module.server.ai.provider.AiProfileImageProviderRegistry;
+import com.kaipai.model.actor.dto.ActorProfileDTO;
+import com.kaipai.integration.ai.provider.AiProfileImageProvider;
+import com.kaipai.integration.ai.provider.AiProfileImageProviderRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

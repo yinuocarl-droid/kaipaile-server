@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@MapperScan("com.kaipai.module.server.**.mapper")
+@MapperScan("com.kaipai.mapper.**")
 @EnableScheduling
 public class KaipaiApplication {
 

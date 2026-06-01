@@ -1,14 +1,14 @@
-package com.kaipai.module.controller.admin.ai;
+package com.kaipai.controller.admin.ai;
 
 import com.kaipai.common.result.R;
-import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestReqDTO;
-import com.kaipai.module.model.ai.dto.AdminAiImageProviderTestRespDTO;
-import com.kaipai.module.server.ai.profilecard.AiGeneratedImageStorage;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
-import com.kaipai.module.server.ai.provider.AiProfileImageProvider;
-import com.kaipai.module.server.ai.provider.AiProfileImageProviderRegistry;
-import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
+import com.kaipai.model.ai.dto.AdminAiImageProviderTestReqDTO;
+import com.kaipai.model.ai.dto.AdminAiImageProviderTestRespDTO;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
+import com.kaipai.service.ai.profilecard.AiProfileImageGenerationRequest;
+import com.kaipai.service.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.integration.ai.provider.AiProfileImageProvider;
+import com.kaipai.integration.ai.provider.AiProfileImageProviderRegistry;
+import com.kaipai.service.ai.AiImageProviderConfigService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

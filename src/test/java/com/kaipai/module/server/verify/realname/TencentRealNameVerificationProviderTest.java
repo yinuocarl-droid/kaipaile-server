@@ -1,4 +1,4 @@
-package com.kaipai.module.server.verify.realname;
+package com.kaipai.integration.verify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;

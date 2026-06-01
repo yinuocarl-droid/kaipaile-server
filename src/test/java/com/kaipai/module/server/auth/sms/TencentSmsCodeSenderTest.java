@@ -1,4 +1,4 @@
-package com.kaipai.module.server.auth.sms;
+package com.kaipai.integration.sms;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;

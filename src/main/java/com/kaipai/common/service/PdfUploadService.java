@@ -3,7 +3,7 @@ package com.kaipai.common.service;
 import com.kaipai.common.dto.PdfUploadRespDTO;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
-import com.kaipai.common.util.CosUtil;
+import com.kaipai.integration.storage.CosUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;

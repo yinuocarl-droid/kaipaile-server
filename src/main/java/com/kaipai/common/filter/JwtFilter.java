@@ -2,7 +2,7 @@ package com.kaipai.common.filter;
 
 import com.kaipai.common.auth.AdminAuthenticatedUser;
 import com.kaipai.common.util.JwtUtil;
-import com.kaipai.module.server.ai.config.AiResumeNotificationProperties;
+import com.kaipai.service.ai.config.AiResumeNotificationProperties;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

@@ -1,13 +1,13 @@
-package com.kaipai.module.server.ai.provider;
+package com.kaipai.integration.ai.provider;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
-import com.kaipai.module.model.ai.dto.AiImageProviderPublicConfigDTO;
-import com.kaipai.module.server.ai.config.AiImageProviderRuntimeConfig;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest;
-import com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult;
-import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
+import com.kaipai.model.ai.dto.AiImageProviderPublicConfigDTO;
+import com.kaipai.service.ai.config.AiImageProviderRuntimeConfig;
+import com.kaipai.service.ai.profilecard.AiProfileImageGenerationRequest;
+import com.kaipai.service.ai.profilecard.AiProfileImageGenerationResult;
+import com.kaipai.service.ai.AiImageProviderConfigService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;

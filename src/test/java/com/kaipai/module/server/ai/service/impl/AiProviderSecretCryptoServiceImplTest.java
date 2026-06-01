@@ -1,4 +1,4 @@
-package com.kaipai.module.server.ai.service.impl;
+package com.kaipai.service.ai.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;

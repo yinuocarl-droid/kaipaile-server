@@ -1,8 +1,8 @@
 package com.kaipai.common.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kaipai.module.model.system.entity.AdminOperationLog;
-import com.kaipai.module.server.system.service.AdminOperationLogService;
+import com.kaipai.model.system.entity.AdminOperationLog;
+import com.kaipai.service.system.AdminOperationLogService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

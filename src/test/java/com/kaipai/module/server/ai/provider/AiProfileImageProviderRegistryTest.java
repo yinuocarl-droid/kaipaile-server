@@ -1,4 +1,4 @@
-package com.kaipai.module.server.ai.provider;
+package com.kaipai.integration.ai.provider;
 
 import com.kaipai.common.exception.BizException;
 import org.junit.jupiter.api.Test;
@@ -34,9 +34,9 @@ class AiProfileImageProviderRegistryTest {
         }
 
         @Override
-        public com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult generate(
-                com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationRequest request) {
-            return com.kaipai.module.server.ai.profilecard.AiProfileImageGenerationResult.imageUrl("https://cdn.kplyyk.com/generated.png");
+        public com.kaipai.service.ai.profilecard.AiProfileImageGenerationResult generate(
+                com.kaipai.service.ai.profilecard.AiProfileImageGenerationRequest request) {
+            return com.kaipai.service.ai.profilecard.AiProfileImageGenerationResult.imageUrl("https://cdn.kplyyk.com/generated.png");
         }
     }
 }

@@ -2,8 +2,8 @@ package com.kaipai.common.auth;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kaipai.module.model.system.entity.AdminOperationLog;
-import com.kaipai.module.server.system.service.AdminOperationLogService;
+import com.kaipai.model.system.entity.AdminOperationLog;
+import com.kaipai.service.system.AdminOperationLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

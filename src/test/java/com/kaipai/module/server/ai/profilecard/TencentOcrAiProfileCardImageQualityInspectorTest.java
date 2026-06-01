@@ -1,8 +1,8 @@
-package com.kaipai.module.server.ai.profilecard;
+package com.kaipai.service.ai.profilecard;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
-import com.kaipai.module.server.ai.service.AiImageProviderConfigService;
+import com.kaipai.service.ai.AiImageProviderConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
