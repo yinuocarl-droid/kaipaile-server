@@ -1,6 +1,6 @@
 package com.kaipai.module.server.ai.profilecard;
 
-import com.kaipai.common.config.CosConfig;
+import com.kaipai.common.config.TencentCloudProperties;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.qcloud.cos.COSClient;
@@ -39,7 +39,7 @@ public class AiGeneratedImageStorage {
     );
 
     private final COSClient cosClient;
-    private final CosConfig cosConfig;
+    private final TencentCloudProperties tencentCloudProperties;
 
     public String uploadFromUrl(String imageUrl, String folder) {
         String normalizedUrl = requireHttpImageUrl(imageUrl);
@@ -65,7 +65,7 @@ public class AiGeneratedImageStorage {
             metadata.setContentLength(bytes.length);
             metadata.setContentType(normalizedContentType);
             PutObjectRequest request = new PutObjectRequest(
-                    cosConfig.getBucketName(),
+                    bucketName(),
                     key,
                     new ByteArrayInputStream(bytes),
                     metadata);
@@ -189,7 +189,15 @@ public class AiGeneratedImageStorage {
 
     private String buildUrlPrefix() {
         return String.format("https://%s.cos.%s.myqcloud.com/",
-                cosConfig.getBucketName(), cosConfig.getRegion());
+                bucketName(), region());
+    }
+
+    private String bucketName() {
+        return tencentCloudProperties.getCos().getBucketName();
+    }
+
+    private String region() {
+        return tencentCloudProperties.getCos().getRegion();
     }
 
     private record DownloadedImage(

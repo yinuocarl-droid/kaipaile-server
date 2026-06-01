@@ -1,6 +1,6 @@
 package com.kaipai.common.util;
 
-import com.kaipai.common.config.CosConfig;
+import com.kaipai.common.config.TencentCloudProperties;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.qcloud.cos.COSClient;
@@ -26,7 +26,7 @@ import java.util.UUID;
 public class CosUtil {
 
     private final COSClient cosClient;
-    private final CosConfig cosConfig;
+    private final TencentCloudProperties tencentCloudProperties;
 
     private static final long MB = 1024L * 1024L;
     private static final long AVATAR_MAX_SIZE = 2 * MB;
@@ -103,7 +103,7 @@ public class CosUtil {
             metadata.setContentLength(bytes.length);
             metadata.setContentType(contentType);
             PutObjectRequest request = new PutObjectRequest(
-                    cosConfig.getBucketName(), key, inputStream, metadata);
+                    bucketName(), key, inputStream, metadata);
             cosClient.putObject(request);
             return buildUrl(key);
         } catch (IOException | CosClientException e) {
@@ -122,7 +122,7 @@ public class CosUtil {
         try {
             // 从 URL 中提取 key
             String key = extractKeyFromUrl(fileUrl);
-            cosClient.deleteObject(cosConfig.getBucketName(), key);
+            cosClient.deleteObject(bucketName(), key);
         } catch (CosClientException e) {
             log.warn("COS 文件删除失败: {}", fileUrl, e);
         }
@@ -144,7 +144,7 @@ public class CosUtil {
             metadata.setContentLength(file.getSize());
             metadata.setContentType(contentType);
             PutObjectRequest request = new PutObjectRequest(
-                    cosConfig.getBucketName(), key, file.getInputStream(), metadata);
+                    bucketName(), key, file.getInputStream(), metadata);
             cosClient.putObject(request);
             return buildUrl(key);
         } catch (IOException | CosClientException e) {
@@ -225,12 +225,20 @@ public class CosUtil {
 
     private String buildUrl(String key) {
         return String.format("https://%s.cos.%s.myqcloud.com/%s",
-                cosConfig.getBucketName(), cosConfig.getRegion(), key);
+                bucketName(), region(), key);
     }
 
     private String extractKeyFromUrl(String fileUrl) {
         String prefix = String.format("https://%s.cos.%s.myqcloud.com/",
-                cosConfig.getBucketName(), cosConfig.getRegion());
+                bucketName(), region());
         return fileUrl.startsWith(prefix) ? fileUrl.substring(prefix.length()) : fileUrl;
+    }
+
+    private String bucketName() {
+        return tencentCloudProperties.getCos().getBucketName();
+    }
+
+    private String region() {
+        return tencentCloudProperties.getCos().getRegion();
     }
 }

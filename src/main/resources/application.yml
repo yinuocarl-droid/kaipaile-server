@@ -39,6 +39,19 @@ wechat:
     app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
     env-version: ${WECHAT_MINIAPP_ENV_VERSION:develop}
 
+tencent:
+  secret-id: ${TENCENT_CLOUD_SECRET_ID:}
+  secret-key: ${TENCENT_CLOUD_SECRET_KEY:}
+  faceid:
+    enabled: ${TENCENT_FACEID_ENABLED:false}
+    endpoint: ${TENCENT_FACEID_ENDPOINT:https://faceid.tencentcloudapi.com}
+    version: ${TENCENT_FACEID_VERSION:2018-03-01}
+    connect-timeout-ms: ${TENCENT_FACEID_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${TENCENT_FACEID_READ_TIMEOUT_MS:10000}
+  cos:
+    region: ${TENCENT_COS_REGION:}
+    bucket-name: ${TENCENT_COS_BUCKET_NAME:}
+
 kaipai:
   cors:
     allowed-origins:

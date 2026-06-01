@@ -23,6 +23,8 @@ import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationOwnerMapper;
+import com.kaipai.module.server.verify.provider.TencentIdCardVerificationClient;
+import com.kaipai.module.server.verify.provider.TencentIdCardVerificationResult;
 import com.kaipai.module.server.verify.service.IdentityVerificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -50,6 +52,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
     private final ReferralRecordService referralRecordService;
+    private final TencentIdCardVerificationClient tencentIdCardVerificationClient;
 
     private static final int STATUS_PENDING = 1;
     private static final int STATUS_APPROVED = 2;
@@ -123,19 +126,23 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         record.setReviewerId(null);
         record.setReviewedAt(null);
         record.setSnapshotProfileCompletion(profileCompletion);
+        applyProviderVerification(record, realName, normalizedIdCardNo);
         save(record);
 
         User updateUser = new User();
         updateUser.setUserId(userId);
-        updateUser.setRealAuthStatus(STATUS_PENDING);
+        updateUser.setRealAuthStatus(record.getStatus());
         updateUser.setUpdateUserId(userId);
         updateUser.setUpdateUserName(resolveUserUpdateName(user));
         userMapper.updateById(updateUser);
 
         if (profile != null) {
             profile.setRealName(realName);
-            profile.setIsCertified(Boolean.FALSE);
+            profile.setIsCertified(record.getStatus() == STATUS_APPROVED);
             actorProfileMapper.updateById(profile);
+        }
+        if (record.getStatus() == STATUS_APPROVED) {
+            referralRecordService.reconcileInviteeReferral(userId);
         }
 
         return toStatusResp(record);
@@ -179,6 +186,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             item.setRealName(record.getRealName());
             item.setStatus(record.getStatus());
             item.setSubmitTime(record.getCreateTime());
+            item.setVerifyProvider(record.getVerifyProvider());
+            item.setProviderResultCode(record.getProviderResultCode());
             User user = userMap.get(record.getUserId());
             if (user != null) {
                 item.setPhone(user.getPhone());
@@ -204,6 +213,10 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmitTime(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
+        dto.setVerifyProvider(record.getVerifyProvider());
+        dto.setProviderResultCode(record.getProviderResultCode());
+        dto.setProviderDescription(record.getProviderDescription());
+        dto.setProviderRequestId(record.getProviderRequestId());
         User user = userMapper.selectById(record.getUserId());
         if (user != null) {
             dto.setPhone(user.getPhone());
@@ -350,6 +363,41 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         dto.setSubmittedAt(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
         return dto;
+    }
+
+    private void applyProviderVerification(IdentityVerification record, String realName, String idCardNo) {
+        if (!tencentIdCardVerificationClient.enabled()) {
+            record.setVerifyProvider("manual");
+            return;
+        }
+        TencentIdCardVerificationResult result = tencentIdCardVerificationClient.verify(realName, idCardNo);
+        record.setVerifyProvider("tencent_faceid");
+        record.setProviderResultCode(result.resultCode());
+        record.setProviderDescription(result.description());
+        record.setProviderRequestId(result.requestId());
+        record.setReviewedAt(LocalDateTime.now());
+        if (result.matched()) {
+            record.setStatus(STATUS_APPROVED);
+            record.setRejectReason(null);
+            return;
+        }
+        if (isProviderTemporarilyUnavailable(result.resultCode())) {
+            throw new BizException(providerRejectReason(result) + "，请稍后重试");
+        }
+        record.setStatus(STATUS_REJECTED);
+        record.setRejectReason(providerRejectReason(result));
+    }
+
+    private boolean isProviderTemporarilyUnavailable(String resultCode) {
+        return "-4".equals(resultCode) || "-6".equals(resultCode) || "-7".equals(resultCode);
+    }
+
+    private String providerRejectReason(TencentIdCardVerificationResult result) {
+        String description = result.description();
+        if (description == null || description.isBlank()) {
+            description = "身份证姓名核验未通过";
+        }
+        return description.length() > 255 ? description.substring(0, 255) : description;
     }
 
     private String normalizeIdCardNo(String idCardNo) {

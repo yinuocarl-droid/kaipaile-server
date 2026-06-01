@@ -14,4 +14,6 @@ public class IdentityVerificationListItemDTO {
     private String realName;
     private Integer status;
     private LocalDateTime submitTime;
+    private String verifyProvider;
+    private String providerResultCode;
 }

@@ -18,4 +18,8 @@ public class IdentityVerificationDetailRespDTO {
     private LocalDateTime submitTime;
     private LocalDateTime reviewedAt;
     private Boolean actorCertified;
+    private String verifyProvider;
+    private String providerResultCode;
+    private String providerDescription;
+    private String providerRequestId;
 }

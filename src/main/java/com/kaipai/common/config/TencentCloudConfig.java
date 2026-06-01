@@ -5,28 +5,22 @@ import com.qcloud.cos.ClientConfig;
 import com.qcloud.cos.auth.BasicCOSCredentials;
 import com.qcloud.cos.auth.COSCredentials;
 import com.qcloud.cos.region.Region;
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-@Data
 @Configuration
-@ConfigurationProperties(prefix = "cos")
-public class CosConfig {
+@RequiredArgsConstructor
+public class TencentCloudConfig {
 
-    private String secretId;
-
-    private String secretKey;
-
-    private String region;
-
-    private String bucketName;
+    private final TencentCloudProperties tencentCloudProperties;
 
     @Bean
     public COSClient cosClient() {
-        COSCredentials credentials = new BasicCOSCredentials(secretId, secretKey);
-        ClientConfig clientConfig = new ClientConfig(new Region(region));
+        COSCredentials credentials = new BasicCOSCredentials(
+                tencentCloudProperties.getSecretId(),
+                tencentCloudProperties.getSecretKey());
+        ClientConfig clientConfig = new ClientConfig(new Region(tencentCloudProperties.getCos().getRegion()));
         return new COSClient(credentials, clientConfig);
     }
 }
