@@ -6,10 +6,13 @@
 
 ## 主要目录
 
-- `src/main/java/com/kaipai/module/controller/ai`
-- `src/main/java/com/kaipai/module/controller/admin/ai`
-- `src/main/java/com/kaipai/module/server/ai`
-- `src/test/java/com/kaipai/module/server/ai`
+- `src/main/java/com/kaipai/controller/api/ai`
+- `src/main/java/com/kaipai/controller/admin/ai`
+- `src/main/java/com/kaipai/service/ai`
+- `src/main/java/com/kaipai/model/ai`
+- `src/main/java/com/kaipai/mapper/ai`
+- `src/main/java/com/kaipai/integration/ai`
+- `src/test/java/com/kaipai`
 
 ## 负责的业务问题
 
@@ -28,6 +31,7 @@
 - 供应商实现很多，适合注册表或策略路由
 - 有异步任务、配置、治理、失败记录、通知闭环
 - `AiProfileCardPromptAgent` 是业务核心之一，不是普通 util
+- 业务逻辑应主要落在 `service/ai`，供应商实现应主要落在 `integration/ai`
 
 ## 工作边界
 

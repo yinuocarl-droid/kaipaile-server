@@ -6,17 +6,21 @@
 
 ## 主要目录
 
-- `src/main/java/com/kaipai/module/controller/actor`
-- `src/main/java/com/kaipai/module/controller/crew`
-- `src/main/java/com/kaipai/module/controller/card`
-- `src/main/java/com/kaipai/module/controller/level`
-- `src/main/java/com/kaipai/module/server/actor`
-- `src/main/java/com/kaipai/module/server/crew`
-- `src/main/java/com/kaipai/module/server/card`
-- `src/main/java/com/kaipai/module/model/actor`
-- `src/main/java/com/kaipai/module/model/crew`
-- `src/main/java/com/kaipai/module/model/card`
-- `src/main/java/com/kaipai/module/model/level`
+- `src/main/java/com/kaipai/controller/api/actor`
+- `src/main/java/com/kaipai/controller/api/crew`
+- `src/main/java/com/kaipai/controller/api/card`
+- `src/main/java/com/kaipai/controller/api/level`
+- `src/main/java/com/kaipai/service/actor`
+- `src/main/java/com/kaipai/service/crew`
+- `src/main/java/com/kaipai/service/card`
+- `src/main/java/com/kaipai/model/actor`
+- `src/main/java/com/kaipai/model/crew`
+- `src/main/java/com/kaipai/model/card`
+- `src/main/java/com/kaipai/model/level`
+- `src/main/java/com/kaipai/mapper/actor`
+- `src/main/java/com/kaipai/mapper/crew`
+- `src/main/java/com/kaipai/mapper/card`
+- `src/main/java/com/kaipai/integration/storage`
 
 ## 负责的业务问题
 
@@ -34,6 +38,7 @@
 - 卡片体系已经是独立业务带
 - 联系方式申请、浏览历史、模板发布都已成型
 - 等级能力和分享能力是资料价值放大层，不应塞回用户模块
+- 外部存储、分享卡与资料卡相关的第三方适配应该归入 `integration/*`
 
 ## 工作边界
 

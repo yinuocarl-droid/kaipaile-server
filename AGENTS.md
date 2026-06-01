@@ -9,6 +9,16 @@
 3. 涉及公共规范、命名、分层、DTO/Entity/Service 约束时，额外阅读 `backend-conventions`。
 4. 如果需求同时触达多个模块，优先保证边界清晰，不把逻辑继续堆进 Controller。
 
+## 当前包结构
+
+- `src/main/java/com/kaipai/controller/admin`：后台管理端接口。
+- `src/main/java/com/kaipai/controller/api`：小程序 / C 端 API 接口。
+- `src/main/java/com/kaipai/service`：业务规则、事务和领域编排。
+- `src/main/java/com/kaipai/model`：DTO、Entity、查询对象和响应对象。
+- `src/main/java/com/kaipai/mapper`：MyBatis Mapper 接口。
+- `src/main/java/com/kaipai/integration`：短信、实名、微信、AI、COS 等外部能力适配。
+- `src/main/java/com/kaipai/common`：公共配置、异常、过滤器和通用工具。
+
 ## Agent 路由
 
 - 项目级架构与模块边界：`.agents/project-architect.md`

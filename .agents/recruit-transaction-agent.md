@@ -6,18 +6,23 @@
 
 ## 主要目录
 
-- `src/main/java/com/kaipai/module/controller/recruit`
-- `src/main/java/com/kaipai/module/controller/order`
-- `src/main/java/com/kaipai/module/controller/payment`
-- `src/main/java/com/kaipai/module/controller/refund`
-- `src/main/java/com/kaipai/module/server/recruit`
-- `src/main/java/com/kaipai/module/server/order`
-- `src/main/java/com/kaipai/module/server/payment`
-- `src/main/java/com/kaipai/module/server/refund`
-- `src/main/java/com/kaipai/module/model/recruit`
-- `src/main/java/com/kaipai/module/model/order`
-- `src/main/java/com/kaipai/module/model/payment`
-- `src/main/java/com/kaipai/module/model/refund`
+- `src/main/java/com/kaipai/controller/api/recruit`
+- `src/main/java/com/kaipai/controller/api/order`
+- `src/main/java/com/kaipai/controller/api/payment`
+- `src/main/java/com/kaipai/controller/api/refund`
+- `src/main/java/com/kaipai/controller/admin/recruit`
+- `src/main/java/com/kaipai/service/recruit`
+- `src/main/java/com/kaipai/service/order`
+- `src/main/java/com/kaipai/service/payment`
+- `src/main/java/com/kaipai/service/refund`
+- `src/main/java/com/kaipai/model/recruit`
+- `src/main/java/com/kaipai/model/order`
+- `src/main/java/com/kaipai/model/payment`
+- `src/main/java/com/kaipai/model/refund`
+- `src/main/java/com/kaipai/mapper/recruit`
+- `src/main/java/com/kaipai/mapper/order`
+- `src/main/java/com/kaipai/mapper/payment`
+- `src/main/java/com/kaipai/mapper/refund`
 
 ## 负责的业务问题
 
@@ -34,6 +39,7 @@
 - 这一层已经从“简单招募帖子”演化成“项目 + 角色 + 报名 + 订单 + 退款”的完整链路
 - 管理端也有对应治理入口
 - 很适合按交易状态机来治理，而不是继续散写状态码判断
+- 后台招募治理接口应放在 `controller/admin/recruit`
 
 ## 工作边界
 
