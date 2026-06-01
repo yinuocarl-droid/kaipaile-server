@@ -13,9 +13,15 @@ public class IdentityVerificationDetailRespDTO {
     private String phone;
     private String realName;
     private String idCardNoCipher;
+    private String idCardNoMasked;
     private Integer status;
     private String rejectReason;
     private LocalDateTime submitTime;
     private LocalDateTime reviewedAt;
     private Boolean actorCertified;
+    private String providerCode;
+    private String providerRequestId;
+    private String providerResultCode;
+    private String providerResultMessage;
+    private LocalDateTime providerVerifiedAt;
 }

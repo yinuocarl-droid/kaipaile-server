@@ -30,6 +30,7 @@ import java.util.List;
 public class DbMigrationRunner {
 
     private static final String DB_URL = "jdbc:mysql://101.43.57.62:3306/kaipai_dev?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false";
+    private static final String LOCAL_DB_URL = "jdbc:mysql://127.0.0.1:3309/kaipai_dev?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false&connectTimeout=3000&socketTimeout=3000";
     private static final String DB_USERNAME = "root";
     private static final String DB_PASSWORD = "root123456";
     private static final String DB_NAME = "kaipai_dev";
@@ -80,6 +81,15 @@ public class DbMigrationRunner {
             new ColumnCheck("template_publish_log", "diff_summary_json")
     );
 
+    private static final List<ColumnCheck> REALNAME_PROVIDER_COLUMNS = Arrays.asList(
+            new ColumnCheck("identity_verification", "id_card_no_masked"),
+            new ColumnCheck("identity_verification", "provider_code"),
+            new ColumnCheck("identity_verification", "provider_request_id"),
+            new ColumnCheck("identity_verification", "provider_result_code"),
+            new ColumnCheck("identity_verification", "provider_result_message"),
+            new ColumnCheck("identity_verification", "provider_verified_at")
+    );
+
     private static final List<ColumnCheck> SHARE_CARD_REQUIRED_COLUMNS = Arrays.asList(
             new ColumnCheck("card_scene_template", "template_scene_code"),
             new ColumnCheck("actor_card_config", "share_card_id"),
@@ -122,11 +132,29 @@ public class DbMigrationRunner {
             return;
         }
 
+        if ("inspect-realname".equalsIgnoreCase(args[0])) {
+            inspectRealNameProvider(DB_URL);
+            return;
+        }
+
+        if ("inspect-realname-local".equalsIgnoreCase(args[0])) {
+            inspectRealNameProvider(LOCAL_DB_URL);
+            return;
+        }
+
         if ("apply".equalsIgnoreCase(args[0])) {
             if (args.length < 2) {
                 throw new IllegalArgumentException("apply mode requires a migration filename");
             }
-            apply(args[1]);
+            apply(args[1], DB_URL);
+            return;
+        }
+
+        if ("apply-local".equalsIgnoreCase(args[0])) {
+            if (args.length < 2) {
+                throw new IllegalArgumentException("apply-local mode requires a migration filename");
+            }
+            apply(args[1], LOCAL_DB_URL);
             return;
         }
 
@@ -136,6 +164,29 @@ public class DbMigrationRunner {
         }
 
         throw new IllegalArgumentException("Unsupported mode: " + args[0]);
+    }
+
+    private static void inspectRealNameProvider(String jdbcUrl) throws SQLException {
+        boolean allColumnsExist = true;
+        try (Connection connection = openConnection(jdbcUrl)) {
+            System.out.println("== identity_verification realname provider columns ==");
+            for (ColumnCheck check : REALNAME_PROVIDER_COLUMNS) {
+                boolean exists = columnExists(connection, check.tableName, check.columnName);
+                System.out.printf("%s.%s: %s%n", check.tableName, check.columnName, exists ? "EXISTS" : "MISSING");
+                allColumnsExist = allColumnsExist && exists;
+            }
+
+            System.out.println();
+            System.out.println("== identity_verification realname provider indexes ==");
+            boolean providerCodeIndexExists = indexExists(connection, "identity_verification", "idx_identity_verification_provider_code");
+            boolean providerVerifiedAtIndexExists = indexExists(connection, "identity_verification", "idx_identity_verification_provider_verified_at");
+            System.out.printf("idx_identity_verification_provider_code: %s%n", providerCodeIndexExists ? "EXISTS" : "MISSING");
+            System.out.printf("idx_identity_verification_provider_verified_at: %s%n", providerVerifiedAtIndexExists ? "EXISTS" : "MISSING");
+
+            if (!allColumnsExist || !providerCodeIndexExists || !providerVerifiedAtIndexExists) {
+                throw new IllegalStateException("Realname provider migration is not fully applied");
+            }
+        }
     }
 
     private static void inspect() throws SQLException {
@@ -347,7 +398,7 @@ public class DbMigrationRunner {
         System.out.println("Backup written to " + BACKUP_DIR.toAbsolutePath().normalize());
     }
 
-    private static void apply(String migrationFileName) throws SQLException, IOException {
+    private static void apply(String migrationFileName, String jdbcUrl) throws SQLException, IOException {
         Path migrationFile = MIGRATION_DIR.resolve(migrationFileName);
         if (!Files.exists(migrationFile)) {
             throw new IllegalArgumentException("Migration file not found: " + migrationFile);
@@ -358,7 +409,7 @@ public class DbMigrationRunner {
             throw new IllegalStateException("No executable SQL statements found in " + migrationFileName);
         }
 
-        try (Connection connection = openConnection()) {
+        try (Connection connection = openConnection(jdbcUrl)) {
             connection.setAutoCommit(false);
             try (Statement statement = connection.createStatement()) {
                 int executed = 0;
@@ -376,7 +427,11 @@ public class DbMigrationRunner {
     }
 
     private static Connection openConnection() throws SQLException {
-        return DriverManager.getConnection(DB_URL, DB_USERNAME, DB_PASSWORD);
+        return openConnection(DB_URL);
+    }
+
+    private static Connection openConnection(String jdbcUrl) throws SQLException {
+        return DriverManager.getConnection(jdbcUrl, DB_USERNAME, DB_PASSWORD);
     }
 
     private static boolean tableExists(Connection connection, String tableName) throws SQLException {
@@ -428,6 +483,25 @@ public class DbMigrationRunner {
             statement.setString(1, DB_NAME);
             statement.setString(2, tableName);
             statement.setString(3, constraintName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private static boolean indexExists(Connection connection, String tableName, String indexName) throws SQLException {
+        String sql = """
+                SELECT 1
+                FROM information_schema.statistics
+                WHERE table_schema = ?
+                  AND table_name = ?
+                  AND index_name = ?
+                LIMIT 1
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DB_NAME);
+            statement.setString(2, tableName);
+            statement.setString(3, indexName);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next();
             }

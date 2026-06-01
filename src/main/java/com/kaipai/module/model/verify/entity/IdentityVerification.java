@@ -23,6 +23,8 @@ public class IdentityVerification extends BaseEntity {
 
     private String idCardNoCipher;
 
+    private String idCardNoMasked;
+
     private String idCardHash;
 
     /** 1 pending, 2 approved, 3 rejected */
@@ -36,4 +38,14 @@ public class IdentityVerification extends BaseEntity {
 
     /** profile completion snapshot captured on submit */
     private Integer snapshotProfileCompletion;
+
+    private String providerCode;
+
+    private String providerRequestId;
+
+    private String providerResultCode;
+
+    private String providerResultMessage;
+
+    private LocalDateTime providerVerifiedAt;
 }
