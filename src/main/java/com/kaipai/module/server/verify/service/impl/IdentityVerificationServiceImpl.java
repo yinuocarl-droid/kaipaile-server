@@ -23,6 +23,10 @@ import com.kaipai.module.server.referral.service.ReferralRecordService;
 import com.kaipai.module.server.user.mapper.UserMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationMapper;
 import com.kaipai.module.server.verify.mapper.IdentityVerificationOwnerMapper;
+import com.kaipai.module.server.verify.realname.IdCardCryptoSupport;
+import com.kaipai.module.server.verify.realname.RealNameVerificationCommand;
+import com.kaipai.module.server.verify.realname.RealNameVerificationProvider;
+import com.kaipai.module.server.verify.realname.RealNameVerificationResult;
 import com.kaipai.module.server.verify.provider.TencentIdCardVerificationClient;
 import com.kaipai.module.server.verify.provider.TencentIdCardVerificationResult;
 import com.kaipai.module.server.verify.service.IdentityVerificationService;
@@ -31,9 +35,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DuplicateKeyException;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -52,6 +53,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     private final AdminAuthContext adminAuthContext;
     private final AdminOperationLogger adminOperationLogger;
     private final ReferralRecordService referralRecordService;
+    private final RealNameVerificationProvider realNameVerificationProvider;
+    private final IdCardCryptoSupport idCardCryptoSupport;
     private final TencentIdCardVerificationClient tencentIdCardVerificationClient;
 
     private static final int STATUS_PENDING = 1;
@@ -83,7 +86,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             throw new BizException("真实姓名不能为空");
         }
         String normalizedIdCardNo = normalizeIdCardNo(req.getIdCardNo());
-        String idCardHash = hashIdCard(normalizedIdCardNo);
+        String idCardHash = idCardCryptoSupport.hash(normalizedIdCardNo);
 
         IdentityVerification latestRecord = selectLatestByUserId(userId);
         if (latestRecord != null) {
@@ -119,26 +122,29 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         IdentityVerification record = new IdentityVerification();
         record.setUserId(userId);
         record.setRealName(realName);
-        record.setIdCardNoCipher(maskIdCard(normalizedIdCardNo));
+        record.setIdCardNoCipher(idCardCryptoSupport.encrypt(normalizedIdCardNo));
+        record.setIdCardNoMasked(idCardCryptoSupport.mask(normalizedIdCardNo));
         record.setIdCardHash(idCardHash);
-        record.setStatus(STATUS_PENDING);
         record.setRejectReason(null);
         record.setReviewerId(null);
         record.setReviewedAt(null);
         record.setSnapshotProfileCompletion(profileCompletion);
+        RealNameVerificationResult verificationResult = verifyRealName(userId, realName, normalizedIdCardNo);
+        applyProviderResult(record, verificationResult);
         applyProviderVerification(record, realName, normalizedIdCardNo);
         save(record);
 
+        int status = record.getStatus() == null ? STATUS_PENDING : record.getStatus();
         User updateUser = new User();
         updateUser.setUserId(userId);
-        updateUser.setRealAuthStatus(record.getStatus());
+        updateUser.setRealAuthStatus(status);
         updateUser.setUpdateUserId(userId);
         updateUser.setUpdateUserName(resolveUserUpdateName(user));
         userMapper.updateById(updateUser);
 
         if (profile != null) {
             profile.setRealName(realName);
-            profile.setIsCertified(record.getStatus() == STATUS_APPROVED);
+            profile.setIsCertified(status == STATUS_APPROVED);
             actorProfileMapper.updateById(profile);
         }
         if (record.getStatus() == STATUS_APPROVED) {
@@ -208,15 +214,17 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         dto.setVerificationId(record.getVerificationId());
         dto.setUserId(record.getUserId());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNoCipher(record.getIdCardNoCipher());
+        dto.setIdCardNoCipher(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
+        dto.setIdCardNoMasked(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
         dto.setStatus(record.getStatus());
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmitTime(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
-        dto.setVerifyProvider(record.getVerifyProvider());
-        dto.setProviderResultCode(record.getProviderResultCode());
-        dto.setProviderDescription(record.getProviderDescription());
+        dto.setProviderCode(record.getProviderCode());
         dto.setProviderRequestId(record.getProviderRequestId());
+        dto.setProviderResultCode(record.getProviderResultCode());
+        dto.setProviderResultMessage(record.getProviderResultMessage());
+        dto.setProviderVerifiedAt(record.getProviderVerifiedAt());
         User user = userMapper.selectById(record.getUserId());
         if (user != null) {
             dto.setPhone(user.getPhone());
@@ -358,7 +366,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
         dto.setStatus(record.getStatus());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNo(record.getIdCardNoCipher());
+        dto.setIdCardNo(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmittedAt(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
@@ -408,14 +416,6 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         return normalized;
     }
 
-    private String maskIdCard(String idCardNo) {
-        String normalized = idCardNo == null ? "" : idCardNo.trim().toUpperCase();
-        if (normalized.length() < 8) {
-            return normalized;
-        }
-        return normalized.substring(0, 3) + "***********" + normalized.substring(normalized.length() - 4);
-    }
-
     private String resolveUserUpdateName(User user) {
         if (user == null || user.getUserName() == null) {
             return "";
@@ -423,18 +423,42 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         return user.getUserName().trim();
     }
 
-    private String hashIdCard(String idCardNo) {
-        String normalized = idCardNo == null ? "" : idCardNo.trim().toUpperCase();
+    private RealNameVerificationResult verifyRealName(Long userId, String realName, String normalizedIdCardNo) {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(normalized.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder(bytes.length * 2);
-            for (byte value : bytes) {
-                builder.append(String.format("%02x", value));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 not supported", ex);
+            return realNameVerificationProvider.verify(new RealNameVerificationCommand(userId, realName, normalizedIdCardNo));
+        } catch (BizException error) {
+            return RealNameVerificationResult.manualReview("tencent", null, "PROVIDER_ERROR", compactProviderMessage(error.getMessage()));
         }
+    }
+
+    private void applyProviderResult(IdentityVerification record, RealNameVerificationResult result) {
+        record.setProviderCode(result.providerCode());
+        record.setProviderRequestId(result.requestId());
+        record.setProviderResultCode(result.resultCode());
+        record.setProviderResultMessage(compactProviderMessage(result.resultMessage()));
+        record.setProviderVerifiedAt(LocalDateTime.now());
+        if (result.matched()) {
+            record.setStatus(STATUS_APPROVED);
+            record.setRejectReason(null);
+            record.setReviewedAt(LocalDateTime.now());
+            return;
+        }
+        if (result.definitive()) {
+            record.setStatus(STATUS_REJECTED);
+            record.setRejectReason("实名认证信息核验未通过");
+            record.setReviewedAt(LocalDateTime.now());
+            return;
+        }
+        record.setStatus(STATUS_PENDING);
+        record.setRejectReason(null);
+    }
+
+    private String compactProviderMessage(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        normalized = normalized.replaceAll("\\d{17}[\\dXx]", "[ID_CARD]");
+        return normalized.length() > 255 ? normalized.substring(0, 255) : normalized;
     }
 }

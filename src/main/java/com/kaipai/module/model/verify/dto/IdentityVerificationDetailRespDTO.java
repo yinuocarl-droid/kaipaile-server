@@ -13,6 +13,7 @@ public class IdentityVerificationDetailRespDTO {
     private String phone;
     private String realName;
     private String idCardNoCipher;
+    private String idCardNoMasked;
     private Integer status;
     private String rejectReason;
     private LocalDateTime submitTime;
@@ -22,4 +23,7 @@ public class IdentityVerificationDetailRespDTO {
     private String providerResultCode;
     private String providerDescription;
     private String providerRequestId;
+    private String providerCode;
+    private String providerResultMessage;
+    private LocalDateTime providerVerifiedAt;
 }

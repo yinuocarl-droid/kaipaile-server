@@ -59,6 +59,32 @@ kaipai:
       - https://api.kplyyk.com
       - http://127.0.0.1:5100
       - http://localhost:5100
+  sms:
+    provider-code: ${KAIPAI_SMS_PROVIDER_CODE:tencent}
+    code-expire-minutes: ${KAIPAI_SMS_CODE_EXPIRE_MINUTES:10}
+    tencent:
+      endpoint: ${TENCENT_SMS_ENDPOINT:https://sms.tencentcloudapi.com}
+      region: ${TENCENT_SMS_REGION:ap-guangzhou}
+      version: ${TENCENT_SMS_VERSION:2021-01-11}
+      secret-id: ${TENCENT_CLOUD_SECRET_ID:}
+      secret-key: ${TENCENT_CLOUD_SECRET_KEY:}
+      sms-sdk-app-id: ${TENCENT_SMS_SDK_APP_ID:}
+      sign-name: ${TENCENT_SMS_SIGN_NAME:}
+      template-id: ${TENCENT_SMS_LOGIN_TEMPLATE_ID:}
+      template-param-mode: ${TENCENT_SMS_TEMPLATE_PARAM_MODE:code}
+      connect-timeout-ms: ${TENCENT_SMS_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${TENCENT_SMS_READ_TIMEOUT_MS:10000}
+  realname:
+    provider-code: ${KAIPAI_REALNAME_PROVIDER_CODE:tencent}
+    tencent:
+      endpoint: ${TENCENT_FACEID_ENDPOINT:https://faceid.tencentcloudapi.com}
+      version: ${TENCENT_FACEID_VERSION:2018-03-01}
+      secret-id: ${TENCENT_CLOUD_SECRET_ID:}
+      secret-key: ${TENCENT_CLOUD_SECRET_KEY:}
+      connect-timeout-ms: ${TENCENT_FACEID_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${TENCENT_FACEID_READ_TIMEOUT_MS:10000}
+  identity:
+    id-card-cipher-key: ${KAIPAI_ID_CARD_CIPHER_KEY:}
   ai:
     profile-card:
       provider-code: ${AI_PROFILE_CARD_PROVIDER_CODE:kplyyk}

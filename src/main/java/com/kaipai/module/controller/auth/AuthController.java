@@ -25,7 +25,7 @@ public class AuthController {
     private final AuthService authService;
 
     @Operation(summary = "发送验证码",
-            description = "开发阶段验证码会直接在 data 字段返回，无需真实短信；验证码 5 分钟内有效")
+            description = "发送手机号验证码；生产短信通道不返回验证码，dev 通道可在 data 字段返回验证码")
     @PostMapping("/sendCode")
     public R<String> sendCode(@Valid @RequestBody SendCodeReqDTO dto) {
         String code = authService.sendCode(dto.getPhone());

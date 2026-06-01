@@ -8,7 +8,8 @@ import com.kaipai.module.model.auth.dto.WechatLoginReqDTO;
 public interface AuthService {
 
     /**
-     * 发送验证码（开发阶段直接返回验证码）
+     * 发送验证码。
+     * dev 通道可返回验证码；生产短信通道不返回验证码。
      */
     String sendCode(String phone);
 
