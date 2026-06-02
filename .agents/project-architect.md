@@ -25,12 +25,17 @@
 
 对应目录：
 
-- `src/main/java/com/kaipai/module/controller/auth`
-- `src/main/java/com/kaipai/module/controller/verify`
-- `src/main/java/com/kaipai/module/controller/admin/auth`
-- `src/main/java/com/kaipai/module/server/auth`
-- `src/main/java/com/kaipai/module/server/verify`
-- `src/main/java/com/kaipai/module/server/wechat`
+- `src/main/java/com/kaipai/controller/api/auth`
+- `src/main/java/com/kaipai/controller/api/verify`
+- `src/main/java/com/kaipai/controller/admin/auth`
+- `src/main/java/com/kaipai/service/auth`
+- `src/main/java/com/kaipai/service/verify`
+- `src/main/java/com/kaipai/model/auth`
+- `src/main/java/com/kaipai/model/verify`
+- `src/main/java/com/kaipai/mapper/verify`
+- `src/main/java/com/kaipai/integration/sms`
+- `src/main/java/com/kaipai/integration/verify`
+- `src/main/java/com/kaipai/integration/wechat`
 
 ### 2. 供给资料层
 
@@ -45,13 +50,20 @@
 
 对应目录：
 
-- `src/main/java/com/kaipai/module/controller/actor`
-- `src/main/java/com/kaipai/module/controller/crew`
-- `src/main/java/com/kaipai/module/controller/card`
-- `src/main/java/com/kaipai/module/controller/level`
-- `src/main/java/com/kaipai/module/server/actor`
-- `src/main/java/com/kaipai/module/server/crew`
-- `src/main/java/com/kaipai/module/server/card`
+- `src/main/java/com/kaipai/controller/api/actor`
+- `src/main/java/com/kaipai/controller/api/crew`
+- `src/main/java/com/kaipai/controller/api/card`
+- `src/main/java/com/kaipai/controller/api/level`
+- `src/main/java/com/kaipai/service/actor`
+- `src/main/java/com/kaipai/service/crew`
+- `src/main/java/com/kaipai/service/card`
+- `src/main/java/com/kaipai/model/actor`
+- `src/main/java/com/kaipai/model/crew`
+- `src/main/java/com/kaipai/model/card`
+- `src/main/java/com/kaipai/model/level`
+- `src/main/java/com/kaipai/mapper/actor`
+- `src/main/java/com/kaipai/mapper/crew`
+- `src/main/java/com/kaipai/mapper/card`
 
 ### 3. 交易撮合层
 
@@ -66,14 +78,23 @@
 
 对应目录：
 
-- `src/main/java/com/kaipai/module/controller/recruit`
-- `src/main/java/com/kaipai/module/controller/order`
-- `src/main/java/com/kaipai/module/controller/payment`
-- `src/main/java/com/kaipai/module/controller/refund`
-- `src/main/java/com/kaipai/module/server/recruit`
-- `src/main/java/com/kaipai/module/server/order`
-- `src/main/java/com/kaipai/module/server/payment`
-- `src/main/java/com/kaipai/module/server/refund`
+- `src/main/java/com/kaipai/controller/api/recruit`
+- `src/main/java/com/kaipai/controller/api/order`
+- `src/main/java/com/kaipai/controller/api/payment`
+- `src/main/java/com/kaipai/controller/api/refund`
+- `src/main/java/com/kaipai/controller/admin/recruit`
+- `src/main/java/com/kaipai/service/recruit`
+- `src/main/java/com/kaipai/service/order`
+- `src/main/java/com/kaipai/service/payment`
+- `src/main/java/com/kaipai/service/refund`
+- `src/main/java/com/kaipai/model/recruit`
+- `src/main/java/com/kaipai/model/order`
+- `src/main/java/com/kaipai/model/payment`
+- `src/main/java/com/kaipai/model/refund`
+- `src/main/java/com/kaipai/mapper/recruit`
+- `src/main/java/com/kaipai/mapper/order`
+- `src/main/java/com/kaipai/mapper/payment`
+- `src/main/java/com/kaipai/mapper/refund`
 
 ### 4. AI 能力层
 
@@ -87,9 +108,12 @@
 
 对应目录：
 
-- `src/main/java/com/kaipai/module/controller/ai`
-- `src/main/java/com/kaipai/module/controller/admin/ai`
-- `src/main/java/com/kaipai/module/server/ai`
+- `src/main/java/com/kaipai/controller/api/ai`
+- `src/main/java/com/kaipai/controller/admin/ai`
+- `src/main/java/com/kaipai/service/ai`
+- `src/main/java/com/kaipai/model/ai`
+- `src/main/java/com/kaipai/mapper/ai`
+- `src/main/java/com/kaipai/integration/ai`
 
 ### 5. 后台治理层
 
@@ -104,10 +128,15 @@
 
 对应目录：
 
-- `src/main/java/com/kaipai/module/controller/admin`
-- `src/main/java/com/kaipai/module/server/adminauth`
-- `src/main/java/com/kaipai/module/server/system`
-- `src/main/java/com/kaipai/module/server/referral`
+- `src/main/java/com/kaipai/controller/admin`
+- `src/main/java/com/kaipai/service/adminauth`
+- `src/main/java/com/kaipai/service/system`
+- `src/main/java/com/kaipai/service/referral`
+- `src/main/java/com/kaipai/model/adminauth`
+- `src/main/java/com/kaipai/model/system`
+- `src/main/java/com/kaipai/model/referral`
+- `src/main/java/com/kaipai/mapper/system`
+- `src/main/java/com/kaipai/mapper/referral`
 
 ## 架构判断规则
 

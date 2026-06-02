@@ -6,12 +6,17 @@
 
 ## 主要目录
 
-- `src/main/java/com/kaipai/module/controller/auth`
-- `src/main/java/com/kaipai/module/controller/verify`
-- `src/main/java/com/kaipai/module/controller/admin/auth`
-- `src/main/java/com/kaipai/module/server/auth`
-- `src/main/java/com/kaipai/module/server/verify`
-- `src/main/java/com/kaipai/module/server/wechat`
+- `src/main/java/com/kaipai/controller/api/auth`
+- `src/main/java/com/kaipai/controller/api/verify`
+- `src/main/java/com/kaipai/controller/admin/auth`
+- `src/main/java/com/kaipai/service/auth`
+- `src/main/java/com/kaipai/service/verify`
+- `src/main/java/com/kaipai/model/auth`
+- `src/main/java/com/kaipai/model/verify`
+- `src/main/java/com/kaipai/mapper/verify`
+- `src/main/java/com/kaipai/integration/sms`
+- `src/main/java/com/kaipai/integration/verify`
+- `src/main/java/com/kaipai/integration/wechat`
 - `src/main/java/com/kaipai/common/filter`
 - `src/main/java/com/kaipai/common/config`
 - `src/main/java/com/kaipai/common/util/JwtUtil.java`
@@ -28,9 +33,9 @@
 ## 当前仓库里的关键特征
 
 - 认证入口已经不只是一套手机号登录
-- 短信模块已经拆到 `module/server/auth/sms`
-- 实名模块已经拆到 `module/server/verify`
-- 微信登录已经有独立服务目录
+- 短信模块已经拆到 `integration/sms`
+- 实名模块已经拆到 `integration/verify`
+- 微信登录已经有独立服务目录和适配层
 
 ## 工作边界
 

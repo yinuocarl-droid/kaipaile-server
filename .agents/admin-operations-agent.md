@@ -6,13 +6,15 @@
 
 ## 主要目录
 
-- `src/main/java/com/kaipai/module/controller/admin`
-- `src/main/java/com/kaipai/module/server/adminauth`
-- `src/main/java/com/kaipai/module/server/system`
-- `src/main/java/com/kaipai/module/server/referral`
-- `src/main/java/com/kaipai/module/model/system`
-- `src/main/java/com/kaipai/module/model/referral`
-- `src/main/java/com/kaipai/module/model/adminauth`
+- `src/main/java/com/kaipai/controller/admin`
+- `src/main/java/com/kaipai/service/adminauth`
+- `src/main/java/com/kaipai/service/system`
+- `src/main/java/com/kaipai/service/referral`
+- `src/main/java/com/kaipai/model/system`
+- `src/main/java/com/kaipai/model/referral`
+- `src/main/java/com/kaipai/model/adminauth`
+- `src/main/java/com/kaipai/mapper/system`
+- `src/main/java/com/kaipai/mapper/referral`
 
 ## 负责的业务问题
 
@@ -29,6 +31,7 @@
 - 后台不是简单的 CRUD 控制台，而是运营治理中心
 - `system` 和 `referral` 都带有明显的治理属性
 - 管理员视角和用户视角已经分离，后续要继续保持
+- 后台聚合编排应以 `controller/admin` + `service/*` + `model/*` + `mapper/*` 为主，不再写回旧 `module`
 
 ## 工作边界
 

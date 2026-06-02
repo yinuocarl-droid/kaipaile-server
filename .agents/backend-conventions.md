@@ -7,8 +7,14 @@
 ## 当前项目约束
 
 - Spring Boot + MyBatis-Plus + Redis + MySQL
-- 业务目录主要在 `src/main/java/com/kaipai/module`
+- 后端主源码已按职责拆为：
+  - `src/main/java/com/kaipai/controller`：HTTP 控制器，分 `admin` 与 `api`
+  - `src/main/java/com/kaipai/service`：业务规则、事务和领域编排
+  - `src/main/java/com/kaipai/model`：DTO、Entity 和业务数据模型
+  - `src/main/java/com/kaipai/mapper`：MyBatis Mapper 接口
+  - `src/main/java/com/kaipai/integration`：短信、实名、微信、AI、COS 等外部能力适配
 - 公共基础设施在 `src/main/java/com/kaipai/common`
+- 新增主源码不得继续写入历史 `module` 结构
 - 项目已有 `.cursor/rules.md`，其中要求：
   - 使用 Java 8+
   - 优先使用 Stream / Optional 提升可读性
@@ -27,6 +33,11 @@
 - 调用应用服务
 - 返回统一响应
 
+路径约定：
+
+- C 端 / 小程序接口放在 `src/main/java/com/kaipai/controller/api/{domain}`
+- 后台接口放在 `src/main/java/com/kaipai/controller/admin/{domain}`
+
 不要负责：
 
 - 复杂业务分支
@@ -42,6 +53,11 @@
 - 事务边界
 - 跨表协调
 
+路径约定：
+
+- 业务服务放在 `src/main/java/com/kaipai/service/{domain}`
+- 领域内 support 放在 `src/main/java/com/kaipai/service/{domain}/support`
+
 ### Mapper
 
 负责：
@@ -55,15 +71,35 @@
 - 业务状态判断
 - 领域规则
 
-### Support / Provider / Adapter
+路径约定：
+
+- Mapper 接口放在 `src/main/java/com/kaipai/mapper/{domain}`
+
+### Model
+
+负责：
+
+- DTO
+- Entity
+- 查询对象
+- 响应对象
+
+路径约定：
+
+- 数据模型放在 `src/main/java/com/kaipai/model/{domain}`
+
+### Integration / Provider / Adapter
 
 适合承载：
 
 - 第三方集成
-- 文案生成
-- 规则计算
 - 路由分发
 - 可替换实现
+
+路径约定：
+
+- 外部服务商、云服务和开放平台适配放在 `src/main/java/com/kaipai/integration/{capability}`
+- 纯领域规则计算仍放在 `service/{domain}/support`
 
 ## DTO 规则
 
