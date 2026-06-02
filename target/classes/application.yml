@@ -18,7 +18,7 @@ spring:
 # MyBatis-Plus 配置
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
-  type-aliases-package: com.kaipai.module.model.**.entity
+  type-aliases-package: com.kaipai.model.**.entity
   global-config:
     db-config:
       id-type: auto

@@ -17,6 +17,7 @@ import com.kaipai.integration.verify.IdCardCryptoSupport;
 import com.kaipai.integration.verify.RealNameVerificationCommand;
 import com.kaipai.integration.verify.RealNameVerificationProvider;
 import com.kaipai.integration.verify.RealNameVerificationResult;
+import com.kaipai.integration.verify.TencentIdCardVerificationClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -114,6 +115,7 @@ class IdentityVerificationServiceImplTest {
         ReferralRecordService referralRecordService = mock(ReferralRecordService.class);
         RealNameVerificationProvider realNameVerificationProvider = mock(RealNameVerificationProvider.class);
         IdCardCryptoSupport idCardCryptoSupport = new IdCardCryptoSupport();
+        TencentIdCardVerificationClient tencentIdCardVerificationClient = mock(TencentIdCardVerificationClient.class);
 
         IdentityVerificationServiceImpl service = new IdentityVerificationServiceImpl(
                 userMapper,
@@ -123,7 +125,8 @@ class IdentityVerificationServiceImplTest {
                 adminOperationLogger,
                 referralRecordService,
                 realNameVerificationProvider,
-                idCardCryptoSupport);
+                idCardCryptoSupport,
+                tencentIdCardVerificationClient);
         ReflectionTestUtils.setField(service, "baseMapper", identityVerificationMapper);
 
         User user = new User();

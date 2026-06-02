@@ -1,4 +1,4 @@
-package com.kaipai.service.wechat.impl;
+package com.kaipai.integration.wechat.impl;
 
 import cn.hutool.http.ContentType;
 import cn.hutool.http.HttpRequest;
