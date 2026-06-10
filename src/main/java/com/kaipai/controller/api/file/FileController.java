@@ -27,7 +27,7 @@ public class FileController {
         return R.ok(cosUtil.uploadImage(file, "avatar"));
     }
 
-    @Operation(summary = "上传形象照/写真", description = "支持 jpg/png/webp，每张建议不超过 5MB")
+    @Operation(summary = "上传形象照/写真", description = "支持 jpg/png/webp，每张建议不超过 10MB")
     @PostMapping("/upload/photo")
     public R<String> uploadPhoto(
             @Parameter(description = "照片文件") @RequestParam("file") MultipartFile file) {
