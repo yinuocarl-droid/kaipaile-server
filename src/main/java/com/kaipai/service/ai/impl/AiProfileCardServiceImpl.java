@@ -12,6 +12,7 @@ import com.kaipai.model.ai.dto.AiProfileCardArtifactRespDTO;
 import com.kaipai.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.model.ai.dto.AiProfileCardGenerateRespDTO;
 import com.kaipai.model.ai.dto.AiProfileCardThemeRespDTO;
+import com.kaipai.model.ai.dto.AiResumeErrorCode;
 import com.kaipai.model.ai.dto.AiProfileCardTaskRespDTO;
 import com.kaipai.model.ai.entity.ActorAiProfileCardPage;
 import com.kaipai.model.ai.entity.ActorAiProfileCardTask;
@@ -81,6 +82,9 @@ public class AiProfileCardServiceImpl extends ServiceImpl<ActorAiProfileCardTask
         String templateSceneCode = TemplateSceneCodeValidator.requireAllowed(dto.getTemplateSceneCode());
         String styleCode = StringUtils.hasText(dto.getStyleCode()) ? dto.getStyleCode().trim() : templateSceneCode;
         ActorProfileDTO profile = actorProfileService.mine(currentUserId);
+        if (!Boolean.TRUE.equals(profile.getIsCertified())) {
+            throw new BizException(AiResumeErrorCode.NOT_CERTIFIED, "完成实名认证后才可生成 AI 分享图");
+        }
         ActorProfile profileEntity = requireProfileEntity(currentUserId);
         String sourceImageUrl = resolveSourceImage(profile, dto.getSourceImageUrl());
         String providerCode = aiImageProviderConfigService.resolveActiveProviderCode(properties.getProviderCode());

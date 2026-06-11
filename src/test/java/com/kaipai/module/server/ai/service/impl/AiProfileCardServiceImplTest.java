@@ -2,7 +2,9 @@ package com.kaipai.service.ai.impl;
 
 import com.kaipai.common.exception.BizException;
 import com.kaipai.model.actor.dto.ActorProfileDTO;
+import com.kaipai.model.ai.dto.AiProfileCardGenerateReqDTO;
 import com.kaipai.model.ai.dto.AiProfileCardTaskRespDTO;
+import com.kaipai.model.ai.dto.AiResumeErrorCode;
 import com.kaipai.model.ai.entity.ActorAiProfileCardTask;
 import com.kaipai.model.card.dto.ActorCardConfigSaveDTO;
 import com.kaipai.model.card.dto.ActorMyShareCardItemDTO;
@@ -42,6 +44,34 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AiProfileCardServiceImplTest {
+
+    @Test
+    void generateShouldRejectWhenActorNotCertified() {
+        ActorProfileService actorProfileService = mock(ActorProfileService.class);
+        AiProfileCardServiceImpl service = new AiProfileCardServiceImpl(
+                actorProfileService,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+
+        ActorProfileDTO profile = new ActorProfileDTO();
+        profile.setIsCertified(false);
+        when(actorProfileService.mine(7L)).thenReturn(profile);
+
+        AiProfileCardGenerateReqDTO dto = new AiProfileCardGenerateReqDTO();
+        dto.setTemplateSceneCode("classic");
+
+        BizException error = assertThrows(BizException.class, () -> service.generate(7L, dto));
+
+        assertEquals(AiResumeErrorCode.NOT_CERTIFIED, error.getCode());
+        assertEquals("完成实名认证后才可生成 AI 分享图", error.getMessage());
+    }
 
     @Test
     void resolveGeneratedImageUrlShouldRejectSourceImageEcho() {
