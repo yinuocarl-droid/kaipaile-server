@@ -2,7 +2,7 @@ spring:
   application:
     name: kaipai-backend
   profiles:
-    active: dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   cloud:
     nacos:
       config:
