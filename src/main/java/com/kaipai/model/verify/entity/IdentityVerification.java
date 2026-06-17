@@ -1,6 +1,7 @@
 package com.kaipai.model.verify.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.kaipai.common.entity.BaseEntity;
@@ -23,6 +24,7 @@ public class IdentityVerification extends BaseEntity {
 
     private String idCardNoCipher;
 
+    @TableField(exist = false)
     private String idCardNoMasked;
 
     private String idCardHash;
@@ -39,17 +41,24 @@ public class IdentityVerification extends BaseEntity {
     /** profile completion snapshot captured on submit */
     private Integer snapshotProfileCompletion;
 
+    @TableField(exist = false)
     private String verifyProvider;
 
+    @TableField(exist = false)
     private String providerResultCode;
 
+    @TableField(exist = false)
     private String providerDescription;
 
+    @TableField(exist = false)
     private String providerRequestId;
 
+    @TableField(exist = false)
     private String providerCode;
 
+    @TableField(exist = false)
     private String providerResultMessage;
 
+    @TableField(exist = false)
     private LocalDateTime providerVerifiedAt;
 }
