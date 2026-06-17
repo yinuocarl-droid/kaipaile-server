@@ -30,7 +30,7 @@ public class CosUtil {
 
     private static final long MB = 1024L * 1024L;
     private static final long AVATAR_MAX_SIZE = 2 * MB;
-    private static final long PHOTO_MAX_SIZE = 5 * MB;
+    private static final long PHOTO_MAX_SIZE = 10 * MB;
     private static final long LICENSE_MAX_SIZE = 5 * MB;
     private static final long VIDEO_MAX_SIZE = 100 * MB;
     private static final long PDF_MAX_SIZE = 20 * MB;
@@ -203,8 +203,8 @@ public class CosUtil {
         return switch (folder) {
             case "avatar" -> "头像图片不能超过2MB";
             case "license" -> "营业执照图片不能超过5MB";
-            case "photo" -> "作品图片不能超过5MB";
-            default -> "图片大小不能超过5MB";
+            case "photo" -> "作品图片不能超过10MB";
+            default -> "图片大小不能超过10MB";
         };
     }
 
