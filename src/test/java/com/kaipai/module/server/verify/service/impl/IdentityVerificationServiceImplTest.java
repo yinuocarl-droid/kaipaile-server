@@ -17,7 +17,6 @@ import com.kaipai.integration.verify.IdCardCryptoSupport;
 import com.kaipai.integration.verify.RealNameVerificationCommand;
 import com.kaipai.integration.verify.RealNameVerificationProvider;
 import com.kaipai.integration.verify.RealNameVerificationResult;
-import com.kaipai.integration.verify.TencentIdCardVerificationClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -105,6 +104,21 @@ class IdentityVerificationServiceImplTest {
         assertFalse(record.getProviderResultMessage().contains("11010519491231002X"));
     }
 
+    @Test
+    void currentStatusShouldFallbackToUserRealAuthStatusWhenLatestRecordQueryFails() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        User user = new User();
+        user.setUserId(10001L);
+        user.setRealAuthStatus(0);
+        when(fixture.userMapper.selectById(10001L)).thenReturn(user);
+        when(fixture.identityVerificationMapper.selectOne(any()))
+                .thenThrow(new RuntimeException("identity_verification schema unavailable"));
+
+        IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10001L);
+
+        assertEquals(0, result.getStatus());
+    }
+
     private TestFixture newFixture(RealNameVerificationResult providerResult) {
         UserMapper userMapper = mock(UserMapper.class);
         ActorProfileMapper actorProfileMapper = mock(ActorProfileMapper.class);
@@ -115,7 +129,6 @@ class IdentityVerificationServiceImplTest {
         ReferralRecordService referralRecordService = mock(ReferralRecordService.class);
         RealNameVerificationProvider realNameVerificationProvider = mock(RealNameVerificationProvider.class);
         IdCardCryptoSupport idCardCryptoSupport = new IdCardCryptoSupport();
-        TencentIdCardVerificationClient tencentIdCardVerificationClient = mock(TencentIdCardVerificationClient.class);
 
         IdentityVerificationServiceImpl service = new IdentityVerificationServiceImpl(
                 userMapper,
@@ -125,8 +138,7 @@ class IdentityVerificationServiceImplTest {
                 adminOperationLogger,
                 referralRecordService,
                 realNameVerificationProvider,
-                idCardCryptoSupport,
-                tencentIdCardVerificationClient);
+                idCardCryptoSupport);
         ReflectionTestUtils.setField(service, "baseMapper", identityVerificationMapper);
 
         User user = new User();

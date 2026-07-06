@@ -15,6 +15,8 @@
 - Share-card runtime physical cleanup for current strict review:
   - [V20260425_010__share_card_template_scene_code_physical_replacement.sql](./V20260425_010__share_card_template_scene_code_physical_replacement.sql)
   - [V20260425_011__share_card_runtime_physical_cleanup.sql](./V20260425_011__share_card_runtime_physical_cleanup.sql)
+- Identity verification status compatibility for mini-program review:
+  - [V20260705_001__identity_verification_status_compat.sql](./V20260705_001__identity_verification_status_compat.sql)
 - Required verification after applying the cleanup files:
   - `mvn -q -Dexec.classpathScope=test -Dexec.mainClass=com.kaipai.DbMigrationRunner -Dexec.args="inspect" org.codehaus.mojo:exec-maven-plugin:3.6.1:java`
   - The inspect command must report every share-card required column as `EXISTS` and every retired column as `ABSENT`.
