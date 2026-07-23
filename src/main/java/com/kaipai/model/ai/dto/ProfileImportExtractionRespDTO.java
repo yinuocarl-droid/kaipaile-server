@@ -1,0 +1,1 @@
+package com.kaipai.model.ai.dto; import lombok.Data; @Data public class ProfileImportExtractionRespDTO { private String requestId; private int profileCandidateCount; private int workCandidateCount; private int conflictCount; private JsonNodePayload payload; public record JsonNodePayload(String json){} }
