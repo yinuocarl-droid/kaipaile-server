@@ -1,0 +1,1 @@
+package com.kaipai.model.ai.dto; import lombok.Data; @Data public class ProfileImportConfigRespDTO { private boolean enabled; private boolean available; private String endpoint; private String modelName; private String secretMask; private String lastTestStatus; }
