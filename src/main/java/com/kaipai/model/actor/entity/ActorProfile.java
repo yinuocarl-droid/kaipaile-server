@@ -51,6 +51,34 @@ public class ActorProfile extends BaseEntity {
 
     private String avatarUrl;
 
+    private Long avatarAssetId;
+
+    private Long currentResumeAssetId;
+
+    private Integer birthYear;
+
+    private Integer birthMonth;
+
+    private Integer birthDay;
+
+    private String birthPrecision;
+
+    private String originPlace;
+
+    private String schoolName;
+
+    private String majorName;
+
+    private String languageTagsJson;
+
+    private String specialtyTagsJson;
+
+    private String roleTypeTagsJson;
+
+    private String professionalAbilityTagsJson;
+
+    private Long workLibraryVersion;
+
     private String coverUrl;
 
     private String intro;

@@ -4,7 +4,10 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.model.actor.dto.ActorProfileDTO;
 import com.kaipai.model.actor.dto.ActorProfileSaveDTO;
+import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
+import com.kaipai.model.actor.dto.ActorProfileRespDTO;
 import com.kaipai.service.actor.ActorProfileService;
+import com.kaipai.service.actor.ActorProfileWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ActorProfileController {
 
     private final ActorProfileService actorProfileService;
+    private final ActorProfileWriteService actorProfileWriteService;
 
     @Operation(summary = "获取我的演员档案")
     @GetMapping("/mine")
@@ -45,6 +49,13 @@ public class ActorProfileController {
     public R<Void> save(Authentication authentication, @Valid @RequestBody ActorProfileSaveDTO dto) {
         actorProfileService.saveProfile(currentUserId(authentication), dto);
         return R.ok();
+    }
+
+    @Operation(summary = "保存我的核心与职业档案")
+    @PutMapping("/mine")
+    public R<ActorProfileRespDTO> saveMine(Authentication authentication,
+                                           @Valid @RequestBody ActorProfileMineUpdateDTO dto) {
+        return R.ok(actorProfileWriteService.saveMine(currentUserId(authentication), dto));
     }
 
     private Long currentUserId(Authentication authentication) {
