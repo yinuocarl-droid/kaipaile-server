@@ -47,7 +47,7 @@ public class ActorWorkServiceImpl implements ActorWorkService {
         ActorProfile profile = requireProfile(userId);
         String project = normalizeName(request.getProjectName()), role = normalizeName(request.getRoleName()), key = hash(project + "|" + role);
         if (experienceMapper.selectCount(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getDedupeKey, key)) > 0) throw ProfileDomainErrorCode.PROFILE_WORK_DUPLICATE.toException();
-        ActorExperience work = new ActorExperience(); work.setUserId(userId); work.setActorProfileId(profile.getActorProfileId()); work.setSourceType("manual");
+        ActorExperience work = new ActorExperience(); work.setUserId(userId); work.setActorProfileId(profile.getActorProfileId()); work.setSourceType(StringUtils.hasText(request.getSourceType()) ? request.getSourceType().trim() : "manual");
         apply(work, request, project, role, key); experienceMapper.insert(work); incrementVersion(profile); return toResponse(work);
     }
 
