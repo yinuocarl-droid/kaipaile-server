@@ -84,6 +84,21 @@ public class ActorWorkServiceImpl implements ActorWorkService {
         return ids.stream().map(id -> works.stream().filter(w -> id.equals(w.getExperienceId())).findFirst().orElseThrow()).map(this::toResponse).toList();
     }
 
+    public List<ActorWorkRespDTO> representativeWorks(Long userId) {
+        ActorProfile profile = requireProfile(userId);
+        List<ActorProfileRepresentativeWork> relations = representativeMapper.selectList(
+                new LambdaQueryWrapper<ActorProfileRepresentativeWork>()
+                        .eq(ActorProfileRepresentativeWork::getActorProfileId, profile.getActorProfileId())
+                        .orderByAsc(ActorProfileRepresentativeWork::getSortNo));
+        if (relations.isEmpty()) return List.of();
+        List<Long> ids = relations.stream().map(ActorProfileRepresentativeWork::getExperienceId).toList();
+        Map<Long, ActorExperience> works = experienceMapper.selectList(new LambdaQueryWrapper<ActorExperience>()
+                        .eq(ActorExperience::getUserId, userId)
+                        .in(ActorExperience::getExperienceId, ids))
+                .stream().collect(java.util.stream.Collectors.toMap(ActorExperience::getExperienceId, work -> work));
+        return ids.stream().map(works::get).filter(Objects::nonNull).map(this::toResponse).toList();
+    }
+
     private ActorProfile requireProfile(Long userId) { ActorProfile p = profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId, userId).last("limit 1")); if (p == null) throw new BizException("演员档案不存在"); return p; }
     private ActorExperience requireWork(Long userId, Long id) { ActorExperience w = experienceMapper.selectOne(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getExperienceId, id).last("limit 1")); if (w == null) throw new BizException("作品不存在"); return w; }
     private void incrementVersion(ActorProfile p) {

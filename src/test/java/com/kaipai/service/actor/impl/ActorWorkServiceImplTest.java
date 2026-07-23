@@ -17,6 +17,7 @@ import com.kaipai.model.actor.dto.ActorWorkQueryDTO;
 import com.kaipai.model.actor.dto.ActorWorkSaveDTO;
 import com.kaipai.model.actor.entity.ActorExperience;
 import com.kaipai.model.actor.entity.ActorProfile;
+import com.kaipai.model.actor.entity.ActorProfileRepresentativeWork;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,26 @@ class ActorWorkServiceImplTest {
 
         assertThrows(BizException.class, () -> service.replaceRepresentativeWorks(7L, request));
         verify(representativeMapper, never()).insert(any());
+    }
+
+    @Test
+    void representativeWorksReturnsCurrentSelectionInConfiguredOrder() {
+        ActorProfileRepresentativeWork second = representative(22L, 2);
+        ActorProfileRepresentativeWork first = representative(21L, 1);
+        when(representativeMapper.selectList(any())).thenReturn(List.of(first, second));
+        when(experienceMapper.selectList(any())).thenReturn(List.of(workEntity(22L), workEntity(21L)));
+
+        var result = service.representativeWorks(7L);
+
+        assertEquals(List.of(21L, 22L), result.stream().map(item -> item.getExperienceId()).toList());
+    }
+
+    private ActorProfileRepresentativeWork representative(Long experienceId, int sortNo) {
+        ActorProfileRepresentativeWork relation = new ActorProfileRepresentativeWork();
+        relation.setActorProfileId(11L);
+        relation.setExperienceId(experienceId);
+        relation.setSortNo(sortNo);
+        return relation;
     }
 
     private ActorWorkSaveDTO workSave(String projectName, String roleName) {

@@ -8,5 +8,6 @@ public interface ActorWorkService {
     ActorWorkRespDTO work(Long userId, Long id);
     ActorWorkRespDTO updateWork(Long userId, Long id, ActorWorkSaveDTO request);
     void deleteWork(Long userId, Long id);
+    List<ActorWorkRespDTO> representativeWorks(Long userId);
     List<ActorWorkRespDTO> replaceRepresentativeWorks(Long userId, ActorRepresentativeWorksUpdateDTO request);
 }

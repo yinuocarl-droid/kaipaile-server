@@ -22,6 +22,7 @@ public class ActorWorkController {
     @GetMapping("/{id}") public R<ActorWorkRespDTO> get(Authentication auth, @PathVariable Long id) { return R.ok(actorWorkService.work(userId(auth), id)); }
     @PutMapping("/{id}") public R<ActorWorkRespDTO> update(Authentication auth, @PathVariable Long id, @Valid @RequestBody ActorWorkSaveDTO dto) { return R.ok(actorWorkService.updateWork(userId(auth), id, dto)); }
     @DeleteMapping("/{id}") public R<Void> delete(Authentication auth, @PathVariable Long id) { actorWorkService.deleteWork(userId(auth), id); return R.ok(); }
+    @GetMapping("/representatives") public R<List<ActorWorkRespDTO>> representatives(Authentication auth) { return R.ok(actorWorkService.representativeWorks(userId(auth))); }
     @PutMapping("/representatives") public R<List<ActorWorkRespDTO>> representatives(Authentication auth, @Valid @RequestBody ActorRepresentativeWorksUpdateDTO dto) { return R.ok(actorWorkService.replaceRepresentativeWorks(userId(auth), dto)); }
 
     private Long userId(Authentication auth) { if (auth == null || !(auth.getPrincipal() instanceof Long id)) throw new BizException("未登录或登录态失效"); return id; }
