@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
+import com.kaipai.common.exception.BizException;
 import com.kaipai.model.actor.dto.ActorProfileCareerUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileCoreUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
@@ -29,11 +30,18 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     private final ObjectMapper objectMapper;
 
     @Override
+    public ActorProfileRespDTO mine(Long currentUserId) {
+        ActorProfile profile = findMine(currentUserId);
+        if (profile == null) {
+            throw new BizException("演员档案不存在");
+        }
+        return toResponse(profile);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public ActorProfileRespDTO saveMine(Long currentUserId, ActorProfileMineUpdateDTO request) {
-        ActorProfile profile = profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
-                .eq(ActorProfile::getUserId, currentUserId)
-                .last("limit 1"));
+        ActorProfile profile = findMine(currentUserId);
         if (profile == null || !request.getExpectedProfileVersion().equals(profile.getVersion())) {
             throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
         }
@@ -52,6 +60,12 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
             profile.setVersion(previousVersion + 1);
         }
         return toResponse(profile);
+    }
+
+    private ActorProfile findMine(Long currentUserId) {
+        return profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>()
+                .eq(ActorProfile::getUserId, currentUserId)
+                .last("limit 1"));
     }
 
     private void applyCore(ActorProfile profile, ActorProfileCoreUpdateDTO core) {

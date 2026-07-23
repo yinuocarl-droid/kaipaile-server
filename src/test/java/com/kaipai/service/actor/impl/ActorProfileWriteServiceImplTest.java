@@ -69,6 +69,19 @@ class ActorProfileWriteServiceImplTest {
         assertEquals(12L, response.getWorkLibraryVersion());
     }
 
+    @Test
+    void mineReturnsVersionedCareerProfile() {
+        current.setNickName("王火火");
+        current.setLanguageTagsJson("[\"粤语\",\"英语\"]");
+
+        var response = service.mine(7L);
+
+        assertEquals(3, response.getProfileVersion());
+        assertEquals(12L, response.getWorkLibraryVersion());
+        assertEquals("王火火", response.getPublicName());
+        assertEquals(List.of("粤语", "英语"), response.getLanguageTags());
+    }
+
     private ActorProfileMineUpdateDTO validRequest() {
         ActorProfileCoreUpdateDTO core = new ActorProfileCoreUpdateDTO();
         core.setPublicName("王火火");

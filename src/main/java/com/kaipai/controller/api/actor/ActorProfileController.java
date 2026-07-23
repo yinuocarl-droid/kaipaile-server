@@ -35,6 +35,12 @@ public class ActorProfileController {
         return R.ok(actorProfileService.mine(currentUserId(authentication)));
     }
 
+    @Operation(summary = "获取我的核心与职业档案")
+    @GetMapping("/mine/career")
+    public R<ActorProfileRespDTO> careerMine(Authentication authentication) {
+        return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
+    }
+
     @Operation(summary = "获取演员档案")
     @GetMapping("/{userId}")
     public R<ActorProfileDTO> profile(Authentication authentication, @PathVariable Long userId) {
