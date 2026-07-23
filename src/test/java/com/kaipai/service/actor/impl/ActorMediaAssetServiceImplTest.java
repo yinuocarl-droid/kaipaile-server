@@ -12,6 +12,7 @@ import com.kaipai.model.actor.dto.ActorAssetUpdateDTO;
 import com.kaipai.model.actor.dto.ActorCurrentResumeUpdateDTO;
 import com.kaipai.model.actor.entity.*;
 import com.kaipai.service.actor.PrivateActorMediaStorage;
+import com.kaipai.service.actor.ActorPrivatePdfProcessor;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,14 +25,17 @@ class ActorMediaAssetServiceImplTest {
     private ActorProfileAssetMapper profileAssetMapper;
     private ActorWorkAssetMapper workAssetMapper;
     private ShareCardAssetMapper shareAssetMapper;
+    private ActorMediaAssetPageMapper pageMapper;
     private PrivateActorMediaStorage storage;
+    private ActorPrivatePdfProcessor pdfProcessor;
     private ActorMediaAssetServiceImpl service;
 
     @BeforeEach void setUp() {
         assetMapper = mock(ActorMediaAssetMapper.class); profileMapper = mock(ActorProfileMapper.class);
         profileAssetMapper = mock(ActorProfileAssetMapper.class); workAssetMapper = mock(ActorWorkAssetMapper.class);
         shareAssetMapper = mock(ShareCardAssetMapper.class); storage = mock(PrivateActorMediaStorage.class);
-        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper, shareAssetMapper, storage);
+        pageMapper = mock(ActorMediaAssetPageMapper.class); pdfProcessor = mock(ActorPrivatePdfProcessor.class);
+        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper, shareAssetMapper, pageMapper, storage, pdfProcessor);
     }
 
     @Test void createdAssetPersistsObjectIdentityWithoutAccessUrl() {
@@ -67,6 +71,23 @@ class ActorMediaAssetServiceImplTest {
         when(profileMapper.selectCount(any())).thenReturn(1L);
         assertEquals(46014, assertThrows(BizException.class, () -> service.delete(7L, 81L)).getCode());
         verify(assetMapper, never()).deleteById(any(Long.class));
+    }
+
+    @Test void deletingPdfAlsoDeletesPersistedPageObjects() {
+        ActorMediaAsset pdf = readyPhoto(7L); pdf.setMediaType("pdf"); pdf.setObjectKey("resume.pdf");
+        ActorMediaAssetPage page = new ActorMediaAssetPage(); page.setPageId(3L); page.setAssetId(81L); page.setImageObjectKey("page-1.jpg");
+        when(assetMapper.selectOne(any())).thenReturn(pdf);
+        when(profileMapper.selectCount(any())).thenReturn(0L);
+        when(profileAssetMapper.selectCount(any())).thenReturn(0L);
+        when(workAssetMapper.selectCount(any())).thenReturn(0L);
+        when(shareAssetMapper.selectCount(any())).thenReturn(0L);
+        when(pageMapper.selectList(any())).thenReturn(java.util.List.of(page));
+
+        service.delete(7L, 81L);
+
+        verify(storage).delete("private", "page-1.jpg");
+        verify(pageMapper).delete(any());
+        verify(storage).delete("private", "resume.pdf");
     }
 
     @Test void listAssetsPaginatesAndFiltersWithoutExposingObjectIdentity() {
@@ -122,6 +143,38 @@ class ActorMediaAssetServiceImplTest {
 
         assertEquals(46013, assertThrows(BizException.class, () -> service.setCurrentResume(7L, request)).getCode());
         verify(profileMapper, never()).updateById(any());
+    }
+
+    @Test void pdfUploadPersistsOrderedPagesBeforeBecomingReady() {
+        var file = new MockMultipartFile("file", "简历.pdf", "application/pdf", "%PDF-test".getBytes());
+        when(assetMapper.insert(any())).thenAnswer(call -> { ((ActorMediaAsset) call.getArgument(0)).setAssetId(90L); return 1; });
+        var original = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "actor-private/7/pdf/a.pdf", null);
+        var page1 = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "actor-private/7/pdf-page/1.jpg", null);
+        var page2 = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "actor-private/7/pdf-page/2.jpg", null);
+        when(storage.store(7L, "pdf", file)).thenReturn(original);
+        when(pdfProcessor.process(7L, file)).thenReturn(java.util.List.of(page1, page2));
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals("ready", result.getProcessStatus());
+        var pages = org.mockito.ArgumentCaptor.forClass(ActorMediaAssetPage.class);
+        verify(pageMapper, times(2)).insert(pages.capture());
+        assertEquals(java.util.List.of(1, 2), pages.getAllValues().stream().map(ActorMediaAssetPage::getPageNo).toList());
+        assertEquals(2, result.getPageCount());
+    }
+
+    @Test void pdfConversionFailureIsPersistedAndNotReportedReady() {
+        var file = new MockMultipartFile("file", "坏简历.pdf", "application/pdf", "%PDF-bad".getBytes());
+        when(assetMapper.insert(any())).thenAnswer(call -> { ((ActorMediaAsset) call.getArgument(0)).setAssetId(91L); return 1; });
+        when(storage.store(7L, "pdf", file)).thenReturn(new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "actor-private/7/pdf/bad.pdf", null));
+        when(pdfProcessor.process(7L, file)).thenThrow(new ActorPrivatePdfProcessor.PdfProcessingException("PDF_RENDER_FAILED", "PDF 页转换失败"));
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals("failed", result.getProcessStatus());
+        var asset = org.mockito.ArgumentCaptor.forClass(ActorMediaAsset.class);
+        verify(assetMapper).updateById(asset.capture());
+        assertEquals("PDF_RENDER_FAILED", asset.getValue().getFailureCode());
     }
 
     private ActorMediaAsset readyPhoto(Long userId) { ActorMediaAsset a = new ActorMediaAsset(); a.setAssetId(81L); a.setUserId(userId); a.setMediaType("photo"); a.setProcessStatus("ready"); a.setStorageProvider("cos"); a.setBucketCode("private"); a.setObjectKey("actor/7/a.jpg"); return a; }
