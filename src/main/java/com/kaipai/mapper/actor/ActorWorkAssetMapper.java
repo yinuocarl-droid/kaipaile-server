@@ -1,0 +1,1 @@
+package com.kaipai.mapper.actor; import com.baomidou.mybatisplus.core.mapper.BaseMapper; import com.kaipai.model.actor.entity.ActorWorkAsset; import org.apache.ibatis.annotations.Mapper; @Mapper public interface ActorWorkAssetMapper extends BaseMapper<ActorWorkAsset> {}
