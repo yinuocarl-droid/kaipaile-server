@@ -51,6 +51,7 @@ tencent:
   cos:
     region: ${TENCENT_COS_REGION:${COS_REGION:}}
     bucket-name: ${TENCENT_COS_BUCKET_NAME:${COS_BUCKET_NAME:}}
+    private-bucket-name: ${TENCENT_COS_PRIVATE_BUCKET_NAME:${COS_PRIVATE_BUCKET_NAME:}}
 
 kaipai:
   cors:
