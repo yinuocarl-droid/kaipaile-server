@@ -32,5 +32,14 @@ class ShareCardFavoriteServiceImplTest {
         var result=service.list(10L,1,10);
         assertEquals(1,result.getTotal());assertEquals(5L,result.getList().get(0).getShareCardId());
     }
+    @Test void stateReadsActiveFavoriteWithoutMutation(){
+        when(cardMapper.selectOne(any())).thenReturn(card(20L,"active"));
+        ShareCardFavorite favorite=new ShareCardFavorite();favorite.setShareCardId(5L);favorite.setUserId(10L);
+        when(favoriteMapper.selectOne(any())).thenReturn(favorite,null);
+        assertTrue(service.state(10L,5L).isFavorited());
+        assertFalse(service.state(10L,5L).isFavorited());
+        verify(favoriteMapper,never()).insert(any());
+        verify(favoriteMapper,never()).deleteById(any());
+    }
     private UserShareCard card(Long owner,String status){UserShareCard c=new UserShareCard();c.setShareCardId(5L);c.setUserId(owner);c.setShareStatus(status);return c;}
 }

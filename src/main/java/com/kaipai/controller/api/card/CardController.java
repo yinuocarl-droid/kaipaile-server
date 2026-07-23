@@ -63,6 +63,11 @@ public class CardController {
         return R.ok(shareCardFavoriteService.add(currentUserId(authentication), shareCardId));
     }
 
+    @GetMapping("/{shareCardId}/favorite")
+    public R<ShareCardFavoriteStateDTO> favoriteState(Authentication authentication, @PathVariable Long shareCardId) {
+        return R.ok(shareCardFavoriteService.state(currentUserId(authentication), shareCardId));
+    }
+
     @DeleteMapping("/{shareCardId}/favorite")
     public R<ShareCardFavoriteStateDTO> unfavorite(Authentication authentication, @PathVariable Long shareCardId) {
         return R.ok(shareCardFavoriteService.remove(currentUserId(authentication), shareCardId));
