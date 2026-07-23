@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
-import com.kaipai.common.exception.BizException;
 import com.kaipai.model.actor.dto.ActorProfileCareerUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileCoreUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
@@ -33,7 +32,7 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     public ActorProfileRespDTO mine(Long currentUserId) {
         ActorProfile profile = findMine(currentUserId);
         if (profile == null) {
-            throw new BizException("演员档案不存在");
+            profile = newProfileDraft(currentUserId);
         }
         return toResponse(profile);
     }
@@ -42,7 +41,14 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     @Transactional(rollbackFor = Exception.class)
     public ActorProfileRespDTO saveMine(Long currentUserId, ActorProfileMineUpdateDTO request) {
         ActorProfile profile = findMine(currentUserId);
-        if (profile == null || !request.getExpectedProfileVersion().equals(profile.getVersion())) {
+        boolean creating = profile == null;
+        if (creating) {
+            if (request.getExpectedProfileVersion() != 0) {
+                throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
+            }
+            profile = newProfileDraft(currentUserId);
+            profile.setProfileStatus(1);
+        } else if (!request.getExpectedProfileVersion().equals(profile.getVersion())) {
             throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
         }
 
@@ -53,13 +59,23 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         profile.setIntro(trimToNull(request.getIntro()));
 
         Integer previousVersion = profile.getVersion();
-        if (profileMapper.updateById(profile) != 1) {
+        int affectedRows = creating ? profileMapper.insert(profile) : profileMapper.updateById(profile);
+        if (affectedRows != 1) {
             throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
         }
-        if (Objects.equals(previousVersion, profile.getVersion())) {
+        if (!creating && Objects.equals(previousVersion, profile.getVersion())) {
             profile.setVersion(previousVersion + 1);
         }
         return toResponse(profile);
+    }
+
+    private ActorProfile newProfileDraft(Long currentUserId) {
+        ActorProfile profile = new ActorProfile();
+        profile.setUserId(currentUserId);
+        profile.setVersion(0);
+        profile.setWorkLibraryVersion(0L);
+        profile.setProfileStatus(3);
+        return profile;
     }
 
     private ActorProfile findMine(Long currentUserId) {
@@ -95,7 +111,9 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         response.setWorkLibraryVersion(profile.getWorkLibraryVersion() == null ? 0L : profile.getWorkLibraryVersion());
         response.setAvatarAssetId(profile.getAvatarAssetId());
         response.setPublicName(profile.getNickName());
-        response.setGender(profile.getGender() != null && profile.getGender() == 2 ? "female" : "male");
+        response.setGender(profile.getGender() == null || profile.getGender() == 0
+                ? null
+                : profile.getGender() == 2 ? "female" : "male");
         response.setAge(profile.getAge());
         response.setHeight(profile.getHeight());
         response.setCurrentCity(profile.getLocationCity());

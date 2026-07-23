@@ -1,6 +1,8 @@
 package com.kaipai.service.actor.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -80,6 +82,43 @@ class ActorProfileWriteServiceImplTest {
         assertEquals(12L, response.getWorkLibraryVersion());
         assertEquals("王火火", response.getPublicName());
         assertEquals(List.of("粤语", "英语"), response.getLanguageTags());
+    }
+
+    @Test
+    void mineReturnsEmptyDraftWhenProfileDoesNotExist() {
+        when(profileMapper.selectOne(any())).thenReturn(null);
+
+        var response = service.mine(7L);
+
+        assertNotNull(response);
+        assertNull(response.getActorProfileId());
+        assertEquals(7L, response.getUserId());
+        assertEquals(0, response.getProfileVersion());
+        assertEquals(0L, response.getWorkLibraryVersion());
+        assertNull(response.getGender());
+        assertEquals(List.of(), response.getLanguageTags());
+    }
+
+    @Test
+    void saveMineCreatesProfileWhenExpectedVersionIsZeroAndProfileDoesNotExist() {
+        when(profileMapper.selectOne(any())).thenReturn(null);
+        when(profileMapper.insert(any())).thenReturn(1);
+        ActorProfileMineUpdateDTO request = validRequest();
+        request.setExpectedProfileVersion(0);
+
+        var response = service.saveMine(7L, request);
+
+        verify(assetVerifier).requireOwnedReadyPhoto(7L, 81L);
+        ArgumentCaptor<ActorProfile> profileCaptor = ArgumentCaptor.forClass(ActorProfile.class);
+        verify(profileMapper).insert(profileCaptor.capture());
+        verify(profileMapper, never()).updateById(any());
+        ActorProfile saved = profileCaptor.getValue();
+        assertEquals(7L, saved.getUserId());
+        assertEquals(0, saved.getVersion());
+        assertEquals(0L, saved.getWorkLibraryVersion());
+        assertEquals(1, saved.getProfileStatus());
+        assertEquals("王火火", response.getPublicName());
+        assertEquals(0, response.getProfileVersion());
     }
 
     private ActorProfileMineUpdateDTO validRequest() {
