@@ -1,0 +1,3 @@
+package com.kaipai.service.ai.profileimport;
+import static org.junit.jupiter.api.Assertions.*; import org.junit.jupiter.api.Test;
+class ProfileImportCandidateProofServiceTest { @Test void proofBindsRequestCandidateValueSourceAndConfirmation(){var service=new ProfileImportCandidateProofService("test-secret");String proof=service.issue("req-1","gender-1","female","inferred_from_roles",true);assertTrue(service.verify(proof,"req-1","gender-1","female","inferred_from_roles",true));assertFalse(service.verify(proof,"req-2","gender-1","female","inferred_from_roles",true));assertFalse(service.verify(proof,"req-1","gender-1","female","direct",true));}}
