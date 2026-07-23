@@ -24,6 +24,7 @@ class ActorMediaAssetServiceImplTest {
     private ActorProfileMapper profileMapper;
     private ActorProfileAssetMapper profileAssetMapper;
     private ActorWorkAssetMapper workAssetMapper;
+    private ActorExperienceMapper experienceMapper;
     private ShareCardAssetMapper shareAssetMapper;
     private ActorMediaAssetPageMapper pageMapper;
     private PrivateActorMediaStorage storage;
@@ -32,10 +33,10 @@ class ActorMediaAssetServiceImplTest {
 
     @BeforeEach void setUp() {
         assetMapper = mock(ActorMediaAssetMapper.class); profileMapper = mock(ActorProfileMapper.class);
-        profileAssetMapper = mock(ActorProfileAssetMapper.class); workAssetMapper = mock(ActorWorkAssetMapper.class);
+        profileAssetMapper = mock(ActorProfileAssetMapper.class); workAssetMapper = mock(ActorWorkAssetMapper.class); experienceMapper = mock(ActorExperienceMapper.class);
         shareAssetMapper = mock(ShareCardAssetMapper.class); storage = mock(PrivateActorMediaStorage.class);
         pageMapper = mock(ActorMediaAssetPageMapper.class); pdfProcessor = mock(ActorPrivatePdfProcessor.class);
-        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper, shareAssetMapper, pageMapper, storage, pdfProcessor);
+        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper, experienceMapper, shareAssetMapper, pageMapper, storage, pdfProcessor);
     }
 
     @Test void createdAssetPersistsObjectIdentityWithoutAccessUrl() {
@@ -175,6 +176,44 @@ class ActorMediaAssetServiceImplTest {
         var asset = org.mockito.ArgumentCaptor.forClass(ActorMediaAsset.class);
         verify(assetMapper).updateById(asset.capture());
         assertEquals("PDF_RENDER_FAILED", asset.getValue().getFailureCode());
+    }
+
+    @Test void readyPhotoCanBeBoundToProfileAndRejectsNonPhoto() {
+        ActorMediaAsset photo = readyPhoto(7L);
+        ActorProfile profile = new ActorProfile(); profile.setActorProfileId(9L); profile.setUserId(7L);
+        when(assetMapper.selectOne(any())).thenReturn(photo); when(profileMapper.selectOne(any())).thenReturn(profile);
+
+        service.bindProfileAsset(7L, 81L, "portrait", 1);
+
+        var relation = org.mockito.ArgumentCaptor.forClass(ActorProfileAsset.class);
+        verify(profileAssetMapper).insert(relation.capture());
+        assertEquals(9L, relation.getValue().getActorProfileId());
+        assertEquals("portrait", relation.getValue().getUsageCode());
+    }
+
+    @Test void readyWorkAssetRequiresOwnedWorkAndAssetType() {
+        ActorMediaAsset video = readyPhoto(7L); video.setMediaType("video");
+        ActorExperience work = new ActorExperience(); work.setExperienceId(12L); work.setUserId(7L);
+        when(assetMapper.selectOne(any())).thenReturn(video);
+        when(experienceMapper.selectOne(any())).thenReturn(work);
+
+        service.bindWorkAsset(7L, 12L, 81L, "clip", 1);
+
+        verify(workAssetMapper).insert(any(ActorWorkAsset.class));
+    }
+
+    @Test void retryRequiresFailedPdfAndCreatesFreshProcessingLifecycle() {
+        ActorMediaAsset failed = readyPhoto(7L); failed.setMediaType("pdf"); failed.setProcessStatus("failed");
+        var file = new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
+        when(assetMapper.selectOne(any())).thenReturn(failed);
+        when(storage.store(7L, "pdf", file)).thenReturn(new PrivateActorMediaStorage.StoredObjectRef("cos", "private", "retry.pdf", null));
+        when(assetMapper.insert(any())).thenAnswer(call -> { ((ActorMediaAsset) call.getArgument(0)).setAssetId(92L); return 1; });
+        when(pdfProcessor.process(7L, file)).thenReturn(java.util.List.of());
+
+        var result = service.retryPdf(7L, 81L, file);
+
+        assertEquals(92L, result.getAssetId());
+        assertEquals("ready", result.getProcessStatus());
     }
 
     private ActorMediaAsset readyPhoto(Long userId) { ActorMediaAsset a = new ActorMediaAsset(); a.setAssetId(81L); a.setUserId(userId); a.setMediaType("photo"); a.setProcessStatus("ready"); a.setStorageProvider("cos"); a.setBucketCode("private"); a.setObjectKey("actor/7/a.jpg"); return a; }

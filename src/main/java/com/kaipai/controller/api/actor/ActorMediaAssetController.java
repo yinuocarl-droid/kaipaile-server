@@ -35,6 +35,11 @@ public class ActorMediaAssetController {
         return R.ok(actorMediaAssetService.upload(userId(auth), mediaType, categoryCode, file));
     }
 
+    @PostMapping("/{id}/retry")
+    public R<ActorAssetRespDTO> retry(Authentication auth, @PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        return R.ok(actorMediaAssetService.retryPdf(userId(auth), id, file));
+    }
+
     @PutMapping("/{id}")
     public R<ActorAssetRespDTO> update(Authentication auth, @PathVariable Long id, @RequestBody ActorAssetUpdateDTO request) {
         return R.ok(actorMediaAssetService.update(userId(auth), id, request));
@@ -49,6 +54,18 @@ public class ActorMediaAssetController {
     @PutMapping("/current-resume")
     public R<Void> setCurrentResume(Authentication auth, @Valid @RequestBody ActorCurrentResumeUpdateDTO request) {
         actorMediaAssetService.setCurrentResume(userId(auth), request);
+        return R.ok();
+    }
+
+    @PostMapping("/profile-bindings")
+    public R<Void> bindProfile(Authentication auth, @Valid @RequestBody ActorAssetBindingDTO request) {
+        actorMediaAssetService.bindProfileAsset(userId(auth), request.getAssetId(), request.getUsageCode(), request.getSortNo());
+        return R.ok();
+    }
+
+    @PostMapping("/work-bindings/{experienceId}")
+    public R<Void> bindWork(Authentication auth, @PathVariable Long experienceId, @Valid @RequestBody ActorAssetBindingDTO request) {
+        actorMediaAssetService.bindWorkAsset(userId(auth), experienceId, request.getAssetId(), request.getUsageCode(), request.getSortNo());
         return R.ok();
     }
 

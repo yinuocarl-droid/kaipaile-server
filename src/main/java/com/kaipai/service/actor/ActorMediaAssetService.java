@@ -6,9 +6,12 @@ public interface ActorMediaAssetService extends ActorMediaAssetOwnershipVerifier
     PageResult<ActorAssetRespDTO> list(Long userId, ActorAssetQueryDTO query);
     ActorAssetRespDTO asset(Long userId, Long assetId);
     ActorAssetRespDTO upload(Long userId, String mediaType, String categoryCode, MultipartFile file);
+    ActorAssetRespDTO retryPdf(Long userId, Long failedAssetId, MultipartFile file);
     ActorAssetRespDTO createReadyAsset(Long userId, String mediaType, String categoryCode, PrivateActorMediaStorage.StoredObjectRef object, String name, String mimeType, Long sizeBytes);
     ActorAssetRespDTO update(Long userId, Long assetId, ActorAssetUpdateDTO request);
     void setCurrentResume(Long userId, ActorCurrentResumeUpdateDTO request);
+    void bindProfileAsset(Long userId, Long assetId, String usageCode, Integer sortNo);
+    void bindWorkAsset(Long userId, Long experienceId, Long assetId, String usageCode, Integer sortNo);
     ActorAssetAccessUrlRespDTO issueOwnerAccessUrl(Long userId, Long assetId);
     void delete(Long userId, Long assetId);
 }
