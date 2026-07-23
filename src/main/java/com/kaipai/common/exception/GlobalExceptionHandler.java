@@ -23,6 +23,8 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
+import java.util.Arrays;
+import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
 
 @Slf4j
 @RestControllerAdvice
@@ -31,7 +33,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public R<Void> handleBizException(BizException e) {
         log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
+        return Arrays.stream(ProfileDomainErrorCode.values()).filter(code -> code.code() == e.getCode()).findFirst()
+                .map(code -> R.<Void>fail(e.getCode(), code.errorCode(), e.getMessage()))
+                .orElseGet(() -> R.fail(e.getCode(), e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

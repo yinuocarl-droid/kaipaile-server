@@ -1,0 +1,3 @@
+package com.kaipai.service.ai.profileimport;
+import static org.junit.jupiter.api.Assertions.*; import com.kaipai.common.exception.GlobalExceptionHandler; import com.kaipai.model.actor.dto.ProfileDomainErrorCode; import org.junit.jupiter.api.Test;
+class ProfileImportErrorContractTest { @Test void importErrorMapAndEnvelopeAreStable(){assertEquals(46001,ProfileDomainErrorCode.PROFILE_IMPORT_DISABLED.code());assertEquals("PROFILE_IMPORT_DISABLED",ProfileDomainErrorCode.PROFILE_IMPORT_DISABLED.errorCode());var response=new GlobalExceptionHandler().handleBizException(ProfileDomainErrorCode.PROFILE_IMPORT_DISABLED.toException());assertEquals("PROFILE_IMPORT_DISABLED",response.getErrorCode());}}
