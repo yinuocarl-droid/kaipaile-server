@@ -1,5 +1,8 @@
 {
+  "schemaVersion": 1,
   "profileCount": 1,
-  "mediaAssetCount": 0,
-  "relationCount": 0
+  "activeWorkCount": 0,
+  "workLibraryVersion": 0,
+  "activeWorksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "baselineHash": "sha256:a9e7f2b14d3f04dd923c9e94490f807bb833cc831dfaefc10d538e5620440a3e"
 }
