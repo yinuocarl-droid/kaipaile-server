@@ -41,6 +41,16 @@ public class ActorProfileController {
         return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
     }
 
+    @Deprecated(forRemoval = false)
+    @Operation(
+            summary = "获取我的旧版聚合演员档案（兼容）",
+            description = "已废弃；仅供旧聚合消费者过渡。新版调用 GET /api/actor/profile/mine/career。",
+            deprecated = true)
+    @GetMapping("/mine/legacy")
+    public R<ActorProfileDTO> legacyMine(Authentication authentication) {
+        return R.ok(actorProfileService.mine(currentUserId(authentication)));
+    }
+
     @Operation(summary = "获取演员档案")
     @GetMapping("/{userId}")
     public R<ActorProfileDTO> profile(Authentication authentication, @PathVariable Long userId) {
