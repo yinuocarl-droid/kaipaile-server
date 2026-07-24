@@ -15,6 +15,17 @@ public interface ActorExperienceMapper extends BaseMapper<ActorExperience> {
             WHERE user_id = #{userId}
               AND experience_id = #{experienceId}
               AND deleted = 0
+            """)
+    ActorExperience selectOwnedActiveById(
+            @Param("userId") Long userId,
+            @Param("experienceId") Long experienceId);
+
+    @Select("""
+            SELECT *
+            FROM actor_experience
+            WHERE user_id = #{userId}
+              AND experience_id = #{experienceId}
+              AND deleted = 0
             FOR UPDATE
             """)
     ActorExperience selectOwnedActiveByIdForUpdate(

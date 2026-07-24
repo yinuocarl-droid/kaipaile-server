@@ -24,6 +24,7 @@ public class ActorWorkController {
     @GetMapping("/{id}") public R<ActorWorkRespDTO> get(Authentication auth, @PathVariable Long id) { return R.ok(actorWorkService.work(userId(auth), id)); }
     @PutMapping("/{id}") public R<ActorWorkRespDTO> update(Authentication auth, @PathVariable Long id, @Valid @RequestBody ActorWorkSaveDTO dto) { return R.ok(actorWorkService.updateWork(userId(auth), id, dto)); }
     @DeleteMapping("/{id}") public R<Void> delete(Authentication auth, @PathVariable Long id) { actorWorkService.deleteWork(userId(auth), id); return R.ok(); }
+    @GetMapping("/{id}/assets") public R<List<ActorWorkAssetRespDTO>> workAssets(Authentication auth, @PathVariable Long id) { return R.ok(actorMediaAssetService.workAssets(userId(auth), id)); }
     @PutMapping("/{id}/assets") public R<Void> replaceAssets(Authentication auth, @PathVariable Long id, @Valid @RequestBody ActorWorkAssetsReplaceDTO dto) { actorMediaAssetService.replaceWorkAssets(userId(auth), id, dto); return R.ok(); }
     @GetMapping("/representatives") public R<List<ActorWorkRespDTO>> representatives(Authentication auth) { return R.ok(actorWorkService.representativeWorks(userId(auth))); }
     @PutMapping("/representatives") public R<List<ActorWorkRespDTO>> representatives(Authentication auth, @Valid @RequestBody ActorRepresentativeWorksUpdateDTO dto) { return R.ok(actorWorkService.replaceRepresentativeWorks(userId(auth), dto)); }

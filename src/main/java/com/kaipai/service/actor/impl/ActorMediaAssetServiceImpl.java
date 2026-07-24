@@ -17,6 +17,15 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
     public ActorAssetRespDTO update(Long userId,Long assetId,ActorAssetUpdateDTO request){ActorMediaAsset a=require(userId,assetId);a.setOriginalName(trim(request.getOriginalName()));a.setCategoryCode(trim(request.getCategoryCode()));assetMapper.updateById(a);return dto(a);}
     @Transactional(rollbackFor=Exception.class) public void setCurrentResume(Long userId,ActorCurrentResumeUpdateDTO request){ActorMediaAsset a=requireForUpdate(userId,request.getAssetId());if(!"pdf".equals(a.getMediaType())||!"ready".equals(a.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();ActorProfile p=profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId,userId).last("limit 1"));if(p==null)throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();p.setCurrentResumeAssetId(a.getAssetId());profileMapper.updateById(p);}
     @Transactional(rollbackFor=Exception.class) public void bindProfileAsset(Long userId,Long assetId,String usageCode,Integer sortNo){ActorMediaAsset a=requireForUpdate(userId,assetId);if(!"photo".equals(a.getMediaType())||!"ready".equals(a.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();ActorProfile p=profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId,userId).last("limit 1"));if(p==null)throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();ActorProfileAsset relation=new ActorProfileAsset();relation.setActorProfileId(p.getActorProfileId());relation.setAssetId(assetId);relation.setUsageCode(usageCode);relation.setSortNo(sortNo);profileAssetMapper.insert(relation);}
+    public List<ActorWorkAssetRespDTO> workAssets(Long userId, Long experienceId) {
+        ActorExperience work = experienceMapper.selectOwnedActiveById(userId, experienceId);
+        if (work == null
+                || !Objects.equals(work.getUserId(), userId)
+                || !Objects.equals(work.getExperienceId(), experienceId)) {
+            throw new BizException("作品不存在");
+        }
+        return workAssetMapper.selectOwnedActiveAssets(userId, experienceId);
+    }
     @Transactional(rollbackFor = Exception.class)
     public void replaceWorkAssets(Long userId, Long experienceId, ActorWorkAssetsReplaceDTO request) {
         List<NormalizedWorkAssetBinding> desired = validateAndNormalizeBindings(request);

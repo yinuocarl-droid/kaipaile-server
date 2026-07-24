@@ -11,6 +11,7 @@ import com.kaipai.model.actor.dto.ActorAssetQueryDTO;
 import com.kaipai.model.actor.dto.ActorAssetBindingDTO;
 import com.kaipai.model.actor.dto.ActorAssetUpdateDTO;
 import com.kaipai.model.actor.dto.ActorCurrentResumeUpdateDTO;
+import com.kaipai.model.actor.dto.ActorWorkAssetRespDTO;
 import com.kaipai.model.actor.dto.ActorWorkAssetsReplaceDTO;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.model.actor.entity.*;
@@ -202,6 +203,48 @@ class ActorMediaAssetServiceImplTest {
         service.requireOwnedReadyPhoto(7L, 81L);
 
         verify(assetMapper).selectOwnedActiveByIdsForUpdate(7L, List.of(81L));
+    }
+
+    @Test
+    void workAssetsReturnsTheMapperSnapshotForAnOwnedActiveWorkWithoutLocking() {
+        ActorWorkAssetRespDTO still = workAssetSnapshot(81L, "still", 1);
+        ActorWorkAssetRespDTO clip = workAssetSnapshot(82L, "clip", 1);
+        when(experienceMapper.selectOwnedActiveById(7L, 12L)).thenReturn(ownedWork());
+        when(workAssetMapper.selectOwnedActiveAssets(7L, 12L)).thenReturn(List.of(still, clip));
+
+        List<ActorWorkAssetRespDTO> result = service.workAssets(7L, 12L);
+
+        assertEquals(List.of(still, clip), result);
+        verify(experienceMapper).selectOwnedActiveById(7L, 12L);
+        verify(workAssetMapper).selectOwnedActiveAssets(7L, 12L);
+        verify(experienceMapper, never()).selectOwnedActiveByIdForUpdate(any(), any());
+    }
+
+    @Test
+    void workAssetsReturnsAnEmptySnapshotWhenTheOwnedWorkHasNoRelations() {
+        when(experienceMapper.selectOwnedActiveById(7L, 12L)).thenReturn(ownedWork());
+        when(workAssetMapper.selectOwnedActiveAssets(7L, 12L)).thenReturn(List.of());
+
+        assertEquals(List.of(), service.workAssets(7L, 12L));
+
+        verify(workAssetMapper).selectOwnedActiveAssets(7L, 12L);
+    }
+
+    @Test
+    void missingAndForeignWorksShareTheNonLeakingNotFoundFailure() {
+        ActorExperience foreignWork = ownedWork();
+        foreignWork.setUserId(8L);
+        when(experienceMapper.selectOwnedActiveById(7L, 12L)).thenReturn(null);
+        when(experienceMapper.selectOwnedActiveById(7L, 13L)).thenReturn(foreignWork);
+
+        BizException missing = assertThrows(BizException.class, () -> service.workAssets(7L, 12L));
+        BizException foreign = assertThrows(BizException.class, () -> service.workAssets(7L, 13L));
+
+        assertAll(
+                () -> assertEquals("作品不存在", missing.getMessage()),
+                () -> assertEquals("作品不存在", foreign.getMessage()));
+        verify(workAssetMapper, never()).selectOwnedActiveAssets(any(), any());
+        verify(experienceMapper, never()).selectOwnedActiveByIdForUpdate(any(), any());
     }
 
     @Test
@@ -408,6 +451,16 @@ class ActorMediaAssetServiceImplTest {
         asset.setAssetId(assetId);
         asset.setMediaType(mediaType);
         asset.setObjectKey("actor/" + userId + "/" + assetId);
+        return asset;
+    }
+
+    private ActorWorkAssetRespDTO workAssetSnapshot(long assetId, String usageCode, int sortNo) {
+        ActorWorkAssetRespDTO asset = new ActorWorkAssetRespDTO();
+        asset.setAssetId(assetId);
+        asset.setUsageCode(usageCode);
+        asset.setSortNo(sortNo);
+        asset.setMediaType("still".equals(usageCode) ? "photo" : "video");
+        asset.setProcessStatus("ready");
         return asset;
     }
 

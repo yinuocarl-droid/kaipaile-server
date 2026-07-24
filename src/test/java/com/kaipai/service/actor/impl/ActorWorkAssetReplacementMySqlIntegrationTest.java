@@ -17,6 +17,7 @@ import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.mapper.actor.ActorWorkAssetMapper;
 import com.kaipai.mapper.card.ShareCardAssetMapper;
 import com.kaipai.model.actor.dto.ActorAssetBindingDTO;
+import com.kaipai.model.actor.dto.ActorWorkAssetRespDTO;
 import com.kaipai.model.actor.dto.ActorWorkAssetsReplaceDTO;
 import com.kaipai.service.actor.ActorMediaAssetService;
 import com.kaipai.service.actor.ActorPrivatePdfProcessor;
@@ -80,6 +81,9 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
     private static final long COLLECTION_PHOTO_A_ID = 282L;
     private static final long COLLECTION_PHOTO_B_ID = 283L;
     private static final String COLLECTION_INSERT_GATE = "kaipai_work_asset_insert_282";
+    private static final long SNAPSHOT_USER_ID = 307L;
+    private static final long SNAPSHOT_PROFILE_ID = 309L;
+    private static final long SNAPSHOT_WORK_ID = 312L;
     private static final Path MIGRATION_DIR = Path.of("src", "main", "resources", "db", "migration");
     private static final List<String> MIGRATIONS = List.of(
             "V20260723_001__career_profile_domain_foundation.sql",
@@ -123,6 +127,7 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
         seedRollbackScenario();
         seedConcurrentDeleteScenario();
         seedConcurrentReplacementScenario();
+        seedSnapshotScenario();
         installSecondInsertFailureTrigger();
     }
 
@@ -243,6 +248,30 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                 () -> transactionalService.requireOwnedReadyPhoto(USER_ID, OLD_PHOTO_ID));
     }
 
+    @Test
+    void workAssetSnapshotFiltersDeletedAndForeignRowsOrdersAndDoesNotChangeVersion() {
+        long versionBefore = queryWorkLibraryVersion(SNAPSHOT_PROFILE_ID);
+
+        List<ActorWorkAssetRespDTO> assets = transactionalService.workAssets(
+                SNAPSHOT_USER_ID, SNAPSHOT_WORK_ID);
+
+        assertEquals(List.of(381L, 382L, 383L, 384L),
+                assets.stream().map(ActorWorkAssetRespDTO::getAssetId).toList());
+        assertEquals(List.of("still", "still", "still", "clip"),
+                assets.stream().map(ActorWorkAssetRespDTO::getUsageCode).toList());
+        assertEquals(List.of(1, 2, 2, 1),
+                assets.stream().map(ActorWorkAssetRespDTO::getSortNo).toList());
+        assertEquals(List.of("photo", "photo", "photo", "video"),
+                assets.stream().map(ActorWorkAssetRespDTO::getMediaType).toList());
+        assertEquals("work_still", assets.get(0).getCategoryCode());
+        assertEquals("scene-01.jpg", assets.get(0).getOriginalName());
+        assertEquals(null, assets.get(1).getCategoryCode());
+        assertEquals(null, assets.get(1).getOriginalName());
+        assertEquals(List.of("ready", "processing", "ready", "ready"),
+                assets.stream().map(ActorWorkAssetRespDTO::getProcessStatus).toList());
+        assertEquals(versionBefore, queryWorkLibraryVersion(SNAPSHOT_PROFILE_ID));
+    }
+
     private void seedRollbackScenario() {
         jdbc.update("""
                 INSERT INTO actor_profile (actor_profile_id, user_id, work_library_version, deleted)
@@ -284,6 +313,55 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                 """, COLLECTION_WORK_ID, COLLECTION_USER_ID, COLLECTION_PROFILE_ID);
         insertReadyAsset(COLLECTION_PHOTO_A_ID, COLLECTION_USER_ID, "photo");
         insertReadyAsset(COLLECTION_PHOTO_B_ID, COLLECTION_USER_ID, "photo");
+    }
+
+    private void seedSnapshotScenario() {
+        jdbc.update("""
+                INSERT INTO actor_profile (actor_profile_id, user_id, work_library_version, deleted)
+                VALUES (?, ?, 31, 0)
+                """, SNAPSHOT_PROFILE_ID, SNAPSHOT_USER_ID);
+        jdbc.update("""
+                INSERT INTO actor_experience (experience_id, user_id, actor_profile_id, drama_name, deleted)
+                VALUES (?, ?, ?, 'snapshot proof work', 0)
+                """, SNAPSHOT_WORK_ID, SNAPSHOT_USER_ID, SNAPSHOT_PROFILE_ID);
+        insertSnapshotAsset(381L, SNAPSHOT_USER_ID, "photo", "work_still", "scene-01.jpg", "ready", 0);
+        insertSnapshotAsset(382L, SNAPSHOT_USER_ID, "photo", null, null, "processing", 0);
+        insertSnapshotAsset(383L, SNAPSHOT_USER_ID, "photo", "behind_scene", "scene-03.jpg", "ready", 0);
+        insertSnapshotAsset(384L, SNAPSHOT_USER_ID, "video", "work_clip", "clip-01.mp4", "ready", 0);
+        insertSnapshotAsset(385L, SNAPSHOT_USER_ID, "photo", "deleted_relation", "hidden-01.jpg", "ready", 0);
+        insertSnapshotAsset(386L, SNAPSHOT_USER_ID, "photo", "deleted_asset", "hidden-02.jpg", "ready", 1);
+        insertSnapshotAsset(387L, SNAPSHOT_USER_ID + 1, "photo", "foreign", "hidden-03.jpg", "ready", 0);
+        insertSnapshotRelation(381L, "still", 1, 0);
+        insertSnapshotRelation(383L, "still", 2, 0);
+        insertSnapshotRelation(382L, "still", 2, 0);
+        insertSnapshotRelation(384L, "clip", 1, 0);
+        insertSnapshotRelation(385L, "still", 3, 1);
+        insertSnapshotRelation(386L, "still", 4, 0);
+        insertSnapshotRelation(387L, "still", 5, 0);
+    }
+
+    private void insertSnapshotAsset(
+            long assetId,
+            long userId,
+            String mediaType,
+            String categoryCode,
+            String originalName,
+            String processStatus,
+            int deleted) {
+        jdbc.update("""
+                INSERT INTO actor_media_asset (
+                    asset_id, user_id, media_type, category_code, storage_provider, bucket_code,
+                    object_key, original_name, process_status, source_type, deleted)
+                VALUES (?, ?, ?, ?, 'cos', 'private-test', ?, ?, ?, 'upload', ?)
+                """, assetId, userId, mediaType, categoryCode, "actor/" + userId + "/" + assetId,
+                originalName, processStatus, deleted);
+    }
+
+    private void insertSnapshotRelation(long assetId, String usageCode, int sortNo, int deleted) {
+        jdbc.update("""
+                INSERT INTO actor_work_asset (experience_id, asset_id, usage_code, sort_no, deleted)
+                VALUES (?, ?, ?, ?, ?)
+                """, SNAPSHOT_WORK_ID, assetId, usageCode, sortNo, deleted);
     }
 
     private void insertReadyAsset(long assetId, String mediaType) {
