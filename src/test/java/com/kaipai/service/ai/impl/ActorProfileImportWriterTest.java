@@ -11,22 +11,24 @@ import com.kaipai.model.actor.dto.ActorWorkSaveDTO;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.model.ai.dto.ProfileImportApplyReqDTO;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
-import com.kaipai.service.actor.ActorWorkService;
+import com.kaipai.service.actor.ActorWorkInternalWriter;
+import com.kaipai.service.actor.ActorWorkSourceType;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ActorProfileImportWriterTest {
     private ActorProfileMapper profileMapper;
-    private ActorWorkService workService;
+    private ActorWorkInternalWriter workWriter;
     private ActorMediaAssetOwnershipVerifier assets;
     private ActorProfileImportWriter writer;
 
     @BeforeEach
     void setUp() {
         profileMapper = mock(ActorProfileMapper.class);
-        workService = mock(ActorWorkService.class);
+        workWriter = mock(ActorWorkInternalWriter.class);
         assets = mock(ActorMediaAssetOwnershipVerifier.class);
-        writer = new ActorProfileImportWriter(profileMapper, workService, assets, new ObjectMapper());
+        writer = new ActorProfileImportWriter(profileMapper, workWriter, assets, new ObjectMapper());
     }
 
     @Test
@@ -44,10 +46,12 @@ class ActorProfileImportWriterTest {
         verify(profileMapper).insert(profile.capture());
         assertEquals(3, profile.getValue().getProfileStatus());
         assertEquals(0L, profile.getValue().getWorkLibraryVersion());
-        verify(workService, times(2)).createWork(eq(7L), any(ActorWorkSaveDTO.class));
         var work = org.mockito.ArgumentCaptor.forClass(ActorWorkSaveDTO.class);
-        verify(workService, times(2)).createWork(eq(7L), work.capture());
-        assertTrue(work.getAllValues().stream().allMatch(item -> "ai_import".equals(item.getSourceType())));
+        verify(workWriter, times(2)).createWork(
+                eq(7L), work.capture(), eq(ActorWorkSourceType.IMPORT));
+        assertEquals(List.of("作品一", "作品二"), work.getAllValues().stream()
+                .map(ActorWorkSaveDTO::getProjectName)
+                .toList());
         assertTrue(summary.contains("2"));
     }
 
@@ -83,7 +87,7 @@ class ActorProfileImportWriterTest {
 
         verify(profileMapper, never()).insert(any());
         verify(profileMapper, never()).updateById(any());
-        verifyNoInteractions(workService);
+        verifyNoInteractions(workWriter);
     }
 
     @Test
@@ -97,7 +101,7 @@ class ActorProfileImportWriterTest {
         BizException error = assertThrows(BizException.class, () -> writer.applyImport(7L, request));
 
         assertEquals(46010, error.getCode());
-        verifyNoInteractions(workService);
+        verifyNoInteractions(workWriter);
     }
 
     private ProfileImportApplyReqDTO worksOnly(String... projects) {

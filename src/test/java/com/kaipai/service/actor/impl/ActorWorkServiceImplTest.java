@@ -3,12 +3,14 @@ package com.kaipai.service.actor.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.kaipai.common.exception.BizException;
+import com.kaipai.common.result.ResultCode;
 import com.kaipai.mapper.actor.ActorExperienceMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.mapper.actor.ActorProfileRepresentativeWorkMapper;
@@ -76,8 +78,27 @@ class ActorWorkServiceImplTest {
         ActorRepresentativeWorksUpdateDTO request = new ActorRepresentativeWorksUpdateDTO();
         request.setExperienceIds(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L));
 
-        assertThrows(BizException.class, () -> service.replaceRepresentativeWorks(7L, request));
+        BizException error = assertThrows(BizException.class,
+                () -> service.replaceRepresentativeWorks(7L, request));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), error.getCode());
+        verify(representativeMapper, never()).delete(any());
         verify(representativeMapper, never()).insert(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void representativeWorksRejectDuplicateIds() {
+        ActorRepresentativeWorksUpdateDTO request = new ActorRepresentativeWorksUpdateDTO();
+        request.setExperienceIds(List.of(1L, 2L, 2L));
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.replaceRepresentativeWorks(7L, request));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), error.getCode());
+        verify(representativeMapper, never()).delete(any());
+        verify(representativeMapper, never()).insert(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
     }
 
     @Test
@@ -90,6 +111,42 @@ class ActorWorkServiceImplTest {
         var result = service.representativeWorks(7L);
 
         assertEquals(List.of(21L, 22L), result.stream().map(item -> item.getExperienceId()).toList());
+    }
+
+    @Test
+    void successfulCreateIncrementsWorkLibraryVersionExactlyOnce() {
+        service.createWork(7L, workSave("测试作品", "角色"));
+
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void successfulUpdateIncrementsWorkLibraryVersionExactlyOnce() {
+        when(experienceMapper.selectOne(any())).thenReturn(workEntity(21L));
+
+        service.updateWork(7L, 21L, workSave("更新作品", "更新角色"));
+
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void successfulDeleteIncrementsWorkLibraryVersionExactlyOnce() {
+        when(experienceMapper.selectOne(any())).thenReturn(workEntity(21L));
+
+        service.deleteWork(7L, 21L);
+
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void successfulRepresentativeReplacementIncrementsWorkLibraryVersionExactlyOnce() {
+        ActorRepresentativeWorksUpdateDTO request = new ActorRepresentativeWorksUpdateDTO();
+        request.setExperienceIds(List.of(21L, 22L));
+        when(experienceMapper.selectList(any())).thenReturn(List.of(workEntity(21L), workEntity(22L)));
+
+        service.replaceRepresentativeWorks(7L, request);
+
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(11L);
     }
 
     private ActorProfileRepresentativeWork representative(Long experienceId, int sortNo) {

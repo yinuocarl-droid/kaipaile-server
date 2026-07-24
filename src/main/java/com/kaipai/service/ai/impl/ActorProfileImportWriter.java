@@ -9,7 +9,8 @@ import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.model.ai.dto.ProfileImportApplyReqDTO;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
-import com.kaipai.service.actor.ActorWorkService;
+import com.kaipai.service.actor.ActorWorkInternalWriter;
+import com.kaipai.service.actor.ActorWorkSourceType;
 import com.kaipai.service.ai.ProfileImportWriter;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -23,7 +24,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ActorProfileImportWriter implements ProfileImportWriter {
     private final ActorProfileMapper profileMapper;
-    private final ActorWorkService workService;
+    private final ActorWorkInternalWriter workWriter;
     private final ActorMediaAssetOwnershipVerifier assetOwnershipVerifier;
     private final ObjectMapper objectMapper;
 
@@ -56,7 +57,7 @@ public class ActorProfileImportWriter implements ProfileImportWriter {
             }
         }
         for (ProfileImportApplyReqDTO.ConfirmedWork work : request.getWorks()) {
-            workService.createWork(userId, toWork(work));
+            workWriter.createWork(userId, toWork(work), ActorWorkSourceType.IMPORT);
         }
         try {
             return objectMapper.writeValueAsString(Map.of(
@@ -131,7 +132,6 @@ public class ActorProfileImportWriter implements ProfileImportWriter {
         work.setCollaborators(source.getCollaborators());
         work.setAchievementText(source.getAchievementText());
         work.setDescription(source.getDescription());
-        work.setSourceType("ai_import");
         return work;
     }
 

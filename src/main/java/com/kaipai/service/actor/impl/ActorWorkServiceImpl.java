@@ -11,10 +11,10 @@ import com.kaipai.mapper.card.ShareCardWorkMapper;
 import com.kaipai.model.actor.dto.*;
 import com.kaipai.model.actor.entity.*;
 import com.kaipai.model.card.entity.ShareCardWork;
+import com.kaipai.service.actor.ActorWorkInternalWriter;
 import com.kaipai.service.actor.ActorWorkService;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.text.Normalizer;
+import com.kaipai.service.actor.ActorWorkSourceType;
+import com.kaipai.service.actor.support.ActorWorkDeduplicationSupport;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,7 @@ import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-public class ActorWorkServiceImpl implements ActorWorkService {
+public class ActorWorkServiceImpl implements ActorWorkService, ActorWorkInternalWriter {
     private final ActorExperienceMapper experienceMapper;
     private final ActorProfileMapper profileMapper;
     private final ActorProfileRepresentativeWorkMapper representativeMapper;
@@ -44,10 +44,19 @@ public class ActorWorkServiceImpl implements ActorWorkService {
 
     @Transactional(rollbackFor = Exception.class)
     public ActorWorkRespDTO createWork(Long userId, ActorWorkSaveDTO request) {
+        return createWork(userId, request, ActorWorkSourceType.MANUAL);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ActorWorkRespDTO createWork(
+            Long userId, ActorWorkSaveDTO request, ActorWorkSourceType sourceType) {
         ActorProfile profile = requireProfile(userId);
-        String project = normalizeName(request.getProjectName()), role = normalizeName(request.getRoleName()), key = hash(project + "|" + role);
+        String project = ActorWorkDeduplicationSupport.normalizeName(request.getProjectName());
+        String role = ActorWorkDeduplicationSupport.normalizeName(request.getRoleName());
+        String key = ActorWorkDeduplicationSupport.dedupeKey(request.getProjectName(), request.getRoleName());
         if (experienceMapper.selectCount(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getDedupeKey, key)) > 0) throw ProfileDomainErrorCode.PROFILE_WORK_DUPLICATE.toException();
-        ActorExperience work = new ActorExperience(); work.setUserId(userId); work.setActorProfileId(profile.getActorProfileId()); work.setSourceType(StringUtils.hasText(request.getSourceType()) ? request.getSourceType().trim() : "manual");
+        ActorExperience work = new ActorExperience(); work.setUserId(userId); work.setActorProfileId(profile.getActorProfileId()); work.setSourceType(Objects.requireNonNull(sourceType, "sourceType").value());
         apply(work, request, project, role, key); experienceMapper.insert(work); incrementVersion(profile); return toResponse(work);
     }
 
@@ -56,7 +65,9 @@ public class ActorWorkServiceImpl implements ActorWorkService {
     @Transactional(rollbackFor = Exception.class)
     public ActorWorkRespDTO updateWork(Long userId, Long id, ActorWorkSaveDTO request) {
         ActorProfile profile = requireProfile(userId); ActorExperience work = requireWork(userId, id);
-        String project = normalizeName(request.getProjectName()), role = normalizeName(request.getRoleName()), key = hash(project + "|" + role);
+        String project = ActorWorkDeduplicationSupport.normalizeName(request.getProjectName());
+        String role = ActorWorkDeduplicationSupport.normalizeName(request.getRoleName());
+        String key = ActorWorkDeduplicationSupport.dedupeKey(request.getProjectName(), request.getRoleName());
         if (experienceMapper.selectCount(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getDedupeKey, key).ne(ActorExperience::getExperienceId, id)) > 0) throw ProfileDomainErrorCode.PROFILE_WORK_DUPLICATE.toException();
         apply(work, request, project, role, key); experienceMapper.updateById(work); incrementVersion(profile); return toResponse(work);
     }
@@ -107,15 +118,7 @@ public class ActorWorkServiceImpl implements ActorWorkService {
         }
     }
     private void apply(ActorExperience w, ActorWorkSaveDTO r, String p, String role, String key) { w.setDramaName(r.getProjectName().trim()); w.setNormalizedDramaName(p); w.setRoleName(trim(r.getRoleName())); w.setNormalizedRoleName(role); w.setDedupeKey(key); w.setPublishStatus(trim(r.getPublishStatus())); w.setWorkTypeCode(trim(r.getWorkTypeCode())); w.setRoleLevelCode(trim(r.getRoleLevelCode())); w.setShootYear(r.getShootYear()); w.setShootMonth(r.getShootMonth()); w.setPlatform(trim(r.getPlatform())); w.setSyncSoundStatus(trim(r.getSyncSoundStatus())); w.setCollaboratorsJson(write(r.getCollaborators())); w.setAchievementText(trim(r.getAchievementText())); w.setRoleDesc(trim(r.getDescription())); }
-    private ActorWorkRespDTO toResponse(ActorExperience w) { ActorWorkRespDTO d = new ActorWorkRespDTO(); d.setExperienceId(w.getExperienceId()); d.setProjectName(w.getDramaName()); d.setPublishStatus(w.getPublishStatus()); d.setWorkTypeCode(w.getWorkTypeCode()); d.setRoleLevelCode(w.getRoleLevelCode()); d.setRoleName(w.getRoleName()); d.setShootYear(w.getShootYear()); d.setShootMonth(w.getShootMonth()); d.setPlatform(w.getPlatform()); d.setSyncSoundStatus(w.getSyncSoundStatus()); d.setCollaborators(read(w.getCollaboratorsJson())); d.setAchievementText(w.getAchievementText()); d.setDescription(w.getRoleDesc()); return d; }
-    private String normalizeName(String value) {
-        if (!StringUtils.hasText(value)) return "";
-        String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
-        StringBuilder result = new StringBuilder();
-        normalized.codePoints().filter(Character::isLetterOrDigit).forEach(result::appendCodePoint);
-        return result.toString();
-    }
-    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(v.getBytes(StandardCharsets.UTF_8))); } catch (Exception e) { throw new IllegalStateException(e); } }
+    private ActorWorkRespDTO toResponse(ActorExperience w) { ActorWorkRespDTO d = new ActorWorkRespDTO(); d.setExperienceId(w.getExperienceId()); d.setProjectName(w.getDramaName()); d.setPublishStatus(w.getPublishStatus()); d.setWorkTypeCode(w.getWorkTypeCode()); d.setRoleLevelCode(w.getRoleLevelCode()); d.setRoleName(w.getRoleName()); d.setShootYear(w.getShootYear()); d.setShootMonth(w.getShootMonth()); d.setPlatform(w.getPlatform()); d.setSyncSoundStatus(w.getSyncSoundStatus()); d.setCollaborators(read(w.getCollaboratorsJson())); d.setAchievementText(w.getAchievementText()); d.setDescription(w.getRoleDesc()); d.setSourceType(w.getSourceType()); return d; }
     private String trim(String v) { return StringUtils.hasText(v) ? v.trim() : null; }
     private String write(List<String> v) { try { return objectMapper.writeValueAsString(v == null ? List.of() : v); } catch (Exception e) { throw new IllegalStateException(e); } }
     private List<String> read(String v) { if (!StringUtils.hasText(v)) return new ArrayList<>(); try { return objectMapper.readValue(v, new TypeReference<List<String>>() {}); } catch (Exception e) { throw new IllegalStateException("work collaborators deserialization failed", e); } }
