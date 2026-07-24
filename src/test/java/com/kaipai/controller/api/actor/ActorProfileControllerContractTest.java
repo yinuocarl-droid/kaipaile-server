@@ -46,28 +46,29 @@ class ActorProfileControllerContractTest {
     }
 
     @Test
-    void getMineKeepsReturningAggregateProfileFromLegacyService() throws Exception {
-        ActorProfileDTO profile = legacyProfile();
-        when(legacyProfileService.mine(USER_ID)).thenReturn(profile);
+    void getMineReturnsVersionedProfileFromWriteService() throws Exception {
+        ActorProfileRespDTO profile = versionedProfile(3, 12L);
+        when(profileWriteService.mine(USER_ID)).thenReturn(profile);
 
         mockMvc.perform(get("/actor/profile/mine").principal(authentication()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.userId").value(USER_ID))
-                .andExpect(jsonPath("$.data.name").value("王火火"));
+                .andExpect(jsonPath("$.data.publicName").value("王火火"))
+                .andExpect(jsonPath("$.data.profileVersion").value(3))
+                .andExpect(jsonPath("$.data.workLibraryVersion").value(12));
 
-        verify(legacyProfileService).mine(USER_ID);
-        verifyNoInteractions(profileWriteService);
+        verify(profileWriteService).mine(USER_ID);
+        verifyNoInteractions(legacyProfileService);
     }
 
     @Test
-    void getCareerMineReturnsVersionZeroEmptyDraftWithHttp200() throws Exception {
+    void getMineReturnsVersionZeroEmptyDraftWithHttp200() throws Exception {
         ActorProfileRespDTO emptyDraft = new ActorProfileRespDTO();
         emptyDraft.setUserId(USER_ID);
         emptyDraft.setProfileVersion(0);
         emptyDraft.setWorkLibraryVersion(0L);
         when(profileWriteService.mine(USER_ID)).thenReturn(emptyDraft);
 
-        mockMvc.perform(get("/actor/profile/mine/career").principal(authentication()))
+        mockMvc.perform(get("/actor/profile/mine").principal(authentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.profileVersion").value(0))
                 .andExpect(jsonPath("$.data.workLibraryVersion").value(0))
@@ -97,13 +98,15 @@ class ActorProfileControllerContractTest {
     }
 
     @Test
-    void getCareerMineIsActiveTransitionRoute() throws Exception {
+    void getCareerMineIsDeprecatedCompatibilityAlias() throws Exception {
         var method = ActorProfileController.class.getDeclaredMethod("careerMine", Authentication.class);
 
-        assertFalse(method.isAnnotationPresent(Deprecated.class));
+        assertTrue(method.isAnnotationPresent(Deprecated.class));
         Operation operation = method.getAnnotation(Operation.class);
         assertNotNull(operation);
-        assertFalse(operation.deprecated());
+        assertTrue(operation.deprecated());
+        assertTrue(operation.description().contains("GET /api/actor/profile/mine"));
+        assertFalse(operation.description().contains("/mine/career"));
     }
 
     @Test
@@ -128,7 +131,8 @@ class ActorProfileControllerContractTest {
         Operation operation = method.getAnnotation(Operation.class);
         assertNotNull(operation);
         assertTrue(operation.deprecated());
-        assertTrue(operation.description().contains("GET /api/actor/profile/mine/career"));
+        assertTrue(operation.description().contains("GET /api/actor/profile/mine"));
+        assertFalse(operation.description().contains("/mine/career"));
     }
 
     @Test

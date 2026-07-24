@@ -29,13 +29,17 @@ public class ActorProfileController {
     private final ActorProfileService actorProfileService;
     private final ActorProfileWriteService actorProfileWriteService;
 
-    @Operation(summary = "获取我的演员档案")
+    @Operation(summary = "获取我的核心与职业档案")
     @GetMapping("/mine")
-    public R<ActorProfileDTO> mine(Authentication authentication) {
-        return R.ok(actorProfileService.mine(currentUserId(authentication)));
+    public R<ActorProfileRespDTO> mine(Authentication authentication) {
+        return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
     }
 
-    @Operation(summary = "获取我的核心与职业档案")
+    @Deprecated(forRemoval = false)
+    @Operation(
+            summary = "获取我的核心与职业档案（兼容别名）",
+            description = "已废弃；请改用 GET /api/actor/profile/mine。",
+            deprecated = true)
     @GetMapping("/mine/career")
     public R<ActorProfileRespDTO> careerMine(Authentication authentication) {
         return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
@@ -44,7 +48,7 @@ public class ActorProfileController {
     @Deprecated(forRemoval = false)
     @Operation(
             summary = "获取我的旧版聚合演员档案（兼容）",
-            description = "已废弃；仅供旧聚合消费者过渡。新版调用 GET /api/actor/profile/mine/career。",
+            description = "已废弃；仅供旧聚合消费者过渡。新版调用 GET /api/actor/profile/mine。",
             deprecated = true)
     @GetMapping("/mine/legacy")
     public R<ActorProfileDTO> legacyMine(Authentication authentication) {
