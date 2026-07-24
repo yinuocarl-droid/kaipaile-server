@@ -9,6 +9,7 @@ import com.kaipai.model.ai.dto.*;
 import com.kaipai.model.ai.entity.AiProfileImportConfig;
 import com.kaipai.model.ai.entity.AiProfileImportConfigAudit;
 import com.kaipai.service.ai.*;
+import com.kaipai.service.ai.profileimport.ProfileImportEndpointPolicy;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -68,7 +69,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
     private void reset(AiProfileImportConfig c) { c.setEnabled(false); c.setLastTestStatus(null); c.setLastTestAt(null); c.setLastTestMessage(null); }
     private void persist(AiProfileImportConfig c) { if (c.getConfigId() == null) mapper.insert(c); else mapper.updateById(c); }
     private void audit(Long op, AiProfileImportConfig c, String action, String status) { AiProfileImportConfigAudit a = new AiProfileImportConfigAudit(); a.setConfigId(c.getConfigId()); a.setActionCode(action); a.setAfterSecretMaskJson(c.getSecretMaskJson()); a.setOperatorId(op); a.setResultStatus(status); auditMapper.insert(a); }
-    private void validateEndpoint(String endpoint) { try { URI uri = URI.create(endpoint); if (!"https".equalsIgnoreCase(uri.getScheme()) || !"api.deepseek.com".equalsIgnoreCase(uri.getHost())) throw new Exception(); } catch (Exception error) { throw new BizException("仅允许 DeepSeek HTTPS 官方接口"); } }
+    private void validateEndpoint(String endpoint) { try { new ProfileImportEndpointPolicy().validateConfigured(URI.create(endpoint)); } catch (Exception error) { throw new BizException("仅允许 DeepSeek HTTPS 官方接口"); } }
     private String mask(String key) { return "****" + key.substring(Math.max(0, key.length() - 4)); }
     private ProfileImportConfigRespDTO dto(AiProfileImportConfig c) { ProfileImportConfigRespDTO d = new ProfileImportConfigRespDTO(); d.setEnabled(Boolean.TRUE.equals(c.getEnabled())); d.setAvailable(Boolean.TRUE.equals(c.getEnabled()) && ready(c)); d.setEndpoint(c.getEndpoint()); d.setModelName(c.getModelName()); d.setConnectTimeoutMs(c.getConnectTimeoutMs()); d.setReadTimeoutMs(c.getReadTimeoutMs()); d.setMaxInputChars(c.getMaxInputChars()); d.setMaxOutputTokens(c.getMaxOutputTokens()); d.setPerUserDailyLimit(c.getPerUserDailyLimit()); d.setSecretMask(c.getSecretMaskJson()); d.setLastTestStatus(c.getLastTestStatus()); d.setLastTestMessage(c.getLastTestMessage()); d.setLastTestAt(c.getLastTestAt()); return d; }
     private ProfileImportConfigAuditRespDTO auditDto(AiProfileImportConfigAudit a) { ProfileImportConfigAuditRespDTO d = new ProfileImportConfigAuditRespDTO(); d.setAuditId(a.getAuditId()); d.setActionCode(a.getActionCode()); d.setOperatorId(a.getOperatorId()); d.setOperatorName(a.getOperatorName()); d.setResultStatus(a.getResultStatus()); d.setMessage(a.getMessage()); d.setCreateTime(a.getCreateTime()); return d; }
