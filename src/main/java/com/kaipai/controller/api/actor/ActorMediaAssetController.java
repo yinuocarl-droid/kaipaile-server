@@ -63,12 +63,6 @@ public class ActorMediaAssetController {
         return R.ok();
     }
 
-    @PostMapping("/work-bindings/{experienceId}")
-    public R<Void> bindWork(Authentication auth, @PathVariable Long experienceId, @Valid @RequestBody ActorAssetBindingDTO request) {
-        actorMediaAssetService.bindWorkAsset(userId(auth), experienceId, request.getAssetId(), request.getUsageCode(), request.getSortNo());
-        return R.ok();
-    }
-
     @PostMapping("/{id}/access-url")
     public R<ActorAssetAccessUrlRespDTO> accessUrl(Authentication auth, @PathVariable Long id) {
         return R.ok(actorMediaAssetService.issueOwnerAccessUrl(userId(auth), id));

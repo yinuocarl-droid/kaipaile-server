@@ -11,7 +11,7 @@ public interface ActorMediaAssetService extends ActorMediaAssetOwnershipVerifier
     ActorAssetRespDTO update(Long userId, Long assetId, ActorAssetUpdateDTO request);
     void setCurrentResume(Long userId, ActorCurrentResumeUpdateDTO request);
     void bindProfileAsset(Long userId, Long assetId, String usageCode, Integer sortNo);
-    void bindWorkAsset(Long userId, Long experienceId, Long assetId, String usageCode, Integer sortNo);
+    void replaceWorkAssets(Long userId, Long experienceId, ActorWorkAssetsReplaceDTO request);
     ActorAssetAccessUrlRespDTO issueOwnerAccessUrl(Long userId, Long assetId);
     void delete(Long userId, Long assetId);
 }

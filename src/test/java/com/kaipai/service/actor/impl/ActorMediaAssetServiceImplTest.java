@@ -8,13 +8,17 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.*;
 import com.kaipai.mapper.card.ShareCardAssetMapper;
 import com.kaipai.model.actor.dto.ActorAssetQueryDTO;
+import com.kaipai.model.actor.dto.ActorAssetBindingDTO;
 import com.kaipai.model.actor.dto.ActorAssetUpdateDTO;
 import com.kaipai.model.actor.dto.ActorCurrentResumeUpdateDTO;
+import com.kaipai.model.actor.dto.ActorWorkAssetsReplaceDTO;
+import com.kaipai.common.result.ResultCode;
 import com.kaipai.model.actor.entity.*;
 import com.kaipai.service.actor.PrivateActorMediaStorage;
 import com.kaipai.service.actor.ActorPrivatePdfProcessor;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -68,7 +72,7 @@ class ActorMediaAssetServiceImplTest {
     }
 
     @Test void referencedAssetCannotBeDeleted() {
-        when(assetMapper.selectOne(any())).thenReturn(readyPhoto(7L));
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyPhoto(7L)));
         when(profileMapper.selectCount(any())).thenReturn(1L);
         assertEquals(46014, assertThrows(BizException.class, () -> service.delete(7L, 81L)).getCode());
         verify(assetMapper, never()).deleteById(any(Long.class));
@@ -77,7 +81,7 @@ class ActorMediaAssetServiceImplTest {
     @Test void deletingPdfAlsoDeletesPersistedPageObjects() {
         ActorMediaAsset pdf = readyPhoto(7L); pdf.setMediaType("pdf"); pdf.setObjectKey("resume.pdf");
         ActorMediaAssetPage page = new ActorMediaAssetPage(); page.setPageId(3L); page.setAssetId(81L); page.setImageObjectKey("page-1.jpg");
-        when(assetMapper.selectOne(any())).thenReturn(pdf);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(pdf));
         when(profileMapper.selectCount(any())).thenReturn(0L);
         when(profileAssetMapper.selectCount(any())).thenReturn(0L);
         when(workAssetMapper.selectCount(any())).thenReturn(0L);
@@ -127,7 +131,7 @@ class ActorMediaAssetServiceImplTest {
         ActorMediaAsset pdf = readyPhoto(7L);
         pdf.setMediaType("pdf");
         ActorProfile profile = new ActorProfile(); profile.setActorProfileId(9L); profile.setUserId(7L);
-        when(assetMapper.selectOne(any())).thenReturn(pdf);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(pdf));
         when(profileMapper.selectOne(any())).thenReturn(profile);
         ActorCurrentResumeUpdateDTO request = new ActorCurrentResumeUpdateDTO(); request.setAssetId(81L);
 
@@ -139,7 +143,7 @@ class ActorMediaAssetServiceImplTest {
 
     @Test void failedPdfCannotBecomeCurrentResume() {
         ActorMediaAsset pdf = readyPhoto(7L); pdf.setMediaType("pdf"); pdf.setProcessStatus("failed");
-        when(assetMapper.selectOne(any())).thenReturn(pdf);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(pdf));
         ActorCurrentResumeUpdateDTO request = new ActorCurrentResumeUpdateDTO(); request.setAssetId(81L);
 
         assertEquals(46013, assertThrows(BizException.class, () -> service.setCurrentResume(7L, request)).getCode());
@@ -181,7 +185,7 @@ class ActorMediaAssetServiceImplTest {
     @Test void readyPhotoCanBeBoundToProfileAndRejectsNonPhoto() {
         ActorMediaAsset photo = readyPhoto(7L);
         ActorProfile profile = new ActorProfile(); profile.setActorProfileId(9L); profile.setUserId(7L);
-        when(assetMapper.selectOne(any())).thenReturn(photo); when(profileMapper.selectOne(any())).thenReturn(profile);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(photo)); when(profileMapper.selectOne(any())).thenReturn(profile);
 
         service.bindProfileAsset(7L, 81L, "portrait", 1);
 
@@ -191,15 +195,175 @@ class ActorMediaAssetServiceImplTest {
         assertEquals("portrait", relation.getValue().getUsageCode());
     }
 
-    @Test void readyWorkAssetRequiresOwnedWorkAndAssetType() {
-        ActorMediaAsset video = readyPhoto(7L); video.setMediaType("video");
-        ActorExperience work = new ActorExperience(); work.setExperienceId(12L); work.setUserId(7L);
-        when(assetMapper.selectOne(any())).thenReturn(video);
-        when(experienceMapper.selectOne(any())).thenReturn(work);
+    @Test void readyPhotoOwnershipValidationUsesTheDeletionLockProtocol() {
+        ActorMediaAsset photo = readyPhoto(7L);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(7L, List.of(81L))).thenReturn(List.of(photo));
 
-        service.bindWorkAsset(7L, 12L, 81L, "clip", 1);
+        service.requireOwnedReadyPhoto(7L, 81L);
 
-        verify(workAssetMapper).insert(any(ActorWorkAsset.class));
+        verify(assetMapper).selectOwnedActiveByIdsForUpdate(7L, List.of(81L));
+    }
+
+    @Test
+    void changedWorkAssetSetReplacesAllRelationsInStableOrderAndIncrementsVersionOnce() {
+        stubOwnedWorkAndProfile();
+        ActorMediaAsset photo = readyAsset(81L, 7L, "photo");
+        ActorMediaAsset video = readyAsset(82L, 7L, "video");
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(video, photo));
+        when(workAssetMapper.selectList(any())).thenReturn(List.of(relation(80L, "still", 1)));
+        when(workAssetMapper.deleteActiveByExperienceId(12L)).thenReturn(1);
+        when(workAssetMapper.insert(any())).thenReturn(1);
+        when(profileMapper.incrementWorkLibraryVersion(9L)).thenReturn(1);
+
+        service.replaceWorkAssets(7L, 12L,
+                bindings(binding(82L, "clip", 1), binding(81L, "still", 1)));
+
+        var lockOrder = inOrder(experienceMapper, assetMapper);
+        lockOrder.verify(experienceMapper).selectOwnedActiveByIdForUpdate(7L, 12L);
+        lockOrder.verify(assetMapper).selectOwnedActiveByIdsForUpdate(7L, List.of(81L, 82L));
+        verify(workAssetMapper).deleteActiveByExperienceId(12L);
+        var inserted = org.mockito.ArgumentCaptor.forClass(ActorWorkAsset.class);
+        verify(workAssetMapper, times(2)).insert(inserted.capture());
+        assertEquals(List.of("still", "clip"),
+                inserted.getAllValues().stream().map(ActorWorkAsset::getUsageCode).toList());
+        assertEquals(List.of(81L, 82L),
+                inserted.getAllValues().stream().map(ActorWorkAsset::getAssetId).toList());
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(9L);
+    }
+
+    @Test
+    void invalidAssetInDesiredSetLeavesRelationsAndVersionUntouched() {
+        stubOwnedWorkAndProfile();
+        ActorMediaAsset photo = readyAsset(81L, 7L, "photo");
+        ActorMediaAsset foreignVideo = readyAsset(82L, 8L, "video");
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(photo, foreignVideo));
+
+        BizException error = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "still", 1), binding(82L, "clip", 1))));
+
+        assertEquals(46012, error.getCode());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(workAssetMapper, never()).insert(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
+    }
+
+    @Test
+    void workMustBelongToTheUsersProfileBeforeAnyRelationIsReadOrWritten() {
+        ActorExperience work = ownedWork();
+        when(experienceMapper.selectOwnedActiveByIdForUpdate(7L, 12L)).thenReturn(work);
+        ActorProfile anotherProfile = profile();
+        anotherProfile.setUserId(8L);
+        when(profileMapper.selectOne(any())).thenReturn(anotherProfile);
+
+        assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "still", 1))));
+
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(any(), any());
+        verify(workAssetMapper, never()).selectList(any());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
+    }
+
+    @Test
+    void identicalNormalizedSetIsNoOpWhileEmptySetClearsAllBindings() {
+        stubOwnedWorkAndProfile();
+        ActorMediaAsset photo = readyAsset(81L, 7L, "photo");
+        ActorMediaAsset video = readyAsset(82L, 7L, "video");
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(photo, video));
+        when(workAssetMapper.selectList(any())).thenReturn(List.of(
+                relation(82L, "clip", 1), relation(81L, "still", 1)));
+        when(workAssetMapper.deleteActiveByExperienceId(12L)).thenReturn(2);
+        when(profileMapper.incrementWorkLibraryVersion(9L)).thenReturn(1);
+
+        service.replaceWorkAssets(7L, 12L,
+                bindings(binding(82L, "clip", 1), binding(81L, "still", 1)));
+
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
+
+        service.replaceWorkAssets(7L, 12L, bindings());
+
+        verify(workAssetMapper).deleteActiveByExperienceId(12L);
+        verify(workAssetMapper, never()).insert(any());
+        verify(profileMapper, times(1)).incrementWorkLibraryVersion(9L);
+    }
+
+    @Test
+    void usageMustBeStillOrClip() {
+        stubOwnedWorkAndProfile();
+
+        BizException error = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "cover", 1))));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), error.getCode());
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(any(), any());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+    }
+
+    @Test
+    void stillRequiresPhotoAndClipRequiresVideo() {
+        stubOwnedWorkAndProfile();
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyAsset(81L, 7L, "video")));
+
+        BizException stillError = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "still", 1))));
+
+        assertEquals(46013, stillError.getCode());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+
+        reset(assetMapper);
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyAsset(82L, 7L, "photo")));
+        BizException clipError = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(82L, "clip", 1))));
+
+        assertEquals(46013, clipError.getCode());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
+    }
+
+    @Test
+    void workAssetMustBeReadyBeforeAnyRelationIsChanged() {
+        stubOwnedWorkAndProfile();
+        ActorMediaAsset processingPhoto = readyAsset(81L, 7L, "photo");
+        processingPhoto.setProcessStatus("processing");
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(processingPhoto));
+
+        BizException error = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "still", 1))));
+
+        assertEquals(46013, error.getCode());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(workAssetMapper, never()).insert(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
+    }
+
+    @Test
+    void duplicateAssetIdIsRejectedAcrossUsages() {
+        stubOwnedWorkAndProfile();
+
+        BizException error = assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                7L, 12L, bindings(binding(81L, "still", 1), binding(81L, "clip", 1))));
+
+        assertEquals(ResultCode.PARAM_ERROR.getCode(), error.getCode());
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(any(), any());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+    }
+
+    @Test
+    void sortNumbersMustBePositiveUniqueAndContinuousWithinEachUsage() {
+        stubOwnedWorkAndProfile();
+
+        assertAll(
+                () -> assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                        7L, 12L, bindings(binding(81L, "still", 0)))),
+                () -> assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                        7L, 12L, bindings(binding(81L, "still", 1), binding(82L, "still", 1)))),
+                () -> assertThrows(BizException.class, () -> service.replaceWorkAssets(
+                        7L, 12L, bindings(binding(81L, "still", 1), binding(82L, "still", 3)))));
+
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(any(), any());
+        verify(workAssetMapper, never()).deleteActiveByExperienceId(any());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(any());
     }
 
     @Test void retryRequiresFailedPdfAndCreatesFreshProcessingLifecycle() {
@@ -217,4 +381,56 @@ class ActorMediaAssetServiceImplTest {
     }
 
     private ActorMediaAsset readyPhoto(Long userId) { ActorMediaAsset a = new ActorMediaAsset(); a.setAssetId(81L); a.setUserId(userId); a.setMediaType("photo"); a.setProcessStatus("ready"); a.setStorageProvider("cos"); a.setBucketCode("private"); a.setObjectKey("actor/7/a.jpg"); return a; }
+
+    private void stubOwnedWorkAndProfile() {
+        when(experienceMapper.selectOwnedActiveByIdForUpdate(7L, 12L)).thenReturn(ownedWork());
+        when(profileMapper.selectOne(any())).thenReturn(profile());
+    }
+
+    private ActorExperience ownedWork() {
+        ActorExperience work = new ActorExperience();
+        work.setExperienceId(12L);
+        work.setUserId(7L);
+        work.setActorProfileId(9L);
+        return work;
+    }
+
+    private ActorProfile profile() {
+        ActorProfile profile = new ActorProfile();
+        profile.setActorProfileId(9L);
+        profile.setUserId(7L);
+        profile.setWorkLibraryVersion(7L);
+        return profile;
+    }
+
+    private ActorMediaAsset readyAsset(long assetId, long userId, String mediaType) {
+        ActorMediaAsset asset = readyPhoto(userId);
+        asset.setAssetId(assetId);
+        asset.setMediaType(mediaType);
+        asset.setObjectKey("actor/" + userId + "/" + assetId);
+        return asset;
+    }
+
+    private ActorWorkAsset relation(long assetId, String usageCode, int sortNo) {
+        ActorWorkAsset relation = new ActorWorkAsset();
+        relation.setExperienceId(12L);
+        relation.setAssetId(assetId);
+        relation.setUsageCode(usageCode);
+        relation.setSortNo(sortNo);
+        return relation;
+    }
+
+    private ActorAssetBindingDTO binding(long assetId, String usageCode, Integer sortNo) {
+        ActorAssetBindingDTO binding = new ActorAssetBindingDTO();
+        binding.setAssetId(assetId);
+        binding.setUsageCode(usageCode);
+        binding.setSortNo(sortNo);
+        return binding;
+    }
+
+    private ActorWorkAssetsReplaceDTO bindings(ActorAssetBindingDTO... bindings) {
+        ActorWorkAssetsReplaceDTO request = new ActorWorkAssetsReplaceDTO();
+        request.setBindings(List.of(bindings));
+        return request;
+    }
 }
