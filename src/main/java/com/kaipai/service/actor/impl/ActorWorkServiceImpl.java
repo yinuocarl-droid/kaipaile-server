@@ -44,32 +44,62 @@ public class ActorWorkServiceImpl implements ActorWorkService, ActorWorkInternal
 
     @Transactional(rollbackFor = Exception.class)
     public ActorWorkRespDTO createWork(Long userId, ActorWorkSaveDTO request) {
-        return createWork(userId, request, ActorWorkSourceType.MANUAL);
+        ActorProfile profile = requireProfile(userId);
+        ActorWorkRespDTO response =
+                createPersistedWork(userId, profile, request, ActorWorkSourceType.MANUAL);
+        incrementVersion(profile);
+        return response;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public ActorWorkRespDTO createWork(
-            Long userId, ActorWorkSaveDTO request, ActorWorkSourceType sourceType) {
+    public ActorWorkRespDTO createImportedWork(Long userId, ActorWorkSaveDTO request) {
         ActorProfile profile = requireProfile(userId);
+        return createPersistedWork(userId, profile, request, ActorWorkSourceType.IMPORT);
+    }
+
+    private ActorWorkRespDTO createPersistedWork(
+            Long userId, ActorProfile profile, ActorWorkSaveDTO request, ActorWorkSourceType sourceType) {
         String project = ActorWorkDeduplicationSupport.normalizeName(request.getProjectName());
         String role = ActorWorkDeduplicationSupport.normalizeName(request.getRoleName());
         String key = ActorWorkDeduplicationSupport.dedupeKey(request.getProjectName(), request.getRoleName());
         if (experienceMapper.selectCount(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getDedupeKey, key)) > 0) throw ProfileDomainErrorCode.PROFILE_WORK_DUPLICATE.toException();
         ActorExperience work = new ActorExperience(); work.setUserId(userId); work.setActorProfileId(profile.getActorProfileId()); work.setSourceType(Objects.requireNonNull(sourceType, "sourceType").value());
-        apply(work, request, project, role, key); experienceMapper.insert(work); incrementVersion(profile); return toResponse(work);
+        apply(work, request, project, role, key);
+        if (experienceMapper.insert(work) != 1) {
+            throw ProfileDomainErrorCode.PROFILE_IMPORT_APPLY_CONFLICT.toException();
+        }
+        return toResponse(work);
     }
 
     public ActorWorkRespDTO work(Long userId, Long id) { return toResponse(requireWork(userId, id)); }
 
     @Transactional(rollbackFor = Exception.class)
     public ActorWorkRespDTO updateWork(Long userId, Long id, ActorWorkSaveDTO request) {
-        ActorProfile profile = requireProfile(userId); ActorExperience work = requireWork(userId, id);
+        ActorProfile profile = requireProfile(userId);
+        ActorWorkRespDTO response = updatePersistedWork(userId, id, request);
+        incrementVersion(profile);
+        return response;
+    }
+
+    private ActorWorkRespDTO updatePersistedWork(Long userId, Long id, ActorWorkSaveDTO request) {
+        ActorExperience work = requireWork(userId, id);
         String project = ActorWorkDeduplicationSupport.normalizeName(request.getProjectName());
         String role = ActorWorkDeduplicationSupport.normalizeName(request.getRoleName());
         String key = ActorWorkDeduplicationSupport.dedupeKey(request.getProjectName(), request.getRoleName());
         if (experienceMapper.selectCount(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getDedupeKey, key).ne(ActorExperience::getExperienceId, id)) > 0) throw ProfileDomainErrorCode.PROFILE_WORK_DUPLICATE.toException();
-        apply(work, request, project, role, key); experienceMapper.updateById(work); incrementVersion(profile); return toResponse(work);
+        apply(work, request, project, role, key);
+        if (experienceMapper.updateById(work) != 1) {
+            throw ProfileDomainErrorCode.PROFILE_IMPORT_APPLY_CONFLICT.toException();
+        }
+        return toResponse(work);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ActorWorkRespDTO updateImportedWork(Long userId, Long experienceId, ActorWorkSaveDTO request) {
+        requireProfile(userId);
+        return updatePersistedWork(userId, experienceId, request);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -79,7 +109,8 @@ public class ActorWorkServiceImpl implements ActorWorkService, ActorWorkInternal
                 || shareCardWorkMapper.selectCount(new LambdaQueryWrapper<ShareCardWork>().eq(ShareCardWork::getExperienceId, id)) > 0) {
             throw ProfileDomainErrorCode.PROFILE_WORK_IN_USE.toException();
         }
-        experienceMapper.deleteById(id); incrementVersion(profile);
+        experienceMapper.deleteById(id);
+        incrementVersion(profile);
     }
 
     @Transactional(rollbackFor = Exception.class)

@@ -46,6 +46,9 @@ class ActorWorkServiceImplTest {
         profile.setWorkLibraryVersion(4L);
         when(profileMapper.selectOne(any())).thenReturn(profile);
         when(profileMapper.incrementWorkLibraryVersion(11L)).thenReturn(1);
+        when(experienceMapper.insert(any())).thenReturn(1);
+        when(experienceMapper.updateById(any())).thenReturn(1);
+        when(experienceMapper.deleteById(any())).thenReturn(1);
     }
 
     @Test
@@ -149,6 +152,52 @@ class ActorWorkServiceImplTest {
         verify(profileMapper, times(1)).incrementWorkLibraryVersion(11L);
     }
 
+    @Test
+    void internalImportCreateWritesImportSourceWithoutIncrementingVersion() {
+        var created = service.createImportedWork(7L, workSave("导入作品", "女主"));
+
+        assertEquals("import", created.getSourceType());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void internalImportMergePreservesStoredSourceWithoutIncrementingVersion() {
+        ActorExperience existing = workEntity(21L);
+        existing.setSourceType("migration");
+        when(experienceMapper.selectOne(any())).thenReturn(existing);
+
+        var updated = service.updateImportedWork(
+                7L, 21L, workSave("导入更新作品", "女二"));
+
+        assertEquals("migration", updated.getSourceType());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void failedWorkInsertFailsClosedBeforeVersionIncrement() {
+        when(experienceMapper.insert(any())).thenReturn(0);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.createImportedWork(7L, workSave("导入作品", "女主")));
+
+        assertEquals(46008, error.getCode());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
+    }
+
+    @Test
+    void failedWorkUpdateFailsClosedBeforeVersionIncrement() {
+        when(experienceMapper.selectOne(any())).thenReturn(workEntity(21L));
+        when(experienceMapper.updateById(any())).thenReturn(0);
+
+        BizException error = assertThrows(
+                BizException.class,
+                () -> service.updateImportedWork(7L, 21L, workSave("导入更新作品", "女二")));
+
+        assertEquals(46008, error.getCode());
+        verify(profileMapper, never()).incrementWorkLibraryVersion(11L);
+    }
+
     private ActorProfileRepresentativeWork representative(Long experienceId, int sortNo) {
         ActorProfileRepresentativeWork relation = new ActorProfileRepresentativeWork();
         relation.setActorProfileId(11L);
@@ -167,8 +216,12 @@ class ActorWorkServiceImplTest {
     private ActorExperience workEntity(long id) {
         ActorExperience work = new ActorExperience();
         work.setExperienceId(id);
+        work.setUserId(7L);
+        work.setActorProfileId(11L);
         work.setDramaName("作品" + id);
         work.setRoleName("角色" + id);
+        work.setSourceType("manual");
+        work.setDeleted(0);
         return work;
     }
 }

@@ -101,6 +101,13 @@ final class CareerProfileMySqlTestSupport implements AutoCloseable {
         jdbc.update("DELETE FROM actor_profile_representative_work");
         jdbc.update("DELETE FROM actor_experience");
         jdbc.update("DELETE FROM actor_profile");
+        jdbc.update("DELETE FROM `user`");
+    }
+
+    void insertUser(long userId) {
+        jdbc.update(
+                "INSERT INTO `user` (user_id, status, version, deleted) VALUES (?, 1, 0, 0)",
+                userId);
     }
 
     void insertProfile(long profileId, long userId, String extendedField, long workLibraryVersion) {
@@ -181,6 +188,16 @@ final class CareerProfileMySqlTestSupport implements AutoCloseable {
 
     private static void createLegacySchema(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
+            statement.execute(
+                    """
+                    CREATE TABLE `user` (
+                      user_id BIGINT NOT NULL,
+                      status INT NOT NULL DEFAULT 1,
+                      version INT NOT NULL DEFAULT 0,
+                      deleted TINYINT NOT NULL DEFAULT 0,
+                      PRIMARY KEY (user_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
             statement.execute(
                     """
                     CREATE TABLE actor_profile (

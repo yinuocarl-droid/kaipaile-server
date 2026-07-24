@@ -16,7 +16,8 @@ class AiProfileImportControllerTest {
     void exposesGovernedCapabilityToAuthenticatedMiniProgramUser() {
         ProfileImportService importService = mock(ProfileImportService.class);
         ProfileImportConfigService configService = mock(ProfileImportConfigService.class);
-        when(configService.capability()).thenReturn(new ProfileImportCapabilityRespDTO(true, null));
+        when(configService.capability()).thenReturn(new ProfileImportCapabilityRespDTO(
+                true, true, "deepseek", "deepseek-chat", 20000, null));
         AiProfileImportController controller = new AiProfileImportController(importService, configService);
 
         var response = controller.capability(new UsernamePasswordAuthenticationToken(7L, null));

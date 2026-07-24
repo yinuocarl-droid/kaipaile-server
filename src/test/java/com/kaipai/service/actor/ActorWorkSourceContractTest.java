@@ -57,6 +57,8 @@ class ActorWorkSourceContractTest {
         profile.setUserId(USER_ID);
         when(profileMapper.selectOne(any())).thenReturn(profile);
         when(profileMapper.incrementWorkLibraryVersion(PROFILE_ID)).thenReturn(1);
+        when(experienceMapper.insert(any())).thenReturn(1);
+        when(experienceMapper.updateById(any())).thenReturn(1);
     }
 
     @Test
