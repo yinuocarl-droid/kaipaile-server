@@ -51,7 +51,7 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
             return failed;
         }
     }
-    public ActorAssetRespDTO retryPdf(Long userId,Long failedAssetId,MultipartFile file){ActorMediaAsset failed=require(userId,failedAssetId);if(!"pdf".equals(failed.getMediaType())||!"failed".equals(failed.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();return upload(userId,"pdf",failed.getCategoryCode(),file);}
+    public ActorAssetRespDTO retryPdf(Long userId,Long failedAssetId,MultipartFile file){ActorMediaAsset failed=require(userId,failedAssetId);if(!"pdf".equals(failed.getMediaType())||!"failed".equals(failed.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();return upload(userId,"pdf","resume",file);}
     public ActorAssetRespDTO createReadyAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,String name,String mime,Long size){ String normalizedMediaType=normalizeMediaType(mediaType); String normalizedCategory=validateCategoryCode(normalizedMediaType,category); ActorMediaAsset a=new ActorMediaAsset(); a.setUserId(userId);a.setMediaType(normalizedMediaType);a.setCategoryCode(normalizedCategory);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(name);a.setMimeType(mime);a.setSizeBytes(size);a.setProcessStatus("ready");a.setSourceType("upload");assetMapper.insert(a);return dto(a); }
     public ActorAssetRespDTO update(Long userId, Long assetId, ActorAssetUpdateDTO request) {
         ActorMediaAsset asset = require(userId, assetId);

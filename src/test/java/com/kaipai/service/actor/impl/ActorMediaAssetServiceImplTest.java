@@ -632,6 +632,14 @@ class ActorMediaAssetServiceImplTest {
         verify(assetMapper, never()).deleteById(81L);
     }
 
+    @Test void retryCanonicalizesMissingLegacyPdfCategoryToResume() {
+        assertLegacyPdfRetryUsesResume(null);
+    }
+
+    @Test void retryCanonicalizesOtherLegacyPdfCategoryToResume() {
+        assertLegacyPdfRetryUsesResume("other");
+    }
+
     @Test void retryFailureKeepsTheOldFailedRowAndReturnsTheNewFailedAsset() {
         ActorMediaAsset failed = readyPhoto(7L); failed.setMediaType("pdf"); failed.setProcessStatus("failed");
         failed.setCategoryCode("resume");
@@ -690,6 +698,28 @@ class ActorMediaAssetServiceImplTest {
             ((ActorMediaAsset) call.getArgument(0)).setAssetId(assetId);
             return 1;
         });
+    }
+
+    private void assertLegacyPdfRetryUsesResume(String legacyCategoryCode) {
+        ActorMediaAsset failed = readyPhoto(7L);
+        failed.setMediaType("pdf");
+        failed.setProcessStatus("failed");
+        failed.setCategoryCode(legacyCategoryCode);
+        var file = new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
+        when(assetMapper.selectOne(any())).thenReturn(failed);
+        stubStoredPdf(file, 94L, "retry.pdf");
+        when(pdfProcessor.process(7L, file)).thenReturn(List.of(
+                new PrivateActorMediaStorage.StoredObjectRef(
+                        "cos", "private-assets", "retry-page.jpg", null)));
+
+        var result = service.retryPdf(7L, 81L, file);
+
+        assertEquals("resume", result.getCategoryCode());
+        var inserted = org.mockito.ArgumentCaptor.forClass(ActorMediaAsset.class);
+        verify(assetMapper).insert(inserted.capture());
+        assertEquals("resume", inserted.getValue().getCategoryCode());
+        verify(assetMapper, never()).updateById(failed);
+        verify(assetMapper, never()).deleteById(81L);
     }
 
     private MockMultipartFile retryFile() {
