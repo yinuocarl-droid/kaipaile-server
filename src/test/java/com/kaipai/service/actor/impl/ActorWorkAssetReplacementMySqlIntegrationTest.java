@@ -689,8 +689,9 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
         @Bean
         ActorPdfAssetLifecycleService actorPdfAssetLifecycleService(
                 ActorMediaAssetMapper assetMapper,
-                ActorMediaAssetPageMapper pageMapper) {
-            return new ActorPdfAssetLifecycleService(assetMapper, pageMapper);
+                ActorMediaAssetPageMapper pageMapper,
+                PlatformTransactionManager transactionManager) {
+            return new ActorPdfAssetLifecycleService(assetMapper, pageMapper, transactionManager);
         }
 
         @Bean

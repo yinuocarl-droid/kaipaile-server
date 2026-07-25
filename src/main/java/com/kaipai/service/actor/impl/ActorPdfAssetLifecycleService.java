@@ -5,17 +5,33 @@ import com.kaipai.mapper.actor.ActorMediaAssetPageMapper;
 import com.kaipai.model.actor.entity.ActorMediaAssetPage;
 import com.kaipai.service.actor.PrivateActorMediaStorage;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 public class ActorPdfAssetLifecycleService {
+    private static final Logger log = LoggerFactory.getLogger(ActorPdfAssetLifecycleService.class);
+
     private final ActorMediaAssetMapper assetMapper;
     private final ActorMediaAssetPageMapper pageMapper;
+    private final TransactionTemplate requiresNewTransaction;
+
+    public ActorPdfAssetLifecycleService(
+            ActorMediaAssetMapper assetMapper,
+            ActorMediaAssetPageMapper pageMapper,
+            PlatformTransactionManager transactionManager) {
+        this.assetMapper = assetMapper;
+        this.pageMapper = pageMapper;
+        this.requiresNewTransaction = new TransactionTemplate(transactionManager);
+        this.requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void finalizeReady(
@@ -44,15 +60,20 @@ public class ActorPdfAssetLifecycleService {
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void markFailed(
             Long userId,
             Long assetId,
             String failureCode,
             String failureMessage) {
-        if (assetMapper.markFailed(assetId, userId, failureCode, failureMessage) != 1) {
-            throw new IllegalStateException("PDF failed transition failed");
+        requiresNewTransaction.executeWithoutResult(status -> {
+            if (assetMapper.markFailed(assetId, userId, failureCode, failureMessage) != 1) {
+                throw new IllegalStateException("PDF failed transition failed");
+            }
+        });
+        try {
+            requiresNewTransaction.executeWithoutResult(status -> pageMapper.deleteActiveByAssetId(assetId));
+        } catch (RuntimeException cleanupFailure) {
+            log.warn("Failed to clean up PDF pages after asset {} entered failed state", assetId, cleanupFailure);
         }
-        pageMapper.deleteActiveByAssetId(assetId);
     }
 }

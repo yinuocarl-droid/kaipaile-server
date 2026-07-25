@@ -1,6 +1,7 @@
 package com.kaipai.service.actor.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -88,7 +89,7 @@ class ActorPdfAssetLifecycleServiceTest {
         lifecycle.markFailed(7L, 90L, "PDF_RENDER_FAILED", "PDF 页转换失败");
 
         verify(pageMapper).deleteActiveByAssetId(90L);
-        assertEquals(1, transactionManager.commits);
+        assertEquals(2, transactionManager.commits);
         assertEquals(0, transactionManager.rollbacks);
     }
 
@@ -104,6 +105,21 @@ class ActorPdfAssetLifecycleServiceTest {
         assertEquals(1, transactionManager.rollbacks);
     }
 
+    @Test
+    void failedStatusCommitsEvenWhenPageCleanupFails() {
+        when(assetMapper.markFailed(90L, 7L, "PDF_RENDER_FAILED", "PDF 页转换失败")).thenReturn(1);
+        when(pageMapper.deleteActiveByAssetId(90L))
+                .thenThrow(new IllegalStateException("page cleanup unavailable"));
+
+        assertDoesNotThrow(() ->
+                lifecycle.markFailed(7L, 90L, "PDF_RENDER_FAILED", "PDF 页转换失败"));
+
+        verify(assetMapper).markFailed(90L, 7L, "PDF_RENDER_FAILED", "PDF 页转换失败");
+        verify(pageMapper).deleteActiveByAssetId(90L);
+        assertEquals(1, transactionManager.commits);
+        assertEquals(1, transactionManager.rollbacks);
+    }
+
     private PrivateActorMediaStorage.StoredObjectRef page(String objectKey) {
         return new PrivateActorMediaStorage.StoredObjectRef("cos", "private", objectKey, null);
     }
@@ -116,8 +132,9 @@ class ActorPdfAssetLifecycleServiceTest {
         @Bean RecordingTransactionManager transactionManager() { return new RecordingTransactionManager(); }
         @Bean ActorPdfAssetLifecycleService lifecycle(
                 ActorMediaAssetMapper assetMapper,
-                ActorMediaAssetPageMapper pageMapper) {
-            return new ActorPdfAssetLifecycleService(assetMapper, pageMapper);
+                ActorMediaAssetPageMapper pageMapper,
+                RecordingTransactionManager transactionManager) {
+            return new ActorPdfAssetLifecycleService(assetMapper, pageMapper, transactionManager);
         }
     }
 
