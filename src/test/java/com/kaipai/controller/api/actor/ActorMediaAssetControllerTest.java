@@ -2,6 +2,7 @@ package com.kaipai.controller.api.actor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,5 +59,19 @@ class ActorMediaAssetControllerTest {
                 .andExpect(status().isNotFound());
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void retryRouteBindsTheAuthenticatedOwnerAssetIdAndMultipartFile() throws Exception {
+        ActorMediaAssetService service = mock(ActorMediaAssetService.class);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new ActorMediaAssetController(service)).build();
+        var file = new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
+
+        mockMvc.perform(multipart("/actor/assets/81/retry")
+                        .file(file)
+                        .principal(new UsernamePasswordAuthenticationToken(7L, null)))
+                .andExpect(status().isOk());
+
+        verify(service).retryPdf(7L, 81L, file);
     }
 }

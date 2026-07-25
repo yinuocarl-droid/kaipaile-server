@@ -34,6 +34,7 @@ class ActorMediaAssetServiceImplTest {
     private ActorMediaAssetPageMapper pageMapper;
     private PrivateActorMediaStorage storage;
     private ActorPrivatePdfProcessor pdfProcessor;
+    private ActorPdfAssetLifecycleService pdfLifecycle;
     private ActorMediaAssetServiceImpl service;
 
     @BeforeEach void setUp() {
@@ -41,7 +42,9 @@ class ActorMediaAssetServiceImplTest {
         profileAssetMapper = mock(ActorProfileAssetMapper.class); workAssetMapper = mock(ActorWorkAssetMapper.class); experienceMapper = mock(ActorExperienceMapper.class);
         shareAssetMapper = mock(ShareCardAssetMapper.class); storage = mock(PrivateActorMediaStorage.class);
         pageMapper = mock(ActorMediaAssetPageMapper.class); pdfProcessor = mock(ActorPrivatePdfProcessor.class);
-        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper, experienceMapper, shareAssetMapper, pageMapper, storage, pdfProcessor);
+        pdfLifecycle = mock(ActorPdfAssetLifecycleService.class);
+        service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper,
+                experienceMapper, shareAssetMapper, pageMapper, storage, pdfProcessor, pdfLifecycle);
     }
 
     @Test void createdAssetPersistsObjectIdentityWithoutAccessUrl() {
@@ -128,6 +131,34 @@ class ActorMediaAssetServiceImplTest {
         verify(assetMapper).updateById(asset);
     }
 
+    @Test void updatingOnlyNamePreservesExistingCategory() {
+        ActorMediaAsset asset = readyPhoto(7L);
+        asset.setOriginalName("old.jpg");
+        asset.setCategoryCode("portrait");
+        when(assetMapper.selectOne(any())).thenReturn(asset);
+        ActorAssetUpdateDTO request = new ActorAssetUpdateDTO();
+        request.setOriginalName("  new.jpg  ");
+
+        var result = service.update(7L, 81L, request);
+
+        assertEquals("new.jpg", result.getOriginalName());
+        assertEquals("portrait", result.getCategoryCode());
+    }
+
+    @Test void updatingOnlyCategoryPreservesExistingName() {
+        ActorMediaAsset asset = readyPhoto(7L);
+        asset.setOriginalName("portrait.jpg");
+        asset.setCategoryCode("other");
+        when(assetMapper.selectOne(any())).thenReturn(asset);
+        ActorAssetUpdateDTO request = new ActorAssetUpdateDTO();
+        request.setCategoryCode("portrait_candidate");
+
+        var result = service.update(7L, 81L, request);
+
+        assertEquals("portrait.jpg", result.getOriginalName());
+        assertEquals("portrait_candidate", result.getCategoryCode());
+    }
+
     @Test void onlyOwnedReadyPdfCanBecomeCurrentResume() {
         ActorMediaAsset pdf = readyPhoto(7L);
         pdf.setMediaType("pdf");
@@ -163,9 +194,8 @@ class ActorMediaAssetServiceImplTest {
         var result = service.upload(7L, "pdf", "resume", file);
 
         assertEquals("ready", result.getProcessStatus());
-        var pages = org.mockito.ArgumentCaptor.forClass(ActorMediaAssetPage.class);
-        verify(pageMapper, times(2)).insert(pages.capture());
-        assertEquals(java.util.List.of(1, 2), pages.getAllValues().stream().map(ActorMediaAssetPage::getPageNo).toList());
+        verify(pdfLifecycle).finalizeReady(7L, 90L, List.of(page1, page2));
+        verify(pdfLifecycle, never()).markFailed(any(), any(), any(), any());
         assertEquals(2, result.getPageCount());
     }
 
@@ -178,9 +208,126 @@ class ActorMediaAssetServiceImplTest {
         var result = service.upload(7L, "pdf", "resume", file);
 
         assertEquals("failed", result.getProcessStatus());
-        var asset = org.mockito.ArgumentCaptor.forClass(ActorMediaAsset.class);
-        verify(assetMapper).updateById(asset.capture());
-        assertEquals("PDF_RENDER_FAILED", asset.getValue().getFailureCode());
+        assertEquals("PDF 页转换失败", result.getFailureMessage());
+        verify(pdfLifecycle).markFailed(7L, 91L, "PDF_RENDER_FAILED", "PDF 页转换失败");
+        verify(pdfLifecycle, never()).finalizeReady(any(), any(), any());
+    }
+
+    @Test void uncheckedProcessorFailureTransitionsTheNewAssetToFailed() {
+        var file = new MockMultipartFile("file", "坏简历.pdf", "application/pdf", "%PDF-bad".getBytes());
+        stubStoredPdf(file, 92L, "actor-private/7/pdf/unchecked.pdf");
+        when(pdfProcessor.process(7L, file)).thenThrow(new IllegalStateException("renderer crashed"));
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals(92L, result.getAssetId());
+        assertEquals("failed", result.getProcessStatus());
+        verify(pdfLifecycle).markFailed(7L, 92L, "PDF_RENDER_FAILED", "PDF 页转换失败");
+    }
+
+    @Test void emptyProcessorOutputIsFailedInsteadOfReady() {
+        var file = new MockMultipartFile("file", "空简历.pdf", "application/pdf", "%PDF-empty".getBytes());
+        stubStoredPdf(file, 93L, "actor-private/7/pdf/empty.pdf");
+        when(pdfProcessor.process(7L, file)).thenReturn(List.of());
+        doThrow(new IllegalStateException("PDF processor returned no pages"))
+                .when(pdfLifecycle).finalizeReady(7L, 93L, List.of());
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals("failed", result.getProcessStatus());
+        verify(pdfLifecycle).markFailed(7L, 93L, "PDF_FINALIZE_FAILED", "PDF 处理结果保存失败");
+    }
+
+    @Test void nullProcessorOutputStillEntersFailedCompensation() {
+        var file = new MockMultipartFile("file", "空简历.pdf", "application/pdf", "%PDF-null".getBytes());
+        stubStoredPdf(file, 96L, "actor-private/7/pdf/null.pdf");
+        when(pdfProcessor.process(7L, file)).thenReturn(null);
+        doThrow(new IllegalStateException("PDF processor returned no pages"))
+                .when(pdfLifecycle).finalizeReady(7L, 96L, null);
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals("failed", result.getProcessStatus());
+        verify(pdfLifecycle).markFailed(7L, 96L, "PDF_FINALIZE_FAILED", "PDF 处理结果保存失败");
+    }
+
+    @Test void finalizeFailureDeletesGeneratedObjectsBestEffortAndMarksAssetFailed() {
+        var file = new MockMultipartFile("file", "简历.pdf", "application/pdf", "%PDF-test".getBytes());
+        var page1 = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "page-1.jpg", null);
+        var page2 = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "page-2.jpg", null);
+        stubStoredPdf(file, 94L, "actor-private/7/pdf/finalize.pdf");
+        when(pdfProcessor.process(7L, file)).thenReturn(List.of(page1, page2));
+        doThrow(new IllegalStateException("commit failed"))
+                .when(pdfLifecycle).finalizeReady(7L, 94L, List.of(page1, page2));
+        doThrow(new IllegalStateException("cleanup failed"))
+                .when(storage).delete("private-assets", "page-1.jpg");
+
+        var result = service.upload(7L, "pdf", "resume", file);
+
+        assertEquals("failed", result.getProcessStatus());
+        verify(storage).delete("private-assets", "page-1.jpg");
+        verify(storage).delete("private-assets", "page-2.jpg");
+        verify(pdfLifecycle).markFailed(7L, 94L, "PDF_FINALIZE_FAILED", "PDF 处理结果保存失败");
+    }
+
+    @Test void ambiguousFinalizeOutcomeDoesNotDeletePagesWhenFailedTransitionIsRejected() {
+        var file = new MockMultipartFile("file", "简历.pdf", "application/pdf", "%PDF-test".getBytes());
+        var page = new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "page-ready.jpg", null);
+        stubStoredPdf(file, 97L, "actor-private/7/pdf/ambiguous.pdf");
+        when(pdfProcessor.process(7L, file)).thenReturn(List.of(page));
+        doThrow(new IllegalStateException("commit outcome unknown"))
+                .when(pdfLifecycle).finalizeReady(7L, 97L, List.of(page));
+        IllegalStateException staleTransition = new IllegalStateException("asset is no longer processing");
+        doThrow(staleTransition).when(pdfLifecycle)
+                .markFailed(7L, 97L, "PDF_FINALIZE_FAILED", "PDF 处理结果保存失败");
+
+        var thrown = assertThrows(IllegalStateException.class,
+                () -> service.upload(7L, "pdf", "resume", file));
+
+        assertSame(staleTransition, thrown);
+        verify(storage, never()).delete("private-assets", "page-ready.jpg");
+    }
+
+    @Test void failedTransitionFailurePropagatesWithoutReturningAnInMemoryFailedAsset() {
+        var file = new MockMultipartFile("file", "坏简历.pdf", "application/pdf", "%PDF-bad".getBytes());
+        stubStoredPdf(file, 95L, "actor-private/7/pdf/failed-transition.pdf");
+        when(pdfProcessor.process(7L, file)).thenThrow(
+                new ActorPrivatePdfProcessor.PdfProcessingException("PDF_RENDER_FAILED", "PDF 页转换失败"));
+        IllegalStateException transitionFailure = new IllegalStateException("failed transition unavailable");
+        doThrow(transitionFailure).when(pdfLifecycle)
+                .markFailed(7L, 95L, "PDF_RENDER_FAILED", "PDF 页转换失败");
+
+        var thrown = assertThrows(IllegalStateException.class,
+                () -> service.upload(7L, "pdf", "resume", file));
+
+        assertSame(transitionFailure, thrown);
+    }
+
+    @Test void zeroRowProcessingInsertDeletesTheStoredOriginalAndStopsProcessing() {
+        var file = new MockMultipartFile("file", "简历.pdf", "application/pdf", "%PDF-test".getBytes());
+        when(storage.store(7L, "pdf", file)).thenReturn(
+                new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "original.pdf", null));
+        when(assetMapper.insert(any())).thenReturn(0);
+
+        assertThrows(IllegalStateException.class, () -> service.upload(7L, "pdf", "resume", file));
+
+        verify(storage).delete("private-assets", "original.pdf");
+        verifyNoInteractions(pdfProcessor, pdfLifecycle);
+    }
+
+    @Test void thrownProcessingInsertDeletesTheStoredOriginalAndPreservesTheFailure() {
+        var file = new MockMultipartFile("file", "简历.pdf", "application/pdf", "%PDF-test".getBytes());
+        when(storage.store(7L, "pdf", file)).thenReturn(
+                new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", "original.pdf", null));
+        IllegalStateException insertFailure = new IllegalStateException("insert failed");
+        when(assetMapper.insert(any())).thenThrow(insertFailure);
+
+        var thrown = assertThrows(IllegalStateException.class,
+                () -> service.upload(7L, "pdf", "resume", file));
+
+        assertSame(insertFailure, thrown);
+        verify(storage).delete("private-assets", "original.pdf");
+        verifyNoInteractions(pdfProcessor, pdfLifecycle);
     }
 
     @Test void readyPhotoCanBeBoundToProfileAndRejectsNonPhoto() {
@@ -409,21 +556,103 @@ class ActorMediaAssetServiceImplTest {
         verify(profileMapper, never()).incrementWorkLibraryVersion(any());
     }
 
-    @Test void retryRequiresFailedPdfAndCreatesFreshProcessingLifecycle() {
+    @Test void retrySuccessCreatesANewAssetWithTheInheritedCategoryAndLeavesTheOldRowUntouched() {
         ActorMediaAsset failed = readyPhoto(7L); failed.setMediaType("pdf"); failed.setProcessStatus("failed");
+        failed.setCategoryCode("resume");
         var file = new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
         when(assetMapper.selectOne(any())).thenReturn(failed);
         when(storage.store(7L, "pdf", file)).thenReturn(new PrivateActorMediaStorage.StoredObjectRef("cos", "private", "retry.pdf", null));
-        when(assetMapper.insert(any())).thenAnswer(call -> { ((ActorMediaAsset) call.getArgument(0)).setAssetId(92L); return 1; });
-        when(pdfProcessor.process(7L, file)).thenReturn(java.util.List.of());
+        when(assetMapper.insert(any())).thenAnswer(call -> {
+            ActorMediaAsset inserted = call.getArgument(0);
+            assertEquals("processing", inserted.getProcessStatus());
+            inserted.setAssetId(92L);
+            return 1;
+        });
+        var page = new PrivateActorMediaStorage.StoredObjectRef("cos", "private", "retry-page.jpg", null);
+        when(pdfProcessor.process(7L, file)).thenReturn(List.of(page));
 
         var result = service.retryPdf(7L, 81L, file);
 
         assertEquals(92L, result.getAssetId());
         assertEquals("ready", result.getProcessStatus());
+        var inserted = org.mockito.ArgumentCaptor.forClass(ActorMediaAsset.class);
+        verify(assetMapper).insert(inserted.capture());
+        assertEquals("resume", inserted.getValue().getCategoryCode());
+        verify(pdfLifecycle).finalizeReady(7L, 92L, List.of(page));
+        verify(assetMapper, never()).updateById(failed);
+        verify(assetMapper, never()).deleteById(81L);
+    }
+
+    @Test void retryFailureKeepsTheOldFailedRowAndReturnsTheNewFailedAsset() {
+        ActorMediaAsset failed = readyPhoto(7L); failed.setMediaType("pdf"); failed.setProcessStatus("failed");
+        failed.setCategoryCode("resume");
+        var file = new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
+        when(assetMapper.selectOne(any())).thenReturn(failed);
+        stubStoredPdf(file, 93L, "retry.pdf");
+        when(pdfProcessor.process(7L, file)).thenThrow(
+                new ActorPrivatePdfProcessor.PdfProcessingException("PDF_RENDER_FAILED", "PDF 页转换失败"));
+
+        var result = service.retryPdf(7L, 81L, file);
+
+        assertEquals(93L, result.getAssetId());
+        assertEquals("failed", result.getProcessStatus());
+        verify(pdfLifecycle).markFailed(7L, 93L, "PDF_RENDER_FAILED", "PDF 页转换失败");
+        verify(assetMapper, never()).updateById(failed);
+        verify(assetMapper, never()).deleteById(81L);
+    }
+
+    @Test void nonPdfRetryIsRejectedWithoutStorageOrDatabaseMutation() {
+        ActorMediaAsset failedPhoto = readyPhoto(7L);
+        failedPhoto.setProcessStatus("failed");
+        when(assetMapper.selectOne(any())).thenReturn(failedPhoto);
+
+        assertThrows(BizException.class,
+                () -> service.retryPdf(7L, 81L, retryFile()));
+
+        verifyRejectedRetryHasNoSideEffects();
+    }
+
+    @Test void nonFailedPdfRetryIsRejectedWithoutStorageOrDatabaseMutation() {
+        ActorMediaAsset readyPdf = readyPhoto(7L);
+        readyPdf.setMediaType("pdf");
+        when(assetMapper.selectOne(any())).thenReturn(readyPdf);
+
+        assertThrows(BizException.class,
+                () -> service.retryPdf(7L, 81L, retryFile()));
+
+        verifyRejectedRetryHasNoSideEffects();
+    }
+
+    @Test void foreignPdfRetryIsRejectedWithoutStorageOrDatabaseMutation() {
+        when(assetMapper.selectOne(any())).thenReturn(null);
+
+        assertThrows(BizException.class,
+                () -> service.retryPdf(7L, 81L, retryFile()));
+
+        verifyRejectedRetryHasNoSideEffects();
     }
 
     private ActorMediaAsset readyPhoto(Long userId) { ActorMediaAsset a = new ActorMediaAsset(); a.setAssetId(81L); a.setUserId(userId); a.setMediaType("photo"); a.setProcessStatus("ready"); a.setStorageProvider("cos"); a.setBucketCode("private"); a.setObjectKey("actor/7/a.jpg"); return a; }
+
+    private void stubStoredPdf(MockMultipartFile file, Long assetId, String objectKey) {
+        when(storage.store(7L, "pdf", file)).thenReturn(
+                new PrivateActorMediaStorage.StoredObjectRef("cos", "private-assets", objectKey, null));
+        when(assetMapper.insert(any())).thenAnswer(call -> {
+            ((ActorMediaAsset) call.getArgument(0)).setAssetId(assetId);
+            return 1;
+        });
+    }
+
+    private MockMultipartFile retryFile() {
+        return new MockMultipartFile("file", "retry.pdf", "application/pdf", "%PDF-retry".getBytes());
+    }
+
+    private void verifyRejectedRetryHasNoSideEffects() {
+        verifyNoInteractions(storage, pdfProcessor, pdfLifecycle);
+        verify(assetMapper, never()).insert(any());
+        verify(assetMapper, never()).updateById(any());
+        verify(assetMapper, never()).deleteById(any());
+    }
 
     private void stubOwnedWorkAndProfile() {
         when(experienceMapper.selectOwnedActiveByIdForUpdate(7L, 12L)).thenReturn(ownedWork());

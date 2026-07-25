@@ -671,7 +671,8 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                 ShareCardAssetMapper shareAssetMapper,
                 ActorMediaAssetPageMapper pageMapper,
                 PrivateActorMediaStorage storage,
-                ActorPrivatePdfProcessor pdfProcessor) {
+                ActorPrivatePdfProcessor pdfProcessor,
+                ActorPdfAssetLifecycleService pdfLifecycle) {
             return new ActorMediaAssetServiceImpl(
                     assetMapper,
                     profileMapper,
@@ -681,7 +682,15 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                     shareAssetMapper,
                     pageMapper,
                     storage,
-                    pdfProcessor);
+                    pdfProcessor,
+                    pdfLifecycle);
+        }
+
+        @Bean
+        ActorPdfAssetLifecycleService actorPdfAssetLifecycleService(
+                ActorMediaAssetMapper assetMapper,
+                ActorMediaAssetPageMapper pageMapper) {
+            return new ActorPdfAssetLifecycleService(assetMapper, pageMapper);
         }
 
         @Bean

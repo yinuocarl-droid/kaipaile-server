@@ -30,21 +30,32 @@ public class ActorPrivatePdfProcessorImpl implements ActorPrivatePdfProcessor {
 
     @Override
     public List<PrivateActorMediaStorage.StoredObjectRef> process(Long userId, MultipartFile file) {
+        List<PrivateActorMediaStorage.StoredObjectRef> pages = new ArrayList<>();
         try (PDDocument document = PDDocument.load(file.getBytes())) {
             if (document.isEncrypted()) throw failure("PDF_ENCRYPTED", "PDF 不支持加密文件");
             int count = document.getNumberOfPages();
             if (count <= 0 || count > MAX_PAGES) throw failure("PDF_PAGE_COUNT_INVALID", "PDF 页数必须为 1 到 20 页");
             PDFRenderer renderer = new PDFRenderer(document);
-            List<PrivateActorMediaStorage.StoredObjectRef> pages = new ArrayList<>();
             for (int index = 0; index < count; index++) {
                 BufferedImage rendered = renderer.renderImageWithDPI(index, 72f, ImageType.RGB);
                 pages.add(storage.storeGenerated(userId, "pdf-page", jpeg(scale(rendered)), "image/jpeg", ".jpg"));
             }
             return pages;
         } catch (PdfProcessingException error) {
+            pages.forEach(this::deleteBestEffort);
             throw error;
         } catch (Exception error) {
+            pages.forEach(this::deleteBestEffort);
             throw failure("PDF_RENDER_FAILED", "PDF 页转换失败");
+        }
+    }
+
+    private void deleteBestEffort(PrivateActorMediaStorage.StoredObjectRef page) {
+        if (page == null || page.bucketCode() == null || page.objectKey() == null) return;
+        try {
+            storage.delete(page.bucketCode(), page.objectKey());
+        } catch (RuntimeException ignored) {
+            // Conversion failure remains primary; orphan cleanup can be retried operationally.
         }
     }
 

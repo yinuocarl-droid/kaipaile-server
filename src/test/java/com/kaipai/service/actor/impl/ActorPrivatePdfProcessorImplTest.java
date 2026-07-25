@@ -31,6 +31,21 @@ class ActorPrivatePdfProcessorImplTest {
         assertEquals("PDF_PAGE_COUNT_INVALID", error.code());
     }
 
+    @Test void cleansAlreadyStoredPagesWhenALaterPageUploadFails() throws Exception {
+        PrivateActorMediaStorage storage = mock(PrivateActorMediaStorage.class);
+        var firstPage = new PrivateActorMediaStorage.StoredObjectRef("cos", "private", "page-1.jpg", null);
+        when(storage.storeGenerated(eq(7L), eq("pdf-page"), any(byte[].class), eq("image/jpeg"), eq(".jpg")))
+                .thenReturn(firstPage)
+                .thenThrow(new IllegalStateException("second page upload failed"));
+        ActorPrivatePdfProcessorImpl processor = new ActorPrivatePdfProcessorImpl(storage);
+
+        var error = assertThrows(ActorPrivatePdfProcessor.PdfProcessingException.class,
+                () -> processor.process(7L, pdf(2)));
+
+        assertEquals("PDF_RENDER_FAILED", error.code());
+        verify(storage).delete("private", "page-1.jpg");
+    }
+
     private MockMultipartFile pdf(int pageCount) throws Exception {
         try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             for (int i = 0; i < pageCount; i++) document.addPage(new PDPage());

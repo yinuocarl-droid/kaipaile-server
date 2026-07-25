@@ -8,13 +8,60 @@ import com.kaipai.mapper.actor.*; import com.kaipai.mapper.card.ShareCardAssetMa
 import java.time.Duration; import java.util.*; import java.util.function.Function; import java.util.stream.Collectors; import lombok.RequiredArgsConstructor; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Propagation; import org.springframework.transaction.annotation.Transactional; import org.springframework.util.StringUtils; import org.springframework.web.multipart.MultipartFile;
 @Service @RequiredArgsConstructor
 public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
-    private final ActorMediaAssetMapper assetMapper; private final ActorProfileMapper profileMapper; private final ActorProfileAssetMapper profileAssetMapper; private final ActorWorkAssetMapper workAssetMapper; private final ActorExperienceMapper experienceMapper; private final ShareCardAssetMapper shareAssetMapper; private final ActorMediaAssetPageMapper pageMapper; private final PrivateActorMediaStorage storage; private final ActorPrivatePdfProcessor pdfProcessor;
+    private final ActorMediaAssetMapper assetMapper; private final ActorProfileMapper profileMapper; private final ActorProfileAssetMapper profileAssetMapper; private final ActorWorkAssetMapper workAssetMapper; private final ActorExperienceMapper experienceMapper; private final ShareCardAssetMapper shareAssetMapper; private final ActorMediaAssetPageMapper pageMapper; private final PrivateActorMediaStorage storage; private final ActorPrivatePdfProcessor pdfProcessor; private final ActorPdfAssetLifecycleService pdfLifecycle;
     public PageResult<ActorAssetRespDTO> list(Long userId, ActorAssetQueryDTO query) { long pageNo=Math.max(1,query.getPage()); long size=query.getSize()<=0?10:Math.min(query.getSize(),50); LambdaQueryWrapper<ActorMediaAsset> wrapper=new LambdaQueryWrapper<ActorMediaAsset>().eq(ActorMediaAsset::getUserId,userId); if(StringUtils.hasText(query.getMediaType()))wrapper.eq(ActorMediaAsset::getMediaType,query.getMediaType().trim()); if(StringUtils.hasText(query.getCategoryCode()))wrapper.eq(ActorMediaAsset::getCategoryCode,query.getCategoryCode().trim()); if(StringUtils.hasText(query.getProcessStatus()))wrapper.eq(ActorMediaAsset::getProcessStatus,query.getProcessStatus().trim()); if(StringUtils.hasText(query.getKeyword()))wrapper.like(ActorMediaAsset::getOriginalName,query.getKeyword().trim()); wrapper.orderByDesc(ActorMediaAsset::getAssetId); Page<ActorMediaAsset> result=assetMapper.selectPage(new Page<>(pageNo,size),wrapper); return new PageResult<>(result.getTotal(),result.getRecords().stream().map(this::dto).toList()); }
     public ActorAssetRespDTO asset(Long userId,Long assetId){return dto(require(userId,assetId));}
-    public ActorAssetRespDTO upload(Long userId,String mediaType,String categoryCode,MultipartFile file){PrivateActorMediaStorage.StoredObjectRef object=storage.store(userId,mediaType,file);if(!"pdf".equals(mediaType))return createReadyAsset(userId,mediaType,categoryCode,object,file.getOriginalFilename(),file.getContentType(),file.getSize());ActorMediaAsset a=newAsset(userId,mediaType,categoryCode,object,file,"processing");assetMapper.insert(a);try{var pages=pdfProcessor.process(userId,file);for(int i=0;i<pages.size();i++){ActorMediaAssetPage page=new ActorMediaAssetPage();page.setAssetId(a.getAssetId());page.setPageNo(i+1);page.setImageObjectKey(pages.get(i).objectKey());page.setProcessStatus("ready");pageMapper.insert(page);}a.setPageCount(pages.size());a.setProcessStatus("ready");}catch(ActorPrivatePdfProcessor.PdfProcessingException error){a.setProcessStatus("failed");a.setFailureCode(error.code());a.setFailureMessage(error.getMessage());}assetMapper.updateById(a);return dto(a);}
+    public ActorAssetRespDTO upload(Long userId, String mediaType, String categoryCode, MultipartFile file) {
+        PrivateActorMediaStorage.StoredObjectRef object = storage.store(userId, mediaType, file);
+        if (!"pdf".equals(mediaType)) {
+            return createReadyAsset(userId, mediaType, categoryCode, object,
+                    file.getOriginalFilename(), file.getContentType(), file.getSize());
+        }
+
+        ActorMediaAsset asset = newAsset(userId, mediaType, categoryCode, object, file, "processing");
+        try {
+            if (assetMapper.insert(asset) != 1) {
+                throw new IllegalStateException("PDF processing asset insert failed");
+            }
+        } catch (RuntimeException error) {
+            deleteBestEffort(object);
+            throw error;
+        }
+
+        List<PrivateActorMediaStorage.StoredObjectRef> pages;
+        try {
+            pages = pdfProcessor.process(userId, file);
+        } catch (ActorPrivatePdfProcessor.PdfProcessingException error) {
+            return markPdfFailed(userId, asset, error.code(), error.getMessage());
+        } catch (RuntimeException error) {
+            return markPdfFailed(userId, asset, "PDF_RENDER_FAILED", "PDF 页转换失败");
+        }
+
+        try {
+            pdfLifecycle.finalizeReady(userId, asset.getAssetId(), pages);
+            asset.setPageCount(pages.size());
+            asset.setProcessStatus("ready");
+            return dto(asset);
+        } catch (RuntimeException error) {
+            ActorAssetRespDTO failed = markPdfFailed(
+                    userId, asset, "PDF_FINALIZE_FAILED", "PDF 处理结果保存失败");
+            if (pages != null) pages.forEach(this::deleteBestEffort);
+            return failed;
+        }
+    }
     public ActorAssetRespDTO retryPdf(Long userId,Long failedAssetId,MultipartFile file){ActorMediaAsset failed=require(userId,failedAssetId);if(!"pdf".equals(failed.getMediaType())||!"failed".equals(failed.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();return upload(userId,"pdf",failed.getCategoryCode(),file);}
     public ActorAssetRespDTO createReadyAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,String name,String mime,Long size){ ActorMediaAsset a=new ActorMediaAsset(); a.setUserId(userId);a.setMediaType(mediaType);a.setCategoryCode(category);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(name);a.setMimeType(mime);a.setSizeBytes(size);a.setProcessStatus("ready");a.setSourceType("upload");assetMapper.insert(a);return dto(a); }
-    public ActorAssetRespDTO update(Long userId,Long assetId,ActorAssetUpdateDTO request){ActorMediaAsset a=require(userId,assetId);a.setOriginalName(trim(request.getOriginalName()));a.setCategoryCode(trim(request.getCategoryCode()));assetMapper.updateById(a);return dto(a);}
+    public ActorAssetRespDTO update(Long userId, Long assetId, ActorAssetUpdateDTO request) {
+        ActorMediaAsset asset = require(userId, assetId);
+        if (request.getOriginalName() != null) {
+            asset.setOriginalName(trim(request.getOriginalName()));
+        }
+        if (request.getCategoryCode() != null) {
+            asset.setCategoryCode(trim(request.getCategoryCode()));
+        }
+        assetMapper.updateById(asset);
+        return dto(asset);
+    }
     @Transactional(rollbackFor=Exception.class) public void setCurrentResume(Long userId,ActorCurrentResumeUpdateDTO request){ActorMediaAsset a=requireForUpdate(userId,request.getAssetId());if(!"pdf".equals(a.getMediaType())||!"ready".equals(a.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();ActorProfile p=profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId,userId).last("limit 1"));if(p==null)throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();p.setCurrentResumeAssetId(a.getAssetId());profileMapper.updateById(p);}
     @Transactional(rollbackFor=Exception.class) public void bindProfileAsset(Long userId,Long assetId,String usageCode,Integer sortNo){ActorMediaAsset a=requireForUpdate(userId,assetId);if(!"photo".equals(a.getMediaType())||!"ready".equals(a.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();ActorProfile p=profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId,userId).last("limit 1"));if(p==null)throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();ActorProfileAsset relation=new ActorProfileAsset();relation.setActorProfileId(p.getActorProfileId());relation.setAssetId(assetId);relation.setUsageCode(usageCode);relation.setSortNo(sortNo);profileAssetMapper.insert(relation);}
     public List<ActorWorkAssetRespDTO> workAssets(Long userId, Long experienceId) {
@@ -87,6 +134,28 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
         return assets.get(0);
     }
     private String trim(String value){return StringUtils.hasText(value)?value.trim():null;}
+    private ActorAssetRespDTO markPdfFailed(
+            Long userId,
+            ActorMediaAsset asset,
+            String failureCode,
+            String failureMessage) {
+        pdfLifecycle.markFailed(userId, asset.getAssetId(), failureCode, failureMessage);
+        asset.setPageCount(null);
+        asset.setProcessStatus("failed");
+        asset.setFailureCode(failureCode);
+        asset.setFailureMessage(failureMessage);
+        return dto(asset);
+    }
+    private void deleteBestEffort(PrivateActorMediaStorage.StoredObjectRef object) {
+        if (object == null || !StringUtils.hasText(object.bucketCode()) || !StringUtils.hasText(object.objectKey())) {
+            return;
+        }
+        try {
+            storage.delete(object.bucketCode(), object.objectKey());
+        } catch (RuntimeException ignored) {
+            // The database lifecycle remains authoritative; orphan cleanup can be retried operationally.
+        }
+    }
     private List<NormalizedWorkAssetBinding> validateAndNormalizeBindings(ActorWorkAssetsReplaceDTO request) {
         if (request == null || request.getBindings() == null) {
             throw parameterError("作品素材集合不能为空");
