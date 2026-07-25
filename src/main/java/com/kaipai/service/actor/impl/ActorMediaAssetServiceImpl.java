@@ -12,13 +12,15 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
     public PageResult<ActorAssetRespDTO> list(Long userId, ActorAssetQueryDTO query) { long pageNo=Math.max(1,query.getPage()); long size=query.getSize()<=0?10:Math.min(query.getSize(),50); LambdaQueryWrapper<ActorMediaAsset> wrapper=new LambdaQueryWrapper<ActorMediaAsset>().eq(ActorMediaAsset::getUserId,userId); if(StringUtils.hasText(query.getMediaType()))wrapper.eq(ActorMediaAsset::getMediaType,query.getMediaType().trim()); if(StringUtils.hasText(query.getCategoryCode()))wrapper.eq(ActorMediaAsset::getCategoryCode,query.getCategoryCode().trim()); if(StringUtils.hasText(query.getProcessStatus()))wrapper.eq(ActorMediaAsset::getProcessStatus,query.getProcessStatus().trim()); if(StringUtils.hasText(query.getKeyword()))wrapper.like(ActorMediaAsset::getOriginalName,query.getKeyword().trim()); wrapper.orderByDesc(ActorMediaAsset::getAssetId); Page<ActorMediaAsset> result=assetMapper.selectPage(new Page<>(pageNo,size),wrapper); return new PageResult<>(result.getTotal(),result.getRecords().stream().map(this::dto).toList()); }
     public ActorAssetRespDTO asset(Long userId,Long assetId){return dto(require(userId,assetId));}
     public ActorAssetRespDTO upload(Long userId, String mediaType, String categoryCode, MultipartFile file) {
-        PrivateActorMediaStorage.StoredObjectRef object = storage.store(userId, mediaType, file);
-        if (!"pdf".equals(mediaType)) {
-            return createReadyAsset(userId, mediaType, categoryCode, object,
+        String normalizedMediaType = normalizeMediaType(mediaType);
+        String normalizedCategoryCode = validateCategoryCode(normalizedMediaType, categoryCode);
+        PrivateActorMediaStorage.StoredObjectRef object = storage.store(userId, normalizedMediaType, file);
+        if (!"pdf".equals(normalizedMediaType)) {
+            return createReadyAsset(userId, normalizedMediaType, normalizedCategoryCode, object,
                     file.getOriginalFilename(), file.getContentType(), file.getSize());
         }
 
-        ActorMediaAsset asset = newAsset(userId, mediaType, categoryCode, object, file, "processing");
+        ActorMediaAsset asset = newAsset(userId, normalizedMediaType, normalizedCategoryCode, object, file, "processing");
         try {
             if (assetMapper.insert(asset) != 1) {
                 throw new IllegalStateException("PDF processing asset insert failed");
@@ -50,14 +52,14 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
         }
     }
     public ActorAssetRespDTO retryPdf(Long userId,Long failedAssetId,MultipartFile file){ActorMediaAsset failed=require(userId,failedAssetId);if(!"pdf".equals(failed.getMediaType())||!"failed".equals(failed.getProcessStatus()))throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_READY.toException();return upload(userId,"pdf",failed.getCategoryCode(),file);}
-    public ActorAssetRespDTO createReadyAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,String name,String mime,Long size){ ActorMediaAsset a=new ActorMediaAsset(); a.setUserId(userId);a.setMediaType(mediaType);a.setCategoryCode(category);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(name);a.setMimeType(mime);a.setSizeBytes(size);a.setProcessStatus("ready");a.setSourceType("upload");assetMapper.insert(a);return dto(a); }
+    public ActorAssetRespDTO createReadyAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,String name,String mime,Long size){ String normalizedMediaType=normalizeMediaType(mediaType); String normalizedCategory=validateCategoryCode(normalizedMediaType,category); ActorMediaAsset a=new ActorMediaAsset(); a.setUserId(userId);a.setMediaType(normalizedMediaType);a.setCategoryCode(normalizedCategory);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(name);a.setMimeType(mime);a.setSizeBytes(size);a.setProcessStatus("ready");a.setSourceType("upload");assetMapper.insert(a);return dto(a); }
     public ActorAssetRespDTO update(Long userId, Long assetId, ActorAssetUpdateDTO request) {
         ActorMediaAsset asset = require(userId, assetId);
         if (request.getOriginalName() != null) {
             asset.setOriginalName(trim(request.getOriginalName()));
         }
         if (request.getCategoryCode() != null) {
-            asset.setCategoryCode(trim(request.getCategoryCode()));
+            asset.setCategoryCode(validateCategoryCode(asset.getMediaType(), request.getCategoryCode()));
         }
         assetMapper.updateById(asset);
         return dto(asset);
@@ -222,6 +224,31 @@ public class ActorMediaAssetServiceImpl implements ActorMediaAssetService {
             .thenComparingInt(NormalizedWorkAssetBinding::sortNo)
             .thenComparingLong(NormalizedWorkAssetBinding::assetId);
     private record NormalizedWorkAssetBinding(Long assetId, String usageCode, Integer sortNo) {}
-    private ActorMediaAsset newAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,MultipartFile file,String status){ActorMediaAsset a=new ActorMediaAsset();a.setUserId(userId);a.setMediaType(mediaType);a.setCategoryCode(category);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(file.getOriginalFilename());a.setMimeType(file.getContentType());a.setSizeBytes(file.getSize());a.setProcessStatus(status);a.setSourceType("upload");return a;}
+    private String normalizeMediaType(String mediaType) {
+        String normalized = trim(mediaType);
+        if (normalized == null || !FORMAL_CATEGORY_CODES.containsKey(normalized)) {
+            throw parameterError("素材类型仅支持 photo、video 或 pdf");
+        }
+        return normalized;
+    }
+
+    private String validateCategoryCode(String mediaType, String categoryCode) {
+        String normalizedMediaType = normalizeMediaType(mediaType);
+        String normalizedCategoryCode = trim(categoryCode);
+        if (normalizedCategoryCode == null) {
+            throw parameterError("素材分类不能为空");
+        }
+        if (!FORMAL_CATEGORY_CODES.get(normalizedMediaType).contains(normalizedCategoryCode)) {
+            throw parameterError("素材分类不支持或已退场");
+        }
+        return normalizedCategoryCode;
+    }
+
+    private static final Map<String, Set<String>> FORMAL_CATEGORY_CODES = Map.of(
+            "photo", Set.of("portrait_candidate", "model_card", "portrait", "lifestyle", "production", "costume", "other"),
+            "video", Set.of("self_intro", "work_clip", "performance_clip", "other"),
+            "pdf", Set.of("resume"));
+
+    private ActorMediaAsset newAsset(Long userId,String mediaType,String category,PrivateActorMediaStorage.StoredObjectRef object,MultipartFile file,String status){String normalizedMediaType=normalizeMediaType(mediaType);String normalizedCategory=validateCategoryCode(normalizedMediaType,category);ActorMediaAsset a=new ActorMediaAsset();a.setUserId(userId);a.setMediaType(normalizedMediaType);a.setCategoryCode(normalizedCategory);a.setStorageProvider(object.storageProvider());a.setBucketCode(object.bucketCode());a.setObjectKey(object.objectKey());a.setThumbnailObjectKey(object.thumbnailObjectKey());a.setOriginalName(file.getOriginalFilename());a.setMimeType(file.getContentType());a.setSizeBytes(file.getSize());a.setProcessStatus(status);a.setSourceType("upload");return a;}
     private ActorAssetRespDTO dto(ActorMediaAsset a){ ActorAssetRespDTO d=new ActorAssetRespDTO();d.setAssetId(a.getAssetId());d.setMediaType(a.getMediaType());d.setCategoryCode(a.getCategoryCode());d.setOriginalName(a.getOriginalName());d.setMimeType(a.getMimeType());d.setSizeBytes(a.getSizeBytes());d.setPageCount(a.getPageCount());d.setProcessStatus(a.getProcessStatus());d.setFailureMessage(a.getFailureMessage());return d; }
 }

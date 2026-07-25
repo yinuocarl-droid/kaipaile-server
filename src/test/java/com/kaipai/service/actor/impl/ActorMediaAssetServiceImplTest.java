@@ -68,6 +68,32 @@ class ActorMediaAssetServiceImplTest {
         verify(storage).store(7L, "photo", file);
     }
 
+    @Test void uploadRejectsLegacyOrInvalidCategoryBeforeStorage() {
+        var file = new MockMultipartFile("file", "旧头像.jpg", "image/jpeg", new byte[] {1, 2, 3});
+
+        assertAll(
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "photo", null, file)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "photo", "   ", file)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "   ", "other", file)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "photo", "avatar", file)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "photo", "work_still", file)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.upload(7L, "video", "model_card", file)).getCode()));
+        verifyNoInteractions(storage);
+        verify(assetMapper, never()).insert(any());
+    }
+
     @Test void ownerAccessRequiresOwnerAndReadyAsset() {
         ActorMediaAsset asset = readyPhoto(7L); when(assetMapper.selectOne(any())).thenReturn(asset, null);
         when(storage.issueAccessUrl(any(), any(), any())).thenReturn(new PrivateActorMediaStorage.SignedAccess("https://signed", Instant.now().plusSeconds(600)));
@@ -157,6 +183,29 @@ class ActorMediaAssetServiceImplTest {
 
         assertEquals("portrait.jpg", result.getOriginalName());
         assertEquals("portrait_candidate", result.getCategoryCode());
+    }
+
+    @Test void updateRejectsLegacyOrCrossMediaCategoryWithoutPersisting() {
+        ActorMediaAsset asset = readyPhoto(7L);
+        when(assetMapper.selectOne(any())).thenReturn(asset);
+        ActorAssetUpdateDTO legacy = new ActorAssetUpdateDTO();
+        legacy.setCategoryCode("work_still");
+        ActorAssetUpdateDTO crossMedia = new ActorAssetUpdateDTO();
+        crossMedia.setCategoryCode("self_intro");
+        ActorAssetUpdateDTO blank = new ActorAssetUpdateDTO();
+        blank.setCategoryCode("   ");
+
+        assertAll(
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.update(7L, 81L, legacy)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.update(7L, 81L, crossMedia)).getCode()),
+                () -> assertEquals(ResultCode.PARAM_ERROR.getCode(),
+                        assertThrows(BizException.class,
+                                () -> service.update(7L, 81L, blank)).getCode()));
+        verify(assetMapper, never()).updateById(any());
     }
 
     @Test void onlyOwnedReadyPdfCanBecomeCurrentResume() {
