@@ -14,6 +14,9 @@ import com.kaipai.mapper.ai.AiProfileImportPromptTemplateMapper;
 import com.kaipai.mapper.ai.AiProfileImportPromptVersionMapper;
 import com.kaipai.model.ai.entity.AiProfileImportPromptTemplate;
 import com.kaipai.model.ai.entity.AiProfileImportPromptVersion;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptContract;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptPolicy;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptRenderer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -22,6 +25,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Map;
 import javax.sql.DataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -62,17 +66,20 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
     private final AiProfileImportPromptTemplateMapper templateMapper;
     private final AiProfileImportPromptVersionMapper versionMapper;
     private final AiProfileImportConfigMapper configMapper;
+    private final ProfileImportPromptRenderer renderer;
 
     @Autowired
     ProfileImportPromptGovernanceMySqlIntegrationTest(
             JdbcTemplate jdbc,
             AiProfileImportPromptTemplateMapper templateMapper,
             AiProfileImportPromptVersionMapper versionMapper,
-            AiProfileImportConfigMapper configMapper) {
+            AiProfileImportConfigMapper configMapper,
+            ProfileImportPromptRenderer renderer) {
         this.jdbc = jdbc;
         this.templateMapper = templateMapper;
         this.versionMapper = versionMapper;
         this.configMapper = configMapper;
+        this.renderer = renderer;
     }
 
     @BeforeEach
@@ -154,6 +161,19 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
                 body("works_only"));
         assertEquals(64, contentSha("full_profile").length());
         assertEquals(64, contentSha("works_only").length());
+    }
+
+    @Test
+    void javaContentHashEqualsEachStoredBootstrapHash() {
+        for (String scene : List.of("full_profile", "works_only")) {
+            AiProfileImportPromptTemplate template = loadTemplate(scene);
+            AiProfileImportPromptVersion version = loadVersion(
+                    template.getTemplateId(), template.getDraftVersionId());
+            assertEquals(
+                    version.getContentSha256(),
+                    renderer.contentSha256(template, version),
+                    scene);
+        }
     }
 
     @Test
@@ -240,6 +260,14 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
                         + "WHERE template_code=? AND deleted=0",
                 Long.class,
                 templateCode);
+    }
+
+    private AiProfileImportPromptTemplate loadTemplate(String scene) {
+        return templateMapper.selectByScene(scene);
+    }
+
+    private AiProfileImportPromptVersion loadVersion(Long templateId, Long promptVersionId) {
+        return versionMapper.selectOwnedDetail(templateId, promptVersionId);
     }
 
     private String body(String templateCode) {
@@ -367,6 +395,24 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
         @Bean
         JdbcTemplate jdbcTemplate(DataSource dataSource) {
             return new JdbcTemplate(dataSource);
+        }
+
+        @Bean
+        ProfileImportPromptContract profileImportPromptContract() {
+            return new ProfileImportPromptContract();
+        }
+
+        @Bean
+        ProfileImportPromptPolicy profileImportPromptPolicy(
+                ProfileImportPromptContract contract) {
+            return new ProfileImportPromptPolicy(contract);
+        }
+
+        @Bean
+        ProfileImportPromptRenderer profileImportPromptRenderer(
+                ProfileImportPromptContract contract,
+                ProfileImportPromptPolicy policy) {
+            return new ProfileImportPromptRenderer(contract, policy);
         }
     }
 
