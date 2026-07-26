@@ -3,6 +3,8 @@ package com.kaipai.service.ai.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.kaipai.common.auth.AdminAuthContext;
 import com.kaipai.common.auth.AdminAuthenticatedUser;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.mapper.ai.AiProfileImportPromptAuditMapper;
@@ -30,6 +32,8 @@ import com.kaipai.service.ai.ProfileImportPromptTester;
 import com.kaipai.service.ai.ProfileImportRuntimeConfig;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog.Fixture;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptContract;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptOperationLogValue;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptReasonCode;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptRenderer;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptRuntime;
@@ -68,6 +72,7 @@ public class ProfileImportPromptManagementServiceImpl
     private final ProfileImportPromptFixtureCatalog fixtureCatalog;
     private final ProfileImportConfigService configService;
     private final AdminAuthContext adminAuthContext;
+    private final AdminOperationLogger operationLogger;
     private final TransactionTemplate transactionTemplate;
 
     @Override
@@ -364,26 +369,160 @@ public class ProfileImportPromptManagementServiceImpl
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ProfileImportPromptTemplateSummaryRespDTO publish(
             Long operatorId,
             Long promptVersionId,
             ProfileImportPromptVersionActionReqDTO request) {
         requireStrictRequest(request);
-        ProfileImportPromptReasonCode.requirePublish(request.getReasonCode());
-        requireOperator(operatorId);
-        throw stateConflict();
+        ProfileImportPromptReasonCode reason = ProfileImportPromptReasonCode.requirePublish(
+                request.getReasonCode());
+        if (promptVersionId == null
+                || request.getExpectedTemplateVersion() == null
+                || request.getExpectedVersion() == null) {
+            throw invalid();
+        }
+        AdminAuthenticatedUser admin = requireOperator(operatorId);
+        AiProfileImportPromptVersion locator = locateVersion(promptVersionId);
+        Long templateId = locator.getTemplateId();
+        AiProfileImportPromptTemplate template = templateMapper.selectByIdForUpdate(templateId);
+        AiProfileImportPromptVersion draft =
+                versionMapper.selectOwnedForUpdate(templateId, promptVersionId);
+        if (!isUndeleted(template)
+                || !Objects.equals(templateId, template.getTemplateId())
+                || !isOwnedVersion(draft, templateId, promptVersionId)
+                || !Objects.equals(promptVersionId, template.getDraftVersionId())
+                || !LIFECYCLE_DRAFT.equals(draft.getLifecycleStatus())) {
+            throw stateConflict();
+        }
+        if (!Objects.equals(request.getExpectedTemplateVersion(), template.getVersion())
+                || !Objects.equals(request.getExpectedVersion(), draft.getVersion())) {
+            throw versionConflict();
+        }
+
+        AiProfileImportConfig config =
+                configMapper.selectByProviderCodeForUpdate("deepseek");
+        String contentSha256 = renderer.contentSha256(template, draft);
+        ProfileImportPromptRuntime runtime = renderer.render(template, draft);
+        Fixture fixture = fixtureCatalog.load(template.getScene());
+        requirePublishBinding(draft, config, contentSha256, runtime, fixture);
+
+        AiProfileImportPromptVersion frozen = publishFreezeSnapshot(draft, admin);
+        if (versionMapper.freezeDraftIfTestSnapshotMatches(frozen) != 1) {
+            throw versionConflict();
+        }
+        if (templateMapper.publishDraftIfExpected(
+                        templateId,
+                        promptVersionId,
+                        request.getExpectedTemplateVersion())
+                != 1) {
+            throw stateConflict();
+        }
+
+        AiProfileImportPromptAudit audit = publishAudit(
+                template,
+                draft,
+                reason,
+                admin);
+        requireAudit(audit);
+        ProfileImportPromptOperationLogValue operationLogValue =
+                new ProfileImportPromptOperationLogValue(
+                        templateId,
+                        draft.getPromptVersionId(),
+                        draft.getVersionNo(),
+                        template.getScene(),
+                        draft.getContentSha256(),
+                        draft.getTestedRuntimeSha256(),
+                        LIFECYCLE_RELEASED,
+                        reason.name(),
+                        draft.getTestCandidateCount(),
+                        draft.getTestWorkCount());
+        operationLogger.logRequired(operationLogCommand(
+                "prompt-publish",
+                templateId,
+                operationLogValue));
+        return freshTemplateSummary(templateId);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ProfileImportPromptTemplateSummaryRespDTO restore(
             Long operatorId,
             String templateCode,
             Long targetVersionId,
             ProfileImportPromptRestoreReqDTO request) {
         requireStrictRequest(request);
-        ProfileImportPromptReasonCode.requireRestore(request.getReasonCode());
-        requireOperator(operatorId);
-        throw stateConflict();
+        ProfileImportPromptReasonCode reason = ProfileImportPromptReasonCode.requireRestore(
+                request.getReasonCode());
+        if (!StringUtils.hasText(templateCode)
+                || targetVersionId == null
+                || request.getExpectedTemplateVersion() == null) {
+            throw invalid();
+        }
+        AdminAuthenticatedUser admin = requireOperator(operatorId);
+        AiProfileImportPromptTemplate template =
+                templateMapper.selectByCodeForUpdate(templateCode);
+        if (!isUndeleted(template)
+                || template.getTemplateId() == null
+                || !Objects.equals(templateCode, template.getTemplateCode())) {
+            throw stateConflict();
+        }
+        if (!Objects.equals(request.getExpectedTemplateVersion(), template.getVersion())) {
+            throw versionConflict();
+        }
+        AiProfileImportPromptVersion target = versionMapper.selectOwnedForUpdate(
+                template.getTemplateId(), targetVersionId);
+        if (!isOwnedVersion(target, template.getTemplateId(), targetVersionId)
+                || !LIFECYCLE_RELEASED.equals(target.getLifecycleStatus())
+                || Objects.equals(template.getActiveVersionId(), targetVersionId)
+                || !ProfileImportPromptContract.SCHEMA_VERSION.equals(target.getSchemaVersion())
+                || !ProfileImportPromptContract.CONTRACT_VERSION.equals(
+                        target.getContractVersion())) {
+            throw stateConflict();
+        }
+
+        String contentSha256;
+        try {
+            contentSha256 = renderer.contentSha256(template, target);
+        } catch (BizException error) {
+            throw stateConflict();
+        }
+        if (!Objects.equals(contentSha256, target.getContentSha256())) {
+            throw stateConflict();
+        }
+        ProfileImportPromptRuntime runtime;
+        try {
+            runtime = renderer.render(template, target);
+        } catch (BizException error) {
+            throw stateConflict();
+        }
+        requireRestorableRuntime(template, target, runtime);
+
+        if (templateMapper.restoreActiveIfExpected(
+                        template.getTemplateId(),
+                        targetVersionId,
+                        request.getExpectedTemplateVersion())
+                != 1) {
+            throw versionConflict();
+        }
+        requireAudit(restoreAudit(template, target, runtime, reason, admin));
+        ProfileImportPromptOperationLogValue operationLogValue =
+                new ProfileImportPromptOperationLogValue(
+                        template.getTemplateId(),
+                        target.getPromptVersionId(),
+                        target.getVersionNo(),
+                        template.getScene(),
+                        target.getContentSha256(),
+                        runtime.runtimeSha256(),
+                        LIFECYCLE_RELEASED,
+                        reason.name(),
+                        target.getTestCandidateCount(),
+                        target.getTestWorkCount());
+        operationLogger.logRequired(operationLogCommand(
+                "prompt-restore",
+                template.getTemplateId(),
+                operationLogValue));
+        return freshTemplateSummary(template.getTemplateId());
     }
 
     @Override
@@ -666,6 +805,160 @@ public class ProfileImportPromptManagementServiceImpl
         return result;
     }
 
+    private static void requirePublishBinding(
+            AiProfileImportPromptVersion draft,
+            AiProfileImportConfig config,
+            String currentContentSha256,
+            ProfileImportPromptRuntime currentRuntime,
+            Fixture currentFixture) {
+        if (!isReadyConfig(config)) {
+            throw stateConflict();
+        }
+        if (!RESULT_SUCCESS.equals(draft.getTestStatus())) {
+            if (draft.getTestStatus() == null
+                    || TEST_UNTESTED.equals(draft.getTestStatus())
+                    || RESULT_FAILED.equals(draft.getTestStatus())) {
+                throw testRequired();
+            }
+            throw testStale();
+        }
+        if (!StringUtils.hasText(currentContentSha256)
+                || currentRuntime == null
+                || currentFixture == null
+                || !Objects.equals(currentContentSha256, draft.getContentSha256())
+                || !Objects.equals(currentContentSha256, draft.getTestedContentSha256())
+                || !Objects.equals(
+                        currentRuntime.runtimeSha256(), draft.getTestedRuntimeSha256())
+                || !Objects.equals(currentFixture.code(), draft.getTestFixtureCode())
+                || !Objects.equals(currentFixture.version(), draft.getTestFixtureVersion())
+                || !Objects.equals(currentFixture.sha256(), draft.getTestFixtureSha256())
+                || !Objects.equals(config.getModelName(), draft.getTestedModelName())
+                || !Objects.equals(config.getVersion(), draft.getTestedConfigVersion())) {
+            throw testStale();
+        }
+    }
+
+    private static boolean isReadyConfig(AiProfileImportConfig config) {
+        return config != null
+                && config.getConfigId() != null
+                && Integer.valueOf(0).equals(config.getDeleted())
+                && "deepseek".equals(config.getProviderCode())
+                && Boolean.TRUE.equals(config.getEnabled())
+                && StringUtils.hasText(config.getEndpoint())
+                && StringUtils.hasText(config.getModelName())
+                && StringUtils.hasText(config.getSecretConfigCiphertext())
+                && RESULT_SUCCESS.equals(config.getLastTestStatus())
+                && config.getVersion() != null;
+    }
+
+    private static AiProfileImportPromptVersion publishFreezeSnapshot(
+            AiProfileImportPromptVersion draft,
+            AdminAuthenticatedUser admin) {
+        AiProfileImportPromptVersion snapshot = new AiProfileImportPromptVersion();
+        snapshot.setPromptVersionId(draft.getPromptVersionId());
+        snapshot.setTemplateId(draft.getTemplateId());
+        snapshot.setVersion(draft.getVersion());
+        snapshot.setContentSha256(draft.getContentSha256());
+        snapshot.setTestedRuntimeSha256(draft.getTestedRuntimeSha256());
+        snapshot.setTestFixtureCode(draft.getTestFixtureCode());
+        snapshot.setTestFixtureVersion(draft.getTestFixtureVersion());
+        snapshot.setTestFixtureSha256(draft.getTestFixtureSha256());
+        snapshot.setTestedModelName(draft.getTestedModelName());
+        snapshot.setTestedConfigVersion(draft.getTestedConfigVersion());
+        snapshot.setReleasedBy(admin.getAdminUserId());
+        snapshot.setReleasedAt(LocalDateTime.now());
+        return snapshot;
+    }
+
+    private static AiProfileImportPromptAudit publishAudit(
+            AiProfileImportPromptTemplate template,
+            AiProfileImportPromptVersion draft,
+            ProfileImportPromptReasonCode reason,
+            AdminAuthenticatedUser admin) {
+        AiProfileImportPromptAudit audit = new AiProfileImportPromptAudit();
+        audit.setTemplateId(template.getTemplateId());
+        audit.setPromptVersionId(draft.getPromptVersionId());
+        audit.setActionCode("publish");
+        audit.setFromVersionId(template.getActiveVersionId());
+        audit.setToVersionId(draft.getPromptVersionId());
+        audit.setContentSha256(draft.getContentSha256());
+        audit.setRuntimeSha256(draft.getTestedRuntimeSha256());
+        audit.setSchemaVersion(draft.getSchemaVersion());
+        audit.setContractVersion(draft.getContractVersion());
+        audit.setFixtureCode(draft.getTestFixtureCode());
+        audit.setFixtureVersion(draft.getTestFixtureVersion());
+        audit.setFixtureSha256(draft.getTestFixtureSha256());
+        audit.setModelName(draft.getTestedModelName());
+        audit.setConfigVersion(draft.getTestedConfigVersion());
+        audit.setTestOperatorId(draft.getTestedBy());
+        audit.setTestedAt(draft.getTestedAt());
+        audit.setOperatorId(admin.getAdminUserId());
+        audit.setOperatorName(admin.getUserName());
+        audit.setReasonCode(reason.name());
+        audit.setResultStatus(RESULT_SUCCESS);
+        audit.setErrorCode(null);
+        audit.setMessage(null);
+        return audit;
+    }
+
+    private static void requireRestorableRuntime(
+            AiProfileImportPromptTemplate template,
+            AiProfileImportPromptVersion target,
+            ProfileImportPromptRuntime runtime) {
+        if (runtime == null
+                || !Objects.equals(template.getTemplateId(), runtime.templateId())
+                || !Objects.equals(template.getTemplateCode(), runtime.templateCode())
+                || !Objects.equals(template.getScene(), runtime.scene())
+                || !Objects.equals(target.getPromptVersionId(), runtime.promptVersionId())
+                || !Objects.equals(target.getVersionNo(), runtime.versionNo())
+                || !Objects.equals(target.getSchemaVersion(), runtime.schemaVersion())
+                || !Objects.equals(target.getContractVersion(), runtime.contractVersion())
+                || !StringUtils.hasText(runtime.systemPrompt())
+                || !StringUtils.hasText(runtime.repairPrompt())
+                || !StringUtils.hasText(runtime.runtimeSha256())) {
+            throw stateConflict();
+        }
+    }
+
+    private static AiProfileImportPromptAudit restoreAudit(
+            AiProfileImportPromptTemplate template,
+            AiProfileImportPromptVersion target,
+            ProfileImportPromptRuntime runtime,
+            ProfileImportPromptReasonCode reason,
+            AdminAuthenticatedUser admin) {
+        AiProfileImportPromptAudit audit = new AiProfileImportPromptAudit();
+        audit.setTemplateId(template.getTemplateId());
+        audit.setPromptVersionId(target.getPromptVersionId());
+        audit.setActionCode("restore");
+        audit.setFromVersionId(template.getActiveVersionId());
+        audit.setToVersionId(target.getPromptVersionId());
+        audit.setContentSha256(target.getContentSha256());
+        audit.setRuntimeSha256(runtime.runtimeSha256());
+        audit.setSchemaVersion(target.getSchemaVersion());
+        audit.setContractVersion(target.getContractVersion());
+        audit.setOperatorId(admin.getAdminUserId());
+        audit.setOperatorName(admin.getUserName());
+        audit.setReasonCode(reason.name());
+        audit.setResultStatus(RESULT_SUCCESS);
+        audit.setErrorCode(null);
+        audit.setMessage(null);
+        return audit;
+    }
+
+    private static AdminOperationLogCommand operationLogCommand(
+            String operationCode,
+            Long templateId,
+            ProfileImportPromptOperationLogValue value) {
+        return AdminOperationLogCommand.builder()
+                .moduleCode("ai-profile-import")
+                .operationCode(operationCode)
+                .targetType("ai_profile_import_prompt_template")
+                .targetId(templateId)
+                .extraContext(value)
+                .operationResult(1)
+                .build();
+    }
+
     private static void requireStrictRequest(ProfileImportPromptStrictWriteDTO request) {
         if (request == null) {
             throw invalid();
@@ -833,6 +1126,10 @@ public class ProfileImportPromptManagementServiceImpl
 
     private static BizException testStale() {
         return ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.toException();
+    }
+
+    private static BizException testRequired() {
+        return ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_REQUIRED.toException();
     }
 
     private static IllegalStateException affectedRowsFailure() {

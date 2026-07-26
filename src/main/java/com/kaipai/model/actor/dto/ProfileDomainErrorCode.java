@@ -24,6 +24,7 @@ public enum ProfileDomainErrorCode {
     PROFILE_LEGACY_COLLECTION_WRITE_RETIRED(46017, "旧版作品或素材保存方式已停用，请升级后重试"),
     PROFILE_IMPORT_PROMPT_VERSION_CONFLICT(46018, "Prompt 版本已变化，请重新加载后人工合并"),
     PROFILE_IMPORT_PROMPT_INVALID(46019, "Prompt 模板或操作参数无效"),
+    PROFILE_IMPORT_PROMPT_TEST_REQUIRED(46020, "Prompt 发布前需要成功试运行"),
     PROFILE_IMPORT_PROMPT_TEST_STALE(46021, "Prompt 试运行结果已失效，请重新测试"),
     PROFILE_IMPORT_PROMPT_STATE_CONFLICT(46022, "Prompt 模板当前状态不允许该操作");
 

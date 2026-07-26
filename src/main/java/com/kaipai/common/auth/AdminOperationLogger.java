@@ -30,6 +30,16 @@ public class AdminOperationLogger {
     private final ObjectMapper objectMapper;
 
     public void log(AdminOperationLogCommand command) {
+        adminOperationLogService.save(toEntity(command));
+    }
+
+    public void logRequired(AdminOperationLogCommand command) {
+        if (!adminOperationLogService.save(toEntity(command))) {
+            throw new IllegalStateException("required admin operation log was not persisted");
+        }
+    }
+
+    private AdminOperationLog toEntity(AdminOperationLogCommand command) {
         AdminAuthenticatedUser currentAdmin = adminAuthContext.getCurrentAdmin();
         HttpServletRequest request = currentRequest();
 
@@ -50,7 +60,7 @@ public class AdminOperationLogger {
         logEntity.setFailReason(command.getFailReason());
         logEntity.setConfirmToken(command.getConfirmToken());
         logEntity.setConfirmedAt(command.getConfirmedAt());
-        adminOperationLogService.save(logEntity);
+        return logEntity;
     }
 
     private HttpServletRequest currentRequest() {

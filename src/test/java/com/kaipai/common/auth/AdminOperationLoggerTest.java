@@ -16,7 +16,10 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -74,5 +77,57 @@ class AdminOperationLoggerTest {
 
         assertTrue(rawRequestId.length() < AdminOperationLogger.MAX_REQUEST_ID_LENGTH);
         assertEquals(rawRequestId, AdminOperationLogger.normalizeRequestId(rawRequestId));
+    }
+
+    @Test
+    void logRequiredThrowsWhenSaveReturnsFalse() {
+        AdminOperationLogger logger = logger();
+        when(adminOperationLogService.save(any(AdminOperationLog.class))).thenReturn(false);
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> logger.logRequired(sanitizedCommand()));
+
+        assertEquals("required admin operation log was not persisted", error.getMessage());
+        verify(adminOperationLogService).save(any(AdminOperationLog.class));
+    }
+
+    @Test
+    void logRequiredPropagatesServiceFailureUnchanged() {
+        AdminOperationLogger logger = logger();
+        IllegalStateException failure = new IllegalStateException("db unavailable");
+        when(adminOperationLogService.save(any(AdminOperationLog.class))).thenThrow(failure);
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> logger.logRequired(sanitizedCommand()));
+
+        assertSame(failure, error);
+    }
+
+    @Test
+    void existingLogStillIgnoresFalseSaveResult() {
+        AdminOperationLogger logger = logger();
+        when(adminOperationLogService.save(any(AdminOperationLog.class))).thenReturn(false);
+
+        assertDoesNotThrow(() -> logger.log(sanitizedCommand()));
+
+        verify(adminOperationLogService).save(any(AdminOperationLog.class));
+    }
+
+    private AdminOperationLogger logger() {
+        return new AdminOperationLogger(
+                adminOperationLogService, adminAuthContext, new ObjectMapper());
+    }
+
+    private static AdminOperationLogCommand sanitizedCommand() {
+        return AdminOperationLogCommand.builder()
+                .moduleCode("ai-profile-import")
+                .operationCode("prompt-publish")
+                .targetType("ai_profile_import_prompt_template")
+                .targetId(11L)
+                .operationResult(1)
+                .extraContext(Set.of("sanitized"))
+                .build();
     }
 }

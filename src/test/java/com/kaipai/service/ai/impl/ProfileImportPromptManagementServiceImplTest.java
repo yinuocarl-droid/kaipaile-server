@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.auth.AdminAuthContext;
 import com.kaipai.common.auth.AdminAuthenticatedUser;
+import com.kaipai.common.auth.AdminOperationLogCommand;
+import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.mapper.ai.AiProfileImportPromptAuditMapper;
@@ -56,6 +59,8 @@ import com.kaipai.service.ai.ProfileImportPromptTester;
 import com.kaipai.service.ai.ProfileImportRuntimeConfig;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog.Fixture;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptContract;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptOperationLogValue;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptRuntime;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptRenderer;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptReasonCode;
@@ -81,6 +86,8 @@ import org.apache.ibatis.annotations.Update;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -101,6 +108,52 @@ class ProfileImportPromptManagementServiceImplTest {
     private static final String INVALID_MESSAGE =
             "Prompt \u6a21\u677f\u6216\u64cd\u4f5c\u53c2\u6570\u65e0\u6548";
 
+    private enum PublishBindingDrift {
+        CURRENT_CONTENT,
+        TESTED_CONTENT,
+        RUNTIME,
+        FIXTURE_CODE,
+        FIXTURE_VERSION,
+        FIXTURE_HASH,
+        MODEL,
+        CONFIG_VERSION
+    }
+
+    private enum PublishTestGate {
+        UNTESTED,
+        FAILED
+    }
+
+    private enum PublishConfigViolation {
+        NULL_ROW,
+        CONFIG_ID_MISSING,
+        DELETED,
+        WRONG_PROVIDER,
+        DISABLED,
+        ENDPOINT_MISSING,
+        MODEL_MISSING,
+        SECRET_MISSING,
+        TEST_NOT_SUCCESSFUL,
+        VERSION_MISSING
+    }
+
+    private enum RestoreTargetViolation {
+        FOREIGN_OWNER,
+        DRAFT,
+        ABANDONED,
+        DELETED
+    }
+
+    private enum RestoreContractViolation {
+        SCHEMA,
+        CONTRACT
+    }
+
+    private enum RestoreRendererFailureStage {
+        CONTENT_HASH,
+        RENDER
+    }
+
     @Mock
     private AiProfileImportPromptTemplateMapper templateMapper;
 
@@ -118,6 +171,9 @@ class ProfileImportPromptManagementServiceImplTest {
 
     @Mock
     private AdminAuthContext adminAuthContext;
+
+    @Mock
+    private AdminOperationLogger operationLogger;
 
     @Mock
     private ProfileImportPromptTester tester;
@@ -145,6 +201,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 fixtureCatalog,
                 configService,
                 adminAuthContext,
+                operationLogger,
                 transactionTemplate);
     }
 
@@ -289,6 +346,7 @@ class ProfileImportPromptManagementServiceImplTest {
                     ProfileImportPromptFixtureCatalog.class,
                     ProfileImportConfigService.class,
                     AdminAuthContext.class,
+                    AdminOperationLogger.class,
                     TransactionTemplate.class
                 },
                 ProfileImportPromptManagementServiceImpl.class
@@ -309,7 +367,18 @@ class ProfileImportPromptManagementServiceImplTest {
                         "abandonDraft",
                         Long.class,
                         Long.class,
-                        ProfileImportPromptVersionActionReqDTO.class))) {
+                        ProfileImportPromptVersionActionReqDTO.class),
+                ProfileImportPromptManagementServiceImpl.class.getDeclaredMethod(
+                        "publish",
+                        Long.class,
+                        Long.class,
+                        ProfileImportPromptVersionActionReqDTO.class),
+                ProfileImportPromptManagementServiceImpl.class.getDeclaredMethod(
+                        "restore",
+                        Long.class,
+                        String.class,
+                        Long.class,
+                        ProfileImportPromptRestoreReqDTO.class))) {
             Transactional transactional = method.getAnnotation(Transactional.class);
             assertNotNull(transactional, method.getName());
             assertArrayEquals(new Class<?>[] {Exception.class}, transactional.rollbackFor());
@@ -1155,24 +1224,614 @@ class ProfileImportPromptManagementServiceImplTest {
     }
 
     @Test
-    void deferredPublishAndRestoreValidateReasonAndOperatorThenFailClosedWithoutMapperCalls() {
-        authenticate(73L, "Future Admin");
+    void promptOperationLogValueHasOnlyTheTenSanitizedFields() {
+        assertTrue(ProfileImportPromptOperationLogValue.class.isRecord());
+        assertArrayEquals(
+                new String[] {
+                    "templateId",
+                    "promptVersionId",
+                    "versionNo",
+                    "scene",
+                    "contentSha256",
+                    "runtimeSha256",
+                    "lifecycleStatus",
+                    "reasonCode",
+                    "candidateCount",
+                    "workCount"
+                },
+                Arrays.stream(ProfileImportPromptOperationLogValue.class.getRecordComponents())
+                        .map(component -> component.getName())
+                        .toArray(String[]::new));
+        assertArrayEquals(
+                new Class<?>[] {
+                    Long.class,
+                    Long.class,
+                    Integer.class,
+                    String.class,
+                    String.class,
+                    String.class,
+                    String.class,
+                    String.class,
+                    Integer.class,
+                    Integer.class
+                },
+                Arrays.stream(ProfileImportPromptOperationLogValue.class.getRecordComponents())
+                        .map(component -> component.getType())
+                        .toArray(Class<?>[]::new));
+    }
+
+    @Test
+    void operationLoggingHelpersNeverAcceptBodyBearingEntities() {
+        for (Method method : ProfileImportPromptManagementServiceImpl.class.getDeclaredMethods()) {
+            if (!method.getName().toLowerCase().contains("operationlog")) {
+                continue;
+            }
+            for (Class<?> parameterType : method.getParameterTypes()) {
+                assertFalse(
+                        parameterType == AiProfileImportPromptTemplate.class
+                                || parameterType == AiProfileImportPromptVersion.class,
+                        method.getName() + " accepts " + parameterType.getSimpleName());
+            }
+        }
+    }
+
+    @Test
+    void publishLocksInOrderFreezesExactBindingAndWritesOnlySanitizedAudits() {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        stubSuccessfulPublishWritesAndSummary(draft);
+
+        ProfileImportPromptTemplateSummaryRespDTO result = service.publish(
+                73L,
+                101L,
+                actionReq("QUALITY_ADJUSTMENT", 4, 7));
+
+        assertEquals(101L, result.getActiveVersionId());
+        assertNull(result.getDraftVersionId());
+        InOrder order = Mockito.inOrder(
+                adminAuthContext,
+                versionMapper,
+                templateMapper,
+                configMapper,
+                renderer,
+                fixtureCatalog,
+                auditMapper,
+                operationLogger);
+        order.verify(adminAuthContext).requireCurrentAdmin();
+        order.verify(versionMapper).selectById(101L);
+        order.verify(templateMapper).selectByIdForUpdate(11L);
+        order.verify(versionMapper).selectOwnedForUpdate(11L, 101L);
+        order.verify(configMapper).selectByProviderCodeForUpdate("deepseek");
+        order.verify(renderer).contentSha256(any(), any());
+        order.verify(renderer).render(any(), any());
+        order.verify(fixtureCatalog).load("full_profile");
+        order.verify(versionMapper).freezeDraftIfTestSnapshotMatches(any());
+        order.verify(templateMapper).publishDraftIfExpected(11L, 101L, 4);
+        order.verify(auditMapper).insertAudit(any());
+        order.verify(operationLogger).logRequired(any());
+        order.verify(templateMapper).selectById(11L);
+        order.verify(versionMapper).selectSummariesByTemplateId(11L);
+
+        ArgumentCaptor<AiProfileImportPromptVersion> freezeCaptor =
+                ArgumentCaptor.forClass(AiProfileImportPromptVersion.class);
+        verify(versionMapper).freezeDraftIfTestSnapshotMatches(freezeCaptor.capture());
+        assertExactFrozenPublishSnapshot(freezeCaptor.getValue());
+
+        ArgumentCaptor<AiProfileImportPromptAudit> auditCaptor =
+                ArgumentCaptor.forClass(AiProfileImportPromptAudit.class);
+        verify(auditMapper).insertAudit(auditCaptor.capture());
+        assertExactPublishAudit(auditCaptor.getValue());
+
+        ArgumentCaptor<AdminOperationLogCommand> commandCaptor =
+                ArgumentCaptor.forClass(AdminOperationLogCommand.class);
+        verify(operationLogger).logRequired(commandCaptor.capture());
+        assertSanitizedOperationCommand(
+                commandCaptor.getValue(), "prompt-publish", "QUALITY_ADJUSTMENT", "released");
+
+        draft.setTestedRuntimeSha256("later-retest-runtime");
+        draft.setTestCandidateCount(999);
+        assertEquals("runtime-hash", auditCaptor.getValue().getRuntimeSha256());
+        assertEquals(17L, auditCaptor.getValue().getTestOperatorId());
+    }
+
+    @ParameterizedTest
+    @EnumSource(PublishTestGate.class)
+    void publishRequiresASuccessfulTestBeforeAnyWrite(PublishTestGate gate) {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        draft.setTestStatus(gate == PublishTestGate.UNTESTED ? "untested" : "failed");
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+
+        assertTestRequired(assertThrows(
+                BizException.class,
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 7))));
+
+        verify(versionMapper, never()).freezeDraftIfTestSnapshotMatches(any());
+        verify(templateMapper, never()).publishDraftIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger);
+    }
+
+    @ParameterizedTest
+    @EnumSource(PublishBindingDrift.class)
+    void publishRejectsEveryBindingDriftAsStale(PublishBindingDrift drift) {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        AiProfileImportConfig config = readyConfig(19);
+        String currentContent = "content-hash";
+        String currentRuntime = "runtime-hash";
+        Fixture currentFixture = fixture();
+        switch (drift) {
+            case CURRENT_CONTENT -> currentContent = "changed-content-hash";
+            case TESTED_CONTENT -> draft.setTestedContentSha256("old-content-hash");
+            case RUNTIME -> draft.setTestedRuntimeSha256("old-runtime-hash");
+            case FIXTURE_CODE -> draft.setTestFixtureCode("old-fixture-code");
+            case FIXTURE_VERSION -> draft.setTestFixtureVersion("old-fixture-version");
+            case FIXTURE_HASH -> draft.setTestFixtureSha256("old-fixture-hash");
+            case MODEL -> draft.setTestedModelName("old-model");
+            case CONFIG_VERSION -> draft.setTestedConfigVersion(18);
+        }
+        stubPublishReadPath(draft, config, currentContent, currentRuntime, currentFixture);
+
+        assertTestStale(assertThrows(
+                BizException.class,
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 7))));
+
+        verify(versionMapper, never()).freezeDraftIfTestSnapshotMatches(any());
+        verify(templateMapper, never()).publishDraftIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger);
+    }
+
+    @ParameterizedTest
+    @EnumSource(PublishConfigViolation.class)
+    void publishFailsClosedForEveryNonReadyConfigState(
+            PublishConfigViolation violation) {
+        AiProfileImportConfig config = readyConfig(19);
+        switch (violation) {
+            case NULL_ROW -> config = null;
+            case CONFIG_ID_MISSING -> config.setConfigId(null);
+            case DELETED -> config.setDeleted(1);
+            case WRONG_PROVIDER -> config.setProviderCode("other");
+            case DISABLED -> config.setEnabled(false);
+            case ENDPOINT_MISSING -> config.setEndpoint(" ");
+            case MODEL_MISSING -> config.setModelName(" ");
+            case SECRET_MISSING -> config.setSecretConfigCiphertext(" ");
+            case TEST_NOT_SUCCESSFUL -> config.setLastTestStatus("failed");
+            case VERSION_MISSING -> config.setVersion(null);
+        }
+        stubPublishReadPath(
+                successfullyTestedDraft(),
+                config,
+                "content-hash",
+                "runtime-hash",
+                fixture());
 
         assertStateConflict(assertThrows(
                 BizException.class,
                 () -> service.publish(
                         73L,
                         101L,
-                        actionReq("QUALITY_ADJUSTMENT", 4, 2))));
-        ProfileImportPromptRestoreReqDTO restore = new ProfileImportPromptRestoreReqDTO();
-        restore.setReasonCode("INCIDENT_ROLLBACK");
-        restore.setExpectedTemplateVersion(4);
+                        actionReq("CONFIG_ALIGNMENT", 4, 7))));
+
+        verify(versionMapper, never()).freezeDraftIfTestSnapshotMatches(any());
+        verify(templateMapper, never()).publishDraftIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger);
+    }
+
+    @Test
+    void publishRejectsStaleExpectedVersionBeforeConfigLock() {
+        authenticate(73L, "Publish Admin");
+        AiProfileImportPromptTemplate template =
+                template(11L, "full_profile", 91L, 101L, 4, 0);
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        when(versionMapper.selectById(101L)).thenReturn(versionLocator(11L, 101L));
+        when(templateMapper.selectByIdForUpdate(11L)).thenReturn(template);
+        when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(draft);
+
+        assertVersionConflict(assertThrows(
+                BizException.class,
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 6))));
+
+        verifyNoInteractions(configMapper, renderer, fixtureCatalog, auditMapper, operationLogger);
+    }
+
+    @Test
+    void publishFreezeAffectedRowsZeroStopsBeforePointerMove() {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(0);
+
+        assertVersionConflict(assertThrows(
+                BizException.class,
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 7))));
+
+        verify(templateMapper, never()).publishDraftIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger);
+    }
+
+    @Test
+    void anotherPublisherWinningThePointerUpdateFailsClosedBeforeAudits() {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(1);
+        when(templateMapper.publishDraftIfExpected(11L, 101L, 4)).thenReturn(0);
+
         assertStateConflict(assertThrows(
                 BizException.class,
-                () -> service.restore(73L, "full_profile", 91L, restore)));
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 7))));
 
-        verify(adminAuthContext, Mockito.times(2)).requireCurrentAdmin();
-        verifyNoInteractions(templateMapper, versionMapper, auditMapper, renderer);
+        verifyNoInteractions(auditMapper, operationLogger);
+    }
+
+    @Test
+    void publishRequiresSpecializedAuditAffectedRowsOne() {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(1);
+        when(templateMapper.publishDraftIfExpected(11L, 101L, 4)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.publish(
+                        73L,
+                        101L,
+                        actionReq("QUALITY_ADJUSTMENT", 4, 7)));
+
+        verifyNoInteractions(operationLogger);
+    }
+
+    @Test
+    void publishPropagatesSpecializedAuditFailureBeforeGlobalLog() {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(1);
+        when(templateMapper.publishDraftIfExpected(11L, 101L, 4)).thenReturn(1);
+        IllegalStateException failure = new IllegalStateException("audit unavailable");
+        when(auditMapper.insertAudit(any())).thenThrow(failure);
+
+        assertSame(
+                failure,
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> service.publish(
+                                73L,
+                                101L,
+                                actionReq("QUALITY_ADJUSTMENT", 4, 7))));
+
+        verifyNoInteractions(operationLogger);
+    }
+
+    @Test
+    void publishPropagatesRequiredGlobalLogFalseFailureBeforeResponse() {
+        assertRequiredPublishLogFailure(
+                new IllegalStateException("required admin operation log was not persisted"));
+    }
+
+    @Test
+    void publishPropagatesRequiredGlobalLogServiceFailureBeforeResponse() {
+        assertRequiredPublishLogFailure(new IllegalStateException("global audit unavailable"));
+    }
+
+    @Test
+    void restoreLocksTemplateThenTargetMovesOnlyActivePointerAndWritesSanitizedAudits() {
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        stubRestoreReadPath(target);
+        when(templateMapper.restoreActiveIfExpected(11L, 101L, 8)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(1);
+        stubSuccessfulRestoreSummary(target);
+
+        ProfileImportPromptTemplateSummaryRespDTO result = service.restore(
+                73L,
+                "full_profile",
+                101L,
+                restoreReq("INCIDENT_ROLLBACK", 8));
+
+        assertEquals(101L, result.getActiveVersionId());
+        assertEquals(404L, result.getDraftVersionId());
+        InOrder order = Mockito.inOrder(
+                adminAuthContext,
+                templateMapper,
+                versionMapper,
+                renderer,
+                auditMapper,
+                operationLogger);
+        order.verify(adminAuthContext).requireCurrentAdmin();
+        order.verify(templateMapper).selectByCodeForUpdate("full_profile");
+        order.verify(versionMapper).selectOwnedForUpdate(11L, 101L);
+        order.verify(renderer).contentSha256(any(), any());
+        order.verify(renderer).render(any(), any());
+        order.verify(templateMapper).restoreActiveIfExpected(11L, 101L, 8);
+        order.verify(auditMapper).insertAudit(any());
+        order.verify(operationLogger).logRequired(any());
+        order.verify(templateMapper).selectById(11L);
+        order.verify(versionMapper).selectSummariesByTemplateId(11L);
+
+        ArgumentCaptor<AiProfileImportPromptAudit> auditCaptor =
+                ArgumentCaptor.forClass(AiProfileImportPromptAudit.class);
+        verify(auditMapper).insertAudit(auditCaptor.capture());
+        assertExactRestoreAudit(auditCaptor.getValue());
+        ArgumentCaptor<AdminOperationLogCommand> commandCaptor =
+                ArgumentCaptor.forClass(AdminOperationLogCommand.class);
+        verify(operationLogger).logRequired(commandCaptor.capture());
+        assertSanitizedOperationCommand(
+                commandCaptor.getValue(),
+                "prompt-restore",
+                "INCIDENT_ROLLBACK",
+                "released");
+        verify(templateMapper, never()).clearDraftIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(configMapper);
+    }
+
+    @Test
+    void restoreRejectsMissingRouteOrExpectedVersionBeforeAuthentication() {
+        assertPromptInvalid(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L, null, 101L, restoreReq("INCIDENT_ROLLBACK", 8))));
+        assertPromptInvalid(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L, " ", 101L, restoreReq("INCIDENT_ROLLBACK", 8))));
+        assertPromptInvalid(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L, "full_profile", null, restoreReq("INCIDENT_ROLLBACK", 8))));
+        assertPromptInvalid(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", null))));
+
+        verifyNoInteractions(
+                adminAuthContext,
+                templateMapper,
+                versionMapper,
+                renderer,
+                auditMapper,
+                operationLogger,
+                configMapper);
+    }
+
+    @Test
+    void restoreRejectsStaleExpectedTemplateVersionBeforeTargetLock() {
+        authenticate(73L, "Restore Admin");
+        when(templateMapper.selectByCodeForUpdate("full_profile"))
+                .thenReturn(restoreTemplate());
+
+        assertVersionConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("QUALITY_REGRESSION", 7))));
+
+        verifyNoInteractions(versionMapper, renderer, auditMapper, operationLogger, configMapper);
+    }
+
+    @Test
+    void restoreRejectsCurrentActiveAfterLockingTheTarget() {
+        authenticate(73L, "Restore Admin");
+        AiProfileImportPromptTemplate template =
+                template(11L, "full_profile", 101L, 404L, 8, 0);
+        when(templateMapper.selectByCodeForUpdate("full_profile")).thenReturn(template);
+        when(versionMapper.selectOwnedForUpdate(11L, 101L))
+                .thenReturn(releasedRestoreTarget());
+
+        assertStateConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verifyNoInteractions(renderer, auditMapper, operationLogger, configMapper);
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+    }
+
+    @ParameterizedTest
+    @EnumSource(RestoreTargetViolation.class)
+    void restoreRejectsInvalidTargetOwnershipLifecycleOrDeletion(
+            RestoreTargetViolation violation) {
+        authenticate(73L, "Restore Admin");
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        switch (violation) {
+            case FOREIGN_OWNER -> target.setTemplateId(12L);
+            case DRAFT -> target.setLifecycleStatus("draft");
+            case ABANDONED -> target.setLifecycleStatus("abandoned");
+            case DELETED -> target.setDeleted(1);
+        }
+        when(templateMapper.selectByCodeForUpdate("full_profile"))
+                .thenReturn(restoreTemplate());
+        when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(target);
+
+        assertStateConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verifyNoInteractions(renderer, auditMapper, operationLogger, configMapper);
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void restoreRejectsDamagedContentHashBeforeRenderAndPointerWrite() {
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        stubRestoreLocks(target);
+        when(renderer.contentSha256(any(), any())).thenReturn("recomputed-hash");
+
+        assertStateConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verify(renderer, never()).render(any(), any());
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger, configMapper);
+    }
+
+    @ParameterizedTest
+    @EnumSource(RestoreContractViolation.class)
+    void restoreRejectsUnsupportedSchemaOrContractBeforeRendering(
+            RestoreContractViolation violation) {
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        if (violation == RestoreContractViolation.SCHEMA) {
+            target.setSchemaVersion("profile-import-json-v0");
+        } else {
+            target.setContractVersion("profile-import-contract-v0");
+        }
+        stubRestoreLocks(target);
+
+        assertStateConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("QUALITY_REGRESSION", 8))));
+
+        verifyNoInteractions(renderer, auditMapper, operationLogger, configMapper);
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void restoreMapsRendererRejectionToStableStateConflict() {
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        stubRestoreLocks(target);
+        when(renderer.contentSha256(any(), any())).thenReturn("content-hash");
+        when(renderer.render(any(), any()))
+                .thenThrow(ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_INVALID.toException());
+
+        assertStateConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger, configMapper);
+    }
+
+    @ParameterizedTest
+    @EnumSource(RestoreRendererFailureStage.class)
+    void restorePropagatesUnexpectedRendererFailureWithoutWrites(
+            RestoreRendererFailureStage stage) {
+        AiProfileImportPromptVersion target = releasedRestoreTarget();
+        stubRestoreLocks(target);
+        IllegalStateException failure = new IllegalStateException("renderer invariant failed");
+        if (stage == RestoreRendererFailureStage.CONTENT_HASH) {
+            when(renderer.contentSha256(any(), any())).thenThrow(failure);
+        } else {
+            when(renderer.contentSha256(any(), any())).thenReturn("content-hash");
+            when(renderer.render(any(), any())).thenThrow(failure);
+        }
+
+        assertSame(
+                failure,
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> service.restore(
+                                73L,
+                                "full_profile",
+                                101L,
+                                restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verify(templateMapper, never()).restoreActiveIfExpected(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(auditMapper, operationLogger, configMapper);
+    }
+
+    @Test
+    void restorePointerAffectedRowsZeroIsVersionConflictBeforeAudits() {
+        stubRestoreReadPath(releasedRestoreTarget());
+        when(templateMapper.restoreActiveIfExpected(11L, 101L, 8)).thenReturn(0);
+
+        assertVersionConflict(assertThrows(
+                BizException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verifyNoInteractions(auditMapper, operationLogger, configMapper);
+    }
+
+    @Test
+    void restoreRequiresSpecializedAuditAffectedRowsOne() {
+        stubRestoreReadPath(releasedRestoreTarget());
+        when(templateMapper.restoreActiveIfExpected(11L, 101L, 8)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.restore(
+                        73L,
+                        "full_profile",
+                        101L,
+                        restoreReq("INCIDENT_ROLLBACK", 8)));
+
+        verifyNoInteractions(operationLogger, configMapper);
+    }
+
+    @Test
+    void restorePropagatesSpecializedAuditFailureBeforeGlobalLog() {
+        stubRestoreReadPath(releasedRestoreTarget());
+        when(templateMapper.restoreActiveIfExpected(11L, 101L, 8)).thenReturn(1);
+        IllegalStateException failure = new IllegalStateException("audit unavailable");
+        when(auditMapper.insertAudit(any())).thenThrow(failure);
+
+        assertSame(
+                failure,
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> service.restore(
+                                73L,
+                                "full_profile",
+                                101L,
+                                restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verifyNoInteractions(operationLogger, configMapper);
+    }
+
+    @Test
+    void restorePropagatesRequiredGlobalLogFalseFailureBeforeResponse() {
+        assertRequiredRestoreLogFailure(
+                new IllegalStateException("required admin operation log was not persisted"));
+    }
+
+    @Test
+    void restorePropagatesRequiredGlobalLogServiceFailureBeforeResponse() {
+        assertRequiredRestoreLogFailure(new IllegalStateException("global audit unavailable"));
     }
 
     @Test
@@ -1354,6 +2013,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 fixtureCatalog,
                 configService,
                 adminAuthContext,
+                operationLogger,
                 transactionTemplate);
         service = new ProfileImportPromptManagementServiceImpl(
                 templateMapper,
@@ -1365,6 +2025,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 fixtureCatalog,
                 configService,
                 adminAuthContext,
+                operationLogger,
                 transactionTemplate);
         stubTestWriteback(testResult("success", null), 5, "content-hash", 18);
 
@@ -1394,6 +2055,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 fixtureCatalog,
                 configService,
                 adminAuthContext,
+                operationLogger,
                 transactionTemplate);
         service = new ProfileImportPromptManagementServiceImpl(
                 templateMapper,
@@ -1405,6 +2067,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 fixtureCatalog,
                 configService,
                 adminAuthContext,
+                operationLogger,
                 transactionTemplate);
         stubTestWriteback(testResult("success", null), 5, "content-hash", 17);
         when(auditMapper.insertAudit(any())).thenReturn(0);
@@ -1613,6 +2276,13 @@ class ProfileImportPromptManagementServiceImplTest {
                 ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_VERSION_CONFLICT.message());
         assertEquals(46019, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_INVALID.code());
         assertEquals(INVALID_MESSAGE, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_INVALID.message());
+        assertEquals(46020, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_REQUIRED.code());
+        assertEquals(
+                "PROFILE_IMPORT_PROMPT_TEST_REQUIRED",
+                ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_REQUIRED.errorCode());
+        assertEquals(
+                "Prompt 发布前需要成功试运行",
+                ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_REQUIRED.message());
         assertEquals(46021, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.code());
         assertEquals(
                 "PROFILE_IMPORT_PROMPT_TEST_STALE",
@@ -1627,8 +2297,6 @@ class ProfileImportPromptManagementServiceImplTest {
         assertEquals(
                 "Prompt \u6a21\u677f\u5f53\u524d\u72b6\u6001\u4e0d\u5141\u8bb8\u8be5\u64cd\u4f5c",
                 ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_STATE_CONFLICT.message());
-        assertTrue(Arrays.stream(ProfileDomainErrorCode.values())
-                .noneMatch(code -> code.code() == 46020));
     }
 
     @Test
@@ -1834,6 +2502,256 @@ class ProfileImportPromptManagementServiceImplTest {
                 Long.class,
                 ProfileImportPromptRestoreReqDTO.class);
         assertListReturn(method("audits"), ProfileImportPromptAuditRespDTO.class);
+    }
+
+    private void stubPublishReadPath(
+            AiProfileImportPromptVersion draft,
+            AiProfileImportConfig config,
+            String currentContentSha256,
+            String currentRuntimeSha256,
+            Fixture currentFixture) {
+        authenticate(73L, "Publish Admin");
+        AiProfileImportPromptTemplate template =
+                template(11L, "full_profile", 91L, 101L, 4, 0);
+        when(versionMapper.selectById(101L)).thenReturn(versionLocator(11L, 101L));
+        when(templateMapper.selectByIdForUpdate(11L)).thenReturn(template);
+        when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(draft);
+        when(configMapper.selectByProviderCodeForUpdate("deepseek")).thenReturn(config);
+        when(renderer.contentSha256(template, draft)).thenReturn(currentContentSha256);
+        when(renderer.render(template, draft)).thenReturn(promptRuntime(currentRuntimeSha256));
+        when(fixtureCatalog.load("full_profile")).thenReturn(currentFixture);
+    }
+
+    private void stubSuccessfulPublishWritesAndSummary(
+            AiProfileImportPromptVersion draft) {
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(1);
+        when(templateMapper.publishDraftIfExpected(11L, 101L, 4)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(1);
+        AiProfileImportPromptTemplate fresh =
+                template(11L, "full_profile", 101L, null, 5, 0);
+        AiProfileImportPromptVersion released = successfullyTestedDraft();
+        released.setLifecycleStatus("released");
+        released.setVersion(8);
+        released.setReleasedBy(73L);
+        released.setReleasedAt(LocalDateTime.of(2026, 7, 26, 12, 1));
+        when(templateMapper.selectById(11L)).thenReturn(fresh);
+        when(versionMapper.selectSummariesByTemplateId(11L)).thenReturn(List.of(released));
+    }
+
+    private void assertRequiredPublishLogFailure(IllegalStateException failure) {
+        AiProfileImportPromptVersion draft = successfullyTestedDraft();
+        stubPublishReadPath(
+                draft, readyConfig(19), "content-hash", "runtime-hash", fixture());
+        when(versionMapper.freezeDraftIfTestSnapshotMatches(any())).thenReturn(1);
+        when(templateMapper.publishDraftIfExpected(11L, 101L, 4)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(1);
+        doThrow(failure).when(operationLogger).logRequired(any());
+
+        assertSame(
+                failure,
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> service.publish(
+                                73L,
+                                101L,
+                                actionReq("QUALITY_ADJUSTMENT", 4, 7))));
+
+        verify(templateMapper, never()).selectById(11L);
+        verify(versionMapper, never()).selectSummariesByTemplateId(11L);
+    }
+
+    private void stubRestoreLocks(AiProfileImportPromptVersion target) {
+        authenticate(73L, "Restore Admin");
+        when(templateMapper.selectByCodeForUpdate("full_profile"))
+                .thenReturn(restoreTemplate());
+        when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(target);
+    }
+
+    private void stubRestoreReadPath(AiProfileImportPromptVersion target) {
+        stubRestoreLocks(target);
+        when(renderer.contentSha256(any(), any())).thenReturn("content-hash");
+        when(renderer.render(any(), any())).thenReturn(promptRuntime("runtime-hash"));
+    }
+
+    private void stubSuccessfulRestoreSummary(AiProfileImportPromptVersion target) {
+        AiProfileImportPromptTemplate fresh =
+                template(11L, "full_profile", 101L, 404L, 9, 0);
+        AiProfileImportPromptVersion draft =
+                governedVersion(404L, 11L, 5, "draft", 2);
+        draft.setContentSha256("draft-hash");
+        draft.setTestStatus("untested");
+        when(templateMapper.selectById(11L)).thenReturn(fresh);
+        when(versionMapper.selectSummariesByTemplateId(11L))
+                .thenReturn(List.of(target, draft));
+    }
+
+    private void assertRequiredRestoreLogFailure(IllegalStateException failure) {
+        stubRestoreReadPath(releasedRestoreTarget());
+        when(templateMapper.restoreActiveIfExpected(11L, 101L, 8)).thenReturn(1);
+        when(auditMapper.insertAudit(any())).thenReturn(1);
+        doThrow(failure).when(operationLogger).logRequired(any());
+
+        assertSame(
+                failure,
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> service.restore(
+                                73L,
+                                "full_profile",
+                                101L,
+                                restoreReq("INCIDENT_ROLLBACK", 8))));
+
+        verify(templateMapper, never()).selectById(11L);
+        verify(versionMapper, never()).selectSummariesByTemplateId(11L);
+        verifyNoInteractions(configMapper);
+    }
+
+    private static AiProfileImportPromptTemplate restoreTemplate() {
+        return template(11L, "full_profile", 91L, 404L, 8, 0);
+    }
+
+    private static AiProfileImportPromptVersion releasedRestoreTarget() {
+        AiProfileImportPromptVersion target = successfullyTestedDraft();
+        target.setLifecycleStatus("released");
+        target.setVersion(5);
+        target.setReleasedBy(61L);
+        target.setReleasedAt(LocalDateTime.of(2026, 7, 20, 10, 0));
+        return target;
+    }
+
+    private static AiProfileImportPromptVersion successfullyTestedDraft() {
+        AiProfileImportPromptVersion draft =
+                governedVersion(101L, 11L, 4, "draft", 7);
+        draft.setSchemaVersion(ProfileImportPromptContract.SCHEMA_VERSION);
+        draft.setContractVersion(ProfileImportPromptContract.CONTRACT_VERSION);
+        draft.setContentSha256("content-hash");
+        draft.setTestStatus("success");
+        draft.setTestedContentSha256("content-hash");
+        draft.setTestedRuntimeSha256("runtime-hash");
+        draft.setTestFixtureCode("full-profile-v1");
+        draft.setTestFixtureVersion("1");
+        draft.setTestFixtureSha256("fixture-hash");
+        draft.setTestedModelName("deepseek-chat");
+        draft.setTestedConfigVersion(19);
+        draft.setTestCandidateCount(2);
+        draft.setTestWorkCount(1);
+        draft.setTestElapsedMs(37L);
+        draft.setTestErrorCode(null);
+        draft.setTestedBy(17L);
+        draft.setTestedAt(LocalDateTime.of(2026, 7, 26, 11, 30));
+        return draft;
+    }
+
+    private static AiProfileImportConfig readyConfig(Integer version) {
+        AiProfileImportConfig config = configEntity(version);
+        config.setEnabled(true);
+        config.setEndpoint("https://api.deepseek.com/chat/completions");
+        config.setSecretConfigCiphertext("encrypted-secret");
+        config.setLastTestStatus("success");
+        config.setLastTestAt(LocalDateTime.of(2026, 7, 26, 11, 0));
+        return config;
+    }
+
+    private static void assertExactFrozenPublishSnapshot(
+            AiProfileImportPromptVersion snapshot) {
+        assertEquals(101L, snapshot.getPromptVersionId());
+        assertEquals(11L, snapshot.getTemplateId());
+        assertEquals(7, snapshot.getVersion());
+        assertEquals("content-hash", snapshot.getContentSha256());
+        assertEquals("runtime-hash", snapshot.getTestedRuntimeSha256());
+        assertEquals("full-profile-v1", snapshot.getTestFixtureCode());
+        assertEquals("1", snapshot.getTestFixtureVersion());
+        assertEquals("fixture-hash", snapshot.getTestFixtureSha256());
+        assertEquals("deepseek-chat", snapshot.getTestedModelName());
+        assertEquals(19, snapshot.getTestedConfigVersion());
+        assertEquals(73L, snapshot.getReleasedBy());
+        assertNotNull(snapshot.getReleasedAt());
+    }
+
+    private static void assertExactPublishAudit(AiProfileImportPromptAudit audit) {
+        assertEquals(11L, audit.getTemplateId());
+        assertEquals(101L, audit.getPromptVersionId());
+        assertEquals("publish", audit.getActionCode());
+        assertEquals(91L, audit.getFromVersionId());
+        assertEquals(101L, audit.getToVersionId());
+        assertEquals("content-hash", audit.getContentSha256());
+        assertEquals("runtime-hash", audit.getRuntimeSha256());
+        assertEquals(ProfileImportPromptContract.SCHEMA_VERSION, audit.getSchemaVersion());
+        assertEquals(ProfileImportPromptContract.CONTRACT_VERSION, audit.getContractVersion());
+        assertEquals("full-profile-v1", audit.getFixtureCode());
+        assertEquals("1", audit.getFixtureVersion());
+        assertEquals("fixture-hash", audit.getFixtureSha256());
+        assertEquals("deepseek-chat", audit.getModelName());
+        assertEquals(19, audit.getConfigVersion());
+        assertEquals(17L, audit.getTestOperatorId());
+        assertEquals(LocalDateTime.of(2026, 7, 26, 11, 30), audit.getTestedAt());
+        assertEquals(73L, audit.getOperatorId());
+        assertEquals("Publish Admin", audit.getOperatorName());
+        assertEquals("QUALITY_ADJUSTMENT", audit.getReasonCode());
+        assertEquals("success", audit.getResultStatus());
+        assertNull(audit.getErrorCode());
+        assertNull(audit.getMessage());
+    }
+
+    private static void assertExactRestoreAudit(AiProfileImportPromptAudit audit) {
+        assertEquals(11L, audit.getTemplateId());
+        assertEquals(101L, audit.getPromptVersionId());
+        assertEquals("restore", audit.getActionCode());
+        assertEquals(91L, audit.getFromVersionId());
+        assertEquals(101L, audit.getToVersionId());
+        assertEquals("content-hash", audit.getContentSha256());
+        assertEquals("runtime-hash", audit.getRuntimeSha256());
+        assertEquals(ProfileImportPromptContract.SCHEMA_VERSION, audit.getSchemaVersion());
+        assertEquals(ProfileImportPromptContract.CONTRACT_VERSION, audit.getContractVersion());
+        assertEquals(73L, audit.getOperatorId());
+        assertEquals("Restore Admin", audit.getOperatorName());
+        assertEquals("INCIDENT_ROLLBACK", audit.getReasonCode());
+        assertEquals("success", audit.getResultStatus());
+        assertNull(audit.getErrorCode());
+        assertNull(audit.getMessage());
+    }
+
+    private static void assertSanitizedOperationCommand(
+            AdminOperationLogCommand command,
+            String operationCode,
+            String reasonCode,
+            String lifecycleStatus) {
+        assertEquals("ai-profile-import", command.getModuleCode());
+        assertEquals(operationCode, command.getOperationCode());
+        assertEquals("ai_profile_import_prompt_template", command.getTargetType());
+        assertEquals(11L, command.getTargetId());
+        assertEquals(1, command.getOperationResult());
+        assertNull(command.getBeforeSnapshot());
+        assertNull(command.getAfterSnapshot());
+        assertNull(command.getFailReason());
+        assertNull(command.getConfirmToken());
+        ProfileImportPromptOperationLogValue value = assertInstanceOf(
+                ProfileImportPromptOperationLogValue.class, command.getExtraContext());
+        assertEquals(11L, value.templateId());
+        assertEquals(101L, value.promptVersionId());
+        assertEquals(4, value.versionNo());
+        assertEquals("full_profile", value.scene());
+        assertEquals("content-hash", value.contentSha256());
+        assertEquals("runtime-hash", value.runtimeSha256());
+        assertEquals(lifecycleStatus, value.lifecycleStatus());
+        assertEquals(reasonCode, value.reasonCode());
+        assertEquals(2, value.candidateCount());
+        assertEquals(1, value.workCount());
+        String serializedSurface = value.toString();
+        for (String forbidden : List.of(
+                "governed-system",
+                "governed-repair",
+                "fixture body secret",
+                "encrypted-secret",
+                "sk-memory",
+                "change summary")) {
+            assertFalse(serializedSurface.contains(forbidden), forbidden);
+        }
+    }
+
+    private static void assertTestRequired(BizException error) {
+        assertEquals(46020, error.getCode());
+        assertEquals("Prompt 发布前需要成功试运行", error.getMessage());
     }
 
     private static AiProfileImportPromptTemplate template(
@@ -2150,6 +3068,14 @@ class ProfileImportPromptManagementServiceImplTest {
         request.setReasonCode(reasonCode);
         request.setExpectedTemplateVersion(expectedTemplateVersion);
         request.setExpectedVersion(expectedVersion);
+        return request;
+    }
+
+    private static ProfileImportPromptRestoreReqDTO restoreReq(
+            String reasonCode, Integer expectedTemplateVersion) {
+        ProfileImportPromptRestoreReqDTO request = new ProfileImportPromptRestoreReqDTO();
+        request.setReasonCode(reasonCode);
+        request.setExpectedTemplateVersion(expectedTemplateVersion);
         return request;
     }
 
