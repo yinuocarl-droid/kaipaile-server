@@ -38,7 +38,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
     public ProfileImportConfigRespDTO savePublicConfig(Long op, ProfileImportPublicConfigUpdateDTO d) {
         validatePublicConfig(d);
         validateEndpoint(d.getEndpoint());
-        AiProfileImportConfig c = config();
+        AiProfileImportConfig c = lockedConfig();
         String beforePublicConfig = publicSnapshot(c);
         String beforeSecretMask = c.getSecretMaskJson();
         c.setEndpoint(d.getEndpoint());
@@ -59,7 +59,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
         if (d == null || !StringUtils.hasText(d.apiKey()) || d.apiKey().trim().length() <= 4) {
             throw new BizException("DeepSeek API Key 至少需要 5 个字符");
         }
-        AiProfileImportConfig c = config();
+        AiProfileImportConfig c = lockedConfig();
         if (c.getConfigId() == null) {
             throw new BizException("请先保存 DeepSeek 公共配置");
         }
@@ -76,7 +76,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
 
     @Transactional(rollbackFor = Exception.class)
     public ProfileImportConfigRespDTO testConnection(Long op) {
-        AiProfileImportConfig c = config();
+        AiProfileImportConfig c = lockedConfig();
         if (!StringUtils.hasText(c.getSecretConfigCiphertext())) throw new BizException("请先配置密钥");
         String beforePublicConfig = publicSnapshot(c);
         String beforeSecretMask = c.getSecretMaskJson();
@@ -90,7 +90,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
 
     @Transactional(rollbackFor = Exception.class)
     public ProfileImportConfigRespDTO setEnabled(Long op, boolean enabled) {
-        AiProfileImportConfig c = config();
+        AiProfileImportConfig c = lockedConfig();
         if (enabled && !ready(c)) throw new BizException("配置未通过连接测试");
         String beforePublicConfig = publicSnapshot(c);
         String beforeSecretMask = c.getSecretMaskJson();
@@ -130,7 +130,7 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
                 throw com.kaipai.model.actor.dto.ProfileDomainErrorCode.PROFILE_IMPORT_UNAVAILABLE.toException();
             }
             return new ProfileImportRuntimeConfig(
-                    c.getConfigId(), c.getEndpoint(), c.getModelName(), key,
+                    c.getConfigId(), c.getVersion(), c.getEndpoint(), c.getModelName(), key,
                     c.getConnectTimeoutMs(), c.getReadTimeoutMs(), c.getMaxInputChars(),
                     c.getMaxOutputTokens(), c.getPerUserDailyLimit());
         } catch (Exception error) {
@@ -138,7 +138,25 @@ public class ProfileImportConfigServiceImpl implements ProfileImportConfigServic
         }
     }
 
-    private AiProfileImportConfig config() { AiProfileImportConfig c = mapper.selectOne(new LambdaQueryWrapper<AiProfileImportConfig>().eq(AiProfileImportConfig::getProviderCode, "deepseek").last("limit 1")); if (c == null) { c = new AiProfileImportConfig(); c.setProviderCode("deepseek"); c.setDisplayName("DeepSeek 资料导入"); c.setEnabled(false); } return c; }
+    private AiProfileImportConfig config() {
+        AiProfileImportConfig c = mapper.selectOne(new LambdaQueryWrapper<AiProfileImportConfig>()
+                .eq(AiProfileImportConfig::getProviderCode, "deepseek")
+                .last("limit 1"));
+        return c == null ? newConfig() : c;
+    }
+
+    private AiProfileImportConfig lockedConfig() {
+        AiProfileImportConfig c = mapper.selectByProviderCodeForUpdate("deepseek");
+        return c == null ? newConfig() : c;
+    }
+
+    private AiProfileImportConfig newConfig() {
+        AiProfileImportConfig c = new AiProfileImportConfig();
+        c.setProviderCode("deepseek");
+        c.setDisplayName("DeepSeek 资料导入");
+        c.setEnabled(false);
+        return c;
+    }
     private boolean ready(AiProfileImportConfig c) { return StringUtils.hasText(c.getEndpoint()) && StringUtils.hasText(c.getModelName()) && StringUtils.hasText(c.getSecretConfigCiphertext()) && "success".equals(c.getLastTestStatus()); }
     private void reset(AiProfileImportConfig c) { c.setEnabled(false); c.setLastTestStatus(null); c.setLastTestAt(null); c.setLastTestMessage(null); }
     private void persist(AiProfileImportConfig c) {

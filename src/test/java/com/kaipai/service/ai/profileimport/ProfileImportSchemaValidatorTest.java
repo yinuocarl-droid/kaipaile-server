@@ -12,6 +12,8 @@ import com.kaipai.service.ai.profileimport.ProfileImportSchemaValidator.Candidat
 import com.kaipai.service.ai.profileimport.ProfileImportSchemaValidator.ValidatedExtraction;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ProfileImportSchemaValidatorTest {
 
@@ -414,6 +416,163 @@ class ProfileImportSchemaValidatorTest {
         assertThrows(IllegalArgumentException.class, () -> validator.validate(
                 "{\"profileCandidates\":[{\"fieldKey\":\"hack\",\"candidateValue\":\"x\"}],\"workCandidates\":[]}",
                 "x"));
+    }
+
+    @Test
+    void governedSceneRequiresTheExactEnvelopeAndCandidateFieldsWithoutEchoingUnknownData() {
+        String secretUnknownValue = "provider-response-secret";
+        String unknownTopLevel = """
+                {"profileCandidates":[],"workCandidates":[],
+                 "ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[],
+                 "unexpected":"%s"}
+                """.formatted(secretUnknownValue);
+        IllegalArgumentException topLevel = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(unknownTopLevel, "fixture", "full_profile"));
+
+        String unknownProfileField = """
+                {"profileCandidates":[{
+                   "candidateId":"p1","fieldKey":"public_name","candidateValue":"林晓禾",
+                   "confidence":0.99,"sourceText":"林晓禾","sourceType":"explicit",
+                   "warning":null,"privateProviderField":"%s"
+                 }],"workCandidates":[],"ignoredMediaPlaceholderCount":0,
+                 "unmappedSegments":[],"warnings":[]}
+                """.formatted(secretUnknownValue);
+        IllegalArgumentException profile = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(unknownProfileField, "林晓禾", "full_profile"));
+
+        assertEquals("invalid extraction root fields", topLevel.getMessage());
+        assertEquals("invalid profile candidate fields", profile.getMessage());
+        assertFalse(topLevel.getMessage().contains("unexpected"));
+        assertFalse(topLevel.getMessage().contains(secretUnknownValue));
+        assertFalse(profile.getMessage().contains("privateProviderField"));
+        assertFalse(profile.getMessage().contains(secretUnknownValue));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "\"provider-response-secret\"",
+        "null",
+        "{\"privateProviderField\":\"provider-response-secret\"}",
+        "-1",
+        "2147483648"
+    })
+    void governedSceneRejectsInvalidIgnoredMediaPlaceholderCountWithoutEchoingValues(
+            String providerValue) {
+        String response = """
+                {"profileCandidates":[],"workCandidates":[],
+                 "ignoredMediaPlaceholderCount":%s,"unmappedSegments":[],"warnings":[]}
+                """.formatted(providerValue);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(response, "fixed fixture", "full_profile"));
+
+        assertEquals("invalid ignored media placeholder count structure", error.getMessage());
+        assertFalse(error.getMessage().contains(providerValue));
+        assertFalse(error.getMessage().contains("provider-response-secret"));
+    }
+
+    @Test
+    void governedSceneAcceptsZeroIgnoredMediaPlaceholderCount() {
+        ProfileImportSchemaValidator.ValidatedExtraction extraction = validator.validate("""
+                {"profileCandidates":[],"workCandidates":[],
+                 "ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[]}
+                """, "fixed fixture", "full_profile");
+
+        assertEquals(0, extraction.ignoredMediaPlaceholderCount());
+    }
+
+    @Test
+    void governedSceneRejectsUnknownWorkAndEvidenceFieldsAndUngovernedWorkKeys() {
+        String unknownWorkField = """
+                {"profileCandidates":[],"workCandidates":[{
+                   "candidateId":"w1","projectName":"纸上星光","fields":{},
+                   "privateProviderField":"secret"
+                 }],"ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[]}
+                """;
+        IllegalArgumentException work = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(unknownWorkField, "纸上星光", "works_only"));
+        assertEquals("invalid work candidate fields", work.getMessage());
+        assertFalse(work.getMessage().contains("privateProviderField"));
+
+        String unknownEvidenceField = """
+                {"profileCandidates":[],"workCandidates":[{
+                   "candidateId":"w1","projectName":"纸上星光","sourceType":"explicit",
+                   "fields":{"projectName":{"candidateValue":"纸上星光","confidence":0.99,
+                     "sourceText":"《纸上星光》","sourceType":"explicit","warning":null,
+                     "privateProviderField":"secret"}}
+                 }],"ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[]}
+                """;
+        IllegalArgumentException evidence = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(
+                        unknownEvidenceField, "《纸上星光》", "works_only"));
+        assertEquals("invalid work field evidence fields", evidence.getMessage());
+        assertFalse(evidence.getMessage().contains("privateProviderField"));
+
+        String secretKey = "privateProviderField";
+        String unknownWorkKey = """
+                {"profileCandidates":[],"workCandidates":[{
+                   "candidateId":"w1","projectName":"纸上星光","sourceType":"explicit",
+                   "fields":{"%s":{"candidateValue":"secret","confidence":0.99,
+                     "sourceText":"secret","sourceType":"explicit","warning":null}}
+                 }],"ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[]}
+                """.formatted(secretKey);
+        IllegalArgumentException unknown = assertThrows(
+                IllegalArgumentException.class,
+                () -> validator.validate(unknownWorkKey, "secret", "works_only"));
+        assertEquals("invalid work field key", unknown.getMessage());
+        assertFalse(unknown.getMessage().contains(secretKey));
+    }
+
+    @Test
+    void governedWorksOnlySceneRejectsAnyProfileCandidate() {
+        String response = """
+                {"profileCandidates":[{
+                   "candidateId":"p1","fieldKey":"public_name","candidateValue":"林晓禾",
+                   "confidence":0.99,"sourceText":"林晓禾","sourceType":"explicit","warning":null
+                 }],"workCandidates":[],"ignoredMediaPlaceholderCount":0,
+                 "unmappedSegments":[],"warnings":[]}
+                """;
+
+        assertEquals(
+                "works_only profile candidates must be empty",
+                assertThrows(IllegalArgumentException.class,
+                        () -> validator.validate(response, "林晓禾", "works_only"))
+                        .getMessage());
+    }
+
+    @Test
+    void governedSceneAcceptsOptionalFieldsAndExistingGovernedFlatWorkFields() {
+        String response = """
+                {"profileCandidates":[{
+                   "fieldKey":"public_name","candidateValue":"林晓禾","confidence":0.99,
+                   "sourceText":"艺名林晓禾"
+                 }],"workCandidates":[{
+                   "projectName":"纸上星光","roleName":"许安","publishStatus":"aired",
+                   "fields":{
+                     "projectName":{"candidateValue":"纸上星光","confidence":0.99,
+                       "sourceText":"《纸上星光》"},
+                     "roleName":{"candidateValue":"许安","confidence":0.99,
+                       "sourceText":"饰演许安"},
+                     "publishStatus":{"candidateValue":"aired","confidence":0.99,
+                       "sourceText":"已播"}
+                   }
+                 }],"ignoredMediaPlaceholderCount":0,"unmappedSegments":[],"warnings":[]}
+                """;
+
+        ProfileImportSchemaValidator.ValidatedExtraction extraction =
+                validator.validate(
+                        response,
+                        "艺名林晓禾。2023年参演《纸上星光》，饰演许安，已播。",
+                        "full_profile");
+
+        assertEquals(1, extraction.profileCandidates().size());
+        assertEquals(1, extraction.workCandidates().size());
+        assertEquals("许安", extraction.workCandidates().get(0).roleName());
     }
 
     private void assertInvalid(String json) {

@@ -32,6 +32,7 @@ import com.kaipai.common.auth.AdminAuthenticatedUser;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.kaipai.mapper.ai.AiProfileImportPromptAuditMapper;
+import com.kaipai.mapper.ai.AiProfileImportConfigMapper;
 import com.kaipai.mapper.ai.AiProfileImportPromptTemplateMapper;
 import com.kaipai.mapper.ai.AiProfileImportPromptVersionMapper;
 import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
@@ -46,9 +47,16 @@ import com.kaipai.model.ai.dto.ProfileImportPromptVersionActionReqDTO;
 import com.kaipai.model.ai.dto.ProfileImportPromptVersionDetailRespDTO;
 import com.kaipai.model.ai.dto.ProfileImportPromptVersionSummaryRespDTO;
 import com.kaipai.model.ai.entity.AiProfileImportPromptAudit;
+import com.kaipai.model.ai.entity.AiProfileImportConfig;
 import com.kaipai.model.ai.entity.AiProfileImportPromptTemplate;
 import com.kaipai.model.ai.entity.AiProfileImportPromptVersion;
+import com.kaipai.service.ai.ProfileImportConfigService;
 import com.kaipai.service.ai.ProfileImportPromptManagementService;
+import com.kaipai.service.ai.ProfileImportPromptTester;
+import com.kaipai.service.ai.ProfileImportRuntimeConfig;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptFixtureCatalog.Fixture;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptRuntime;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptRenderer;
 import com.kaipai.service.ai.profileimport.ProfileImportPromptReasonCode;
 import java.lang.reflect.Field;
@@ -64,6 +72,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.ibatis.annotations.Select;
@@ -81,6 +90,9 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.STRICT_STUBS)
@@ -99,17 +111,41 @@ class ProfileImportPromptManagementServiceImplTest {
     private AiProfileImportPromptAuditMapper auditMapper;
 
     @Mock
+    private AiProfileImportConfigMapper configMapper;
+
+    @Mock
     private ProfileImportPromptRenderer renderer;
 
     @Mock
     private AdminAuthContext adminAuthContext;
+
+    @Mock
+    private ProfileImportPromptTester tester;
+
+    @Mock
+    private ProfileImportPromptFixtureCatalog fixtureCatalog;
+
+    @Mock
+    private ProfileImportConfigService configService;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
 
     private ProfileImportPromptManagementServiceImpl service;
 
     @BeforeEach
     void setUp() {
         service = new ProfileImportPromptManagementServiceImpl(
-                templateMapper, versionMapper, auditMapper, renderer, adminAuthContext);
+                templateMapper,
+                versionMapper,
+                auditMapper,
+                configMapper,
+                renderer,
+                tester,
+                fixtureCatalog,
+                configService,
+                adminAuthContext,
+                transactionTemplate);
     }
 
     @Test
@@ -247,8 +283,13 @@ class ProfileImportPromptManagementServiceImplTest {
                     AiProfileImportPromptTemplateMapper.class,
                     AiProfileImportPromptVersionMapper.class,
                     AiProfileImportPromptAuditMapper.class,
+                    AiProfileImportConfigMapper.class,
                     ProfileImportPromptRenderer.class,
-                    AdminAuthContext.class
+                    ProfileImportPromptTester.class,
+                    ProfileImportPromptFixtureCatalog.class,
+                    ProfileImportConfigService.class,
+                    AdminAuthContext.class,
+                    TransactionTemplate.class
                 },
                 ProfileImportPromptManagementServiceImpl.class
                         .getDeclaredConstructors()[0]
@@ -273,6 +314,9 @@ class ProfileImportPromptManagementServiceImplTest {
             assertNotNull(transactional, method.getName());
             assertArrayEquals(new Class<?>[] {Exception.class}, transactional.rollbackFor());
         }
+        assertNull(ProfileImportPromptManagementServiceImpl.class
+                .getDeclaredMethod("test", Long.class, Long.class)
+                .getAnnotation(Transactional.class));
     }
 
     @Test
@@ -1111,12 +1155,9 @@ class ProfileImportPromptManagementServiceImplTest {
     }
 
     @Test
-    void deferredActionsValidateReasonAndOperatorThenFailClosedWithoutMapperCalls() {
+    void deferredPublishAndRestoreValidateReasonAndOperatorThenFailClosedWithoutMapperCalls() {
         authenticate(73L, "Future Admin");
 
-        assertStateConflict(assertThrows(
-                BizException.class,
-                () -> service.test(73L, 101L)));
         assertStateConflict(assertThrows(
                 BizException.class,
                 () -> service.publish(
@@ -1130,8 +1171,246 @@ class ProfileImportPromptManagementServiceImplTest {
                 BizException.class,
                 () -> service.restore(73L, "full_profile", 91L, restore)));
 
-        verify(adminAuthContext, Mockito.times(3)).requireCurrentAdmin();
+        verify(adminAuthContext, Mockito.times(2)).requireCurrentAdmin();
         verifyNoInteractions(templateMapper, versionMapper, auditMapper, renderer);
+    }
+
+    @Test
+    void testCallsRemoteBeforeShortVersionConfigLocksThenWritesBoundResultAndAudit() {
+        AtomicBoolean insideTransaction = new AtomicBoolean(false);
+        AiProfileImportPromptTemplate template = template(11L, "full_profile", 91L, 101L, 4, 0);
+        AiProfileImportPromptVersion snapshot = governedVersion(101L, 11L, 4, "draft", 5);
+        snapshot.setContentSha256("content-hash");
+        snapshot.setSchemaVersion("profile-import-json-v1");
+        ProfileImportPromptRuntime runtime = promptRuntime("runtime-hash");
+        ProfileImportRuntimeConfig configSnapshot = runtimeConfig(17);
+        ProfileImportPromptTestResultRespDTO tested = testResult("success", null);
+        authenticate(73L, "Test Admin");
+        when(versionMapper.selectById(101L)).thenReturn(versionLocator(11L, 101L));
+        when(templateMapper.selectById(11L)).thenReturn(template);
+        when(versionMapper.selectOwnedDetail(11L, 101L)).thenReturn(snapshot);
+        when(renderer.contentSha256(eq(template), any())).thenReturn("content-hash");
+        when(renderer.render(eq(template), any())).thenReturn(runtime);
+        when(configService.runtimeConfig()).thenReturn(configSnapshot);
+        when(fixtureCatalog.load("full_profile")).thenReturn(fixture());
+        when(tester.execute(template, snapshot, configSnapshot)).thenAnswer(invocation -> {
+            assertFalse(insideTransaction.get());
+            return tested;
+        });
+        AiProfileImportPromptVersion locked = governedVersion(101L, 11L, 4, "draft", 5);
+        locked.setContentSha256("content-hash");
+        when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(locked);
+        when(configMapper.selectByProviderCodeForUpdate("deepseek"))
+                .thenReturn(configEntity(17));
+        Mockito.lenient().when(versionMapper.writeTestResultIfSnapshotMatches(any())).thenReturn(1);
+        Mockito.lenient().when(auditMapper.insertAudit(any())).thenReturn(1);
+        stubTransaction(insideTransaction);
+
+        ProfileImportPromptTestResultRespDTO result = service.test(73L, 101L);
+
+        InOrder order = Mockito.inOrder(
+                fixtureCatalog,
+                tester,
+                transactionTemplate,
+                versionMapper,
+                configMapper,
+                auditMapper);
+        order.verify(fixtureCatalog).load("full_profile");
+        order.verify(tester).execute(template, snapshot, configSnapshot);
+        order.verify(fixtureCatalog).load("full_profile");
+        order.verify(transactionTemplate).execute(any());
+        order.verify(versionMapper).selectOwnedForUpdate(11L, 101L);
+        order.verify(configMapper).selectByProviderCodeForUpdate("deepseek");
+        ArgumentCaptor<AiProfileImportPromptVersion> write =
+                ArgumentCaptor.forClass(AiProfileImportPromptVersion.class);
+        order.verify(versionMapper).writeTestResultIfSnapshotMatches(write.capture());
+        ArgumentCaptor<AiProfileImportPromptAudit> audit =
+                ArgumentCaptor.forClass(AiProfileImportPromptAudit.class);
+        order.verify(auditMapper).insertAudit(audit.capture());
+        verify(templateMapper, never()).selectByIdForUpdate(anyLong());
+        assertTestWrite(write.getValue(), "success", null);
+        assertTestAudit(audit.getValue(), "success", null);
+        assertEquals(73L, result.getTestedBy());
+        assertNotNull(result.getTestedAt());
+        assertEquals("success", result.getStatus());
+        assertFalse(write.getValue().toString().contains("governed-system"));
+        assertFalse(write.getValue().toString().contains("sk-memory"));
+        assertFalse(audit.getValue().toString().contains("fixture body"));
+    }
+
+    @Test
+    void failedRemoteResultIsPersistedWithOnlyItsStableErrorCode() {
+        ProfileImportPromptTestResultRespDTO failed = testResult(
+                "failed", "PROFILE_IMPORT_MODEL_TIMEOUT");
+        stubTestWriteback(failed, 5, "content-hash", 17);
+
+        ProfileImportPromptTestResultRespDTO result = service.test(73L, 101L);
+
+        ArgumentCaptor<AiProfileImportPromptVersion> write =
+                ArgumentCaptor.forClass(AiProfileImportPromptVersion.class);
+        verify(versionMapper).writeTestResultIfSnapshotMatches(write.capture());
+        ArgumentCaptor<AiProfileImportPromptAudit> audit =
+                ArgumentCaptor.forClass(AiProfileImportPromptAudit.class);
+        verify(auditMapper).insertAudit(audit.capture());
+        assertTestWrite(write.getValue(), "failed", "PROFILE_IMPORT_MODEL_TIMEOUT");
+        assertTestAudit(audit.getValue(), "failed", "PROFILE_IMPORT_MODEL_TIMEOUT");
+        assertEquals("failed", result.getStatus());
+        assertEquals("PROFILE_IMPORT_MODEL_TIMEOUT", result.getErrorCode());
+    }
+
+    @Test
+    void fixtureCodeDriftAfterRemoteCallReturns46021BeforeTransaction() {
+        assertFixtureIdentityDrift(fixture("changed-code", "1", "fixture-hash"));
+    }
+
+    @Test
+    void fixtureVersionDriftAfterRemoteCallReturns46021BeforeTransaction() {
+        assertFixtureIdentityDrift(fixture("full-profile-v1", "2", "fixture-hash"));
+    }
+
+    @Test
+    void fixtureHashDriftAfterRemoteCallReturns46021BeforeTransaction() {
+        assertFixtureIdentityDrift(fixture("full-profile-v1", "1", "changed-hash"));
+    }
+
+    @Test
+    void fullProfileSuccessWithoutProfileCandidatesIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult("success", null);
+        tested.setCandidateCount(0);
+
+        assertInvalidBoundExecution("full_profile", tested);
+    }
+
+    @Test
+    void fullProfileSuccessWithoutWorkCandidatesIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult("success", null);
+        tested.setWorkCount(0);
+
+        assertInvalidBoundExecution("full_profile", tested);
+    }
+
+    @Test
+    void worksOnlySuccessWithProfileCandidatesIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult("success", null);
+        tested.setCandidateCount(1);
+        tested.setWorkCount(1);
+
+        assertInvalidBoundExecution("works_only", tested);
+    }
+
+    @Test
+    void worksOnlySuccessWithoutWorkCandidatesIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult("success", null);
+        tested.setCandidateCount(0);
+        tested.setWorkCount(0);
+
+        assertInvalidBoundExecution("works_only", tested);
+    }
+
+    @Test
+    void failedExecutionWithNonzeroCountsIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult(
+                "failed", ProfileDomainErrorCode.PROFILE_IMPORT_RESPONSE_INVALID.errorCode());
+        tested.setCandidateCount(1);
+        tested.setWorkCount(1);
+
+        assertInvalidBoundExecution("full_profile", tested);
+    }
+
+    @Test
+    void failedExecutionWithApplyConflictIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult(
+                "failed", ProfileDomainErrorCode.PROFILE_IMPORT_APPLY_CONFLICT.errorCode());
+
+        assertInvalidBoundExecution("full_profile", tested);
+    }
+
+    @Test
+    void failedExecutionWithPromptTestStaleIsRejectedBeforeTransaction() {
+        ProfileImportPromptTestResultRespDTO tested = testResult(
+                "failed", ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.errorCode());
+
+        assertInvalidBoundExecution("full_profile", tested);
+    }
+
+    @Test
+    void contentOrConfigDriftAndConditionalWriteConflictReturnStable46021WithoutAudit() {
+        stubTestWriteback(testResult("success", null), 5, "changed-content", 17);
+
+        BizException content = assertThrows(
+                BizException.class, () -> service.test(73L, 101L));
+
+        assertTestStale(content);
+        verify(versionMapper, never()).writeTestResultIfSnapshotMatches(any());
+        verifyNoInteractions(auditMapper);
+
+        Mockito.reset(
+                templateMapper,
+                versionMapper,
+                auditMapper,
+                configMapper,
+                renderer,
+                tester,
+                fixtureCatalog,
+                configService,
+                adminAuthContext,
+                transactionTemplate);
+        service = new ProfileImportPromptManagementServiceImpl(
+                templateMapper,
+                versionMapper,
+                auditMapper,
+                configMapper,
+                renderer,
+                tester,
+                fixtureCatalog,
+                configService,
+                adminAuthContext,
+                transactionTemplate);
+        stubTestWriteback(testResult("success", null), 5, "content-hash", 18);
+
+        BizException config = assertThrows(
+                BizException.class, () -> service.test(73L, 101L));
+
+        assertTestStale(config);
+        verify(versionMapper, never()).writeTestResultIfSnapshotMatches(any());
+        verifyNoInteractions(auditMapper);
+    }
+
+    @Test
+    void conditionalWriteZeroReturns46021AndAuditFailurePropagatesInsideShortTransaction() {
+        stubTestWriteback(testResult("success", null), 5, "content-hash", 17);
+        when(versionMapper.writeTestResultIfSnapshotMatches(any())).thenReturn(0);
+
+        assertTestStale(assertThrows(BizException.class, () -> service.test(73L, 101L)));
+        verifyNoInteractions(auditMapper);
+
+        Mockito.reset(
+                templateMapper,
+                versionMapper,
+                auditMapper,
+                configMapper,
+                renderer,
+                tester,
+                fixtureCatalog,
+                configService,
+                adminAuthContext,
+                transactionTemplate);
+        service = new ProfileImportPromptManagementServiceImpl(
+                templateMapper,
+                versionMapper,
+                auditMapper,
+                configMapper,
+                renderer,
+                tester,
+                fixtureCatalog,
+                configService,
+                adminAuthContext,
+                transactionTemplate);
+        stubTestWriteback(testResult("success", null), 5, "content-hash", 17);
+        when(auditMapper.insertAudit(any())).thenReturn(0);
+
+        assertThrows(IllegalStateException.class, () -> service.test(73L, 101L));
+        verify(versionMapper).writeTestResultIfSnapshotMatches(any());
     }
 
     @Test
@@ -1334,6 +1613,13 @@ class ProfileImportPromptManagementServiceImplTest {
                 ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_VERSION_CONFLICT.message());
         assertEquals(46019, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_INVALID.code());
         assertEquals(INVALID_MESSAGE, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_INVALID.message());
+        assertEquals(46021, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.code());
+        assertEquals(
+                "PROFILE_IMPORT_PROMPT_TEST_STALE",
+                ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.errorCode());
+        assertEquals(
+                "Prompt 试运行结果已失效，请重新测试",
+                ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_TEST_STALE.message());
         assertEquals(46022, ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_STATE_CONFLICT.code());
         assertEquals(
                 "PROFILE_IMPORT_PROMPT_STATE_CONFLICT",
@@ -1342,7 +1628,7 @@ class ProfileImportPromptManagementServiceImplTest {
                 "Prompt \u6a21\u677f\u5f53\u524d\u72b6\u6001\u4e0d\u5141\u8bb8\u8be5\u64cd\u4f5c",
                 ProfileDomainErrorCode.PROFILE_IMPORT_PROMPT_STATE_CONFLICT.message());
         assertTrue(Arrays.stream(ProfileDomainErrorCode.values())
-                .noneMatch(code -> code.code() == 46020 || code.code() == 46021));
+                .noneMatch(code -> code.code() == 46020));
     }
 
     @Test
@@ -1597,6 +1883,239 @@ class ProfileImportPromptManagementServiceImplTest {
                 .permissions(Set.of())
                 .roleCodes(Set.of())
                 .build());
+    }
+
+    private void stubTestWriteback(
+            ProfileImportPromptTestResultRespDTO tested,
+            Integer lockedVersion,
+            String lockedContentSha256,
+            Integer lockedConfigVersion) {
+        stubTestWriteback(
+                tested,
+                lockedVersion,
+                lockedContentSha256,
+                lockedConfigVersion,
+                fixture(),
+                fixture());
+    }
+
+    private void stubTestWriteback(
+            ProfileImportPromptTestResultRespDTO tested,
+            Integer lockedVersion,
+            String lockedContentSha256,
+            Integer lockedConfigVersion,
+            Fixture fixtureBefore,
+            Fixture fixtureAfter) {
+        AtomicBoolean insideTransaction = new AtomicBoolean(false);
+        AiProfileImportPromptTemplate template = template(11L, "full_profile", 91L, 101L, 4, 0);
+        AiProfileImportPromptVersion snapshot = governedVersion(101L, 11L, 4, "draft", 5);
+        snapshot.setContentSha256("content-hash");
+        snapshot.setSchemaVersion("profile-import-json-v1");
+        ProfileImportPromptRuntime runtime = promptRuntime("runtime-hash");
+        ProfileImportRuntimeConfig configSnapshot = runtimeConfig(17);
+        authenticate(73L, "Test Admin");
+        when(versionMapper.selectById(101L)).thenReturn(versionLocator(11L, 101L));
+        when(templateMapper.selectById(11L)).thenReturn(template);
+        when(versionMapper.selectOwnedDetail(11L, 101L)).thenReturn(snapshot);
+        when(renderer.contentSha256(eq(template), any())).thenReturn("content-hash");
+        when(renderer.render(eq(template), any())).thenReturn(runtime);
+        when(configService.runtimeConfig()).thenReturn(configSnapshot);
+        when(fixtureCatalog.load("full_profile")).thenReturn(fixtureBefore, fixtureAfter);
+        when(tester.execute(template, snapshot, configSnapshot)).thenAnswer(invocation -> {
+            assertFalse(insideTransaction.get());
+            return tested;
+        });
+        AiProfileImportPromptVersion locked = governedVersion(
+                101L, 11L, 4, "draft", lockedVersion);
+        locked.setContentSha256(lockedContentSha256);
+        Mockito.lenient().when(versionMapper.selectOwnedForUpdate(11L, 101L)).thenReturn(locked);
+        Mockito.lenient().when(configMapper.selectByProviderCodeForUpdate("deepseek"))
+                .thenReturn(configEntity(lockedConfigVersion));
+        Mockito.lenient().when(versionMapper.writeTestResultIfSnapshotMatches(any())).thenReturn(1);
+        Mockito.lenient().when(auditMapper.insertAudit(any())).thenReturn(1);
+        stubTransaction(insideTransaction);
+    }
+
+    private void stubTransaction(AtomicBoolean insideTransaction) {
+        Mockito.lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            insideTransaction.set(true);
+            try {
+                return callback.doInTransaction(Mockito.mock(TransactionStatus.class));
+            } finally {
+                insideTransaction.set(false);
+            }
+        });
+    }
+
+    private void assertFixtureIdentityDrift(Fixture fixtureAfter) {
+        stubTestWriteback(
+                testResult("success", null),
+                5,
+                "content-hash",
+                17,
+                fixture(),
+                fixtureAfter);
+
+        assertTestStale(assertThrows(BizException.class, () -> service.test(73L, 101L)));
+
+        verify(transactionTemplate, never()).execute(any());
+        verify(versionMapper, never()).selectOwnedForUpdate(anyLong(), anyLong());
+        verify(versionMapper, never()).writeTestResultIfSnapshotMatches(any());
+        verifyNoInteractions(configMapper, auditMapper);
+    }
+
+    private void assertInvalidBoundExecution(
+            String scene,
+            ProfileImportPromptTestResultRespDTO tested) {
+        Fixture boundFixture = "works_only".equals(scene)
+                ? fixture("works-only-v1", "1", "fixture-hash")
+                : fixture();
+        tested.setFixtureCode(boundFixture.code());
+        tested.setFixtureVersion(boundFixture.version());
+        tested.setFixtureSha256(boundFixture.sha256());
+        AiProfileImportPromptTemplate template = template(
+                11L, scene, 91L, 101L, 4, 0);
+        AiProfileImportPromptVersion snapshot = governedVersion(
+                101L, 11L, 4, "draft", 5);
+        snapshot.setContentSha256("content-hash");
+        snapshot.setSchemaVersion("profile-import-json-v1");
+        ProfileImportPromptRuntime runtime = promptRuntime("runtime-hash");
+        ProfileImportRuntimeConfig configSnapshot = runtimeConfig(17);
+        authenticate(73L, "Test Admin");
+        when(versionMapper.selectById(101L)).thenReturn(versionLocator(11L, 101L));
+        when(templateMapper.selectById(11L)).thenReturn(template);
+        when(versionMapper.selectOwnedDetail(11L, 101L)).thenReturn(snapshot);
+        when(renderer.contentSha256(eq(template), any())).thenReturn("content-hash");
+        when(renderer.render(eq(template), any())).thenReturn(runtime);
+        when(configService.runtimeConfig()).thenReturn(configSnapshot);
+        when(fixtureCatalog.load(scene)).thenReturn(boundFixture, boundFixture);
+        when(tester.execute(template, snapshot, configSnapshot)).thenReturn(tested);
+
+        assertTestStale(assertThrows(BizException.class, () -> service.test(73L, 101L)));
+
+        verify(transactionTemplate, never()).execute(any());
+        verify(versionMapper, never()).selectOwnedForUpdate(anyLong(), anyLong());
+        verify(versionMapper, never()).writeTestResultIfSnapshotMatches(any());
+        verifyNoInteractions(configMapper, auditMapper);
+    }
+
+    private static Fixture fixture() {
+        return fixture("full-profile-v1", "1", "fixture-hash");
+    }
+
+    private static Fixture fixture(String code, String version, String sha256) {
+        return new Fixture(code, version, sha256, "fixture body secret");
+    }
+
+    private static ProfileImportRuntimeConfig runtimeConfig(Integer version) {
+        return new ProfileImportRuntimeConfig(
+                3L,
+                version,
+                "https://api.deepseek.com/chat/completions",
+                "deepseek-chat",
+                "sk-memory",
+                3000,
+                30000,
+                20000,
+                8000,
+                10);
+    }
+
+    private static AiProfileImportConfig configEntity(Integer version) {
+        AiProfileImportConfig config = new AiProfileImportConfig();
+        config.setConfigId(3L);
+        config.setProviderCode("deepseek");
+        config.setModelName("deepseek-chat");
+        config.setVersion(version);
+        config.setDeleted(0);
+        return config;
+    }
+
+    private static ProfileImportPromptRuntime promptRuntime(String runtimeSha256) {
+        return new ProfileImportPromptRuntime(
+                11L,
+                "full_profile",
+                "full_profile",
+                101L,
+                4,
+                "profile-import-json-v1",
+                "profile-import-contract-v1",
+                "governed-system",
+                "governed-repair",
+                runtimeSha256);
+    }
+
+    private static ProfileImportPromptTestResultRespDTO testResult(
+            String status, String errorCode) {
+        ProfileImportPromptTestResultRespDTO result = new ProfileImportPromptTestResultRespDTO();
+        result.setPromptVersionId(101L);
+        result.setContentSha256("content-hash");
+        result.setRuntimeSha256("runtime-hash");
+        result.setFixtureCode("full-profile-v1");
+        result.setFixtureVersion("1");
+        result.setFixtureSha256("fixture-hash");
+        result.setModelName("deepseek-chat");
+        result.setConfigVersion(17);
+        result.setStatus(status);
+        result.setCandidateCount("success".equals(status) ? 2 : 0);
+        result.setWorkCount("success".equals(status) ? 1 : 0);
+        result.setElapsedMs(37L);
+        result.setErrorCode(errorCode);
+        return result;
+    }
+
+    private static void assertTestWrite(
+            AiProfileImportPromptVersion write, String status, String errorCode) {
+        assertEquals(101L, write.getPromptVersionId());
+        assertEquals(11L, write.getTemplateId());
+        assertEquals(5, write.getVersion());
+        assertEquals("content-hash", write.getContentSha256());
+        assertEquals(status, write.getTestStatus());
+        assertEquals("content-hash", write.getTestedContentSha256());
+        assertEquals("runtime-hash", write.getTestedRuntimeSha256());
+        assertEquals("full-profile-v1", write.getTestFixtureCode());
+        assertEquals("1", write.getTestFixtureVersion());
+        assertEquals("fixture-hash", write.getTestFixtureSha256());
+        assertEquals("deepseek-chat", write.getTestedModelName());
+        assertEquals(17, write.getTestedConfigVersion());
+        assertEquals("success".equals(status) ? 2 : 0, write.getTestCandidateCount());
+        assertEquals("success".equals(status) ? 1 : 0, write.getTestWorkCount());
+        assertEquals(37L, write.getTestElapsedMs());
+        assertEquals(errorCode, write.getTestErrorCode());
+        assertEquals(73L, write.getTestedBy());
+        assertNotNull(write.getTestedAt());
+    }
+
+    private static void assertTestAudit(
+            AiProfileImportPromptAudit audit, String status, String errorCode) {
+        assertEquals(11L, audit.getTemplateId());
+        assertEquals(101L, audit.getPromptVersionId());
+        assertEquals("test", audit.getActionCode());
+        assertEquals(101L, audit.getFromVersionId());
+        assertEquals(101L, audit.getToVersionId());
+        assertEquals("content-hash", audit.getContentSha256());
+        assertEquals("runtime-hash", audit.getRuntimeSha256());
+        assertEquals("profile-import-json-v1", audit.getSchemaVersion());
+        assertEquals("profile-import-contract-v1", audit.getContractVersion());
+        assertEquals("full-profile-v1", audit.getFixtureCode());
+        assertEquals("1", audit.getFixtureVersion());
+        assertEquals("fixture-hash", audit.getFixtureSha256());
+        assertEquals("deepseek-chat", audit.getModelName());
+        assertEquals(17, audit.getConfigVersion());
+        assertEquals(73L, audit.getTestOperatorId());
+        assertNotNull(audit.getTestedAt());
+        assertEquals(73L, audit.getOperatorId());
+        assertEquals("Test Admin", audit.getOperatorName());
+        assertEquals("TEST_EXECUTED", audit.getReasonCode());
+        assertEquals(status, audit.getResultStatus());
+        assertEquals(errorCode, audit.getErrorCode());
+        assertNull(audit.getMessage());
+    }
+
+    private static void assertTestStale(BizException error) {
+        assertEquals(46021, error.getCode());
+        assertEquals("Prompt 试运行结果已失效，请重新测试", error.getMessage());
     }
 
     private static ProfileImportPromptCreateDraftReqDTO createReq(

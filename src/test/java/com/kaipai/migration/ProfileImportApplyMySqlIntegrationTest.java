@@ -1347,6 +1347,7 @@ class ProfileImportApplyMySqlIntegrationTest {
                     true, true, "deepseek", "deepseek-fixture", 10000, null));
             when(service.runtimeConfig()).thenReturn(new ProfileImportRuntimeConfig(
                     1L,
+                    1,
                     "https://deepseek.invalid/profile-import",
                     "deepseek-fixture",
                     "test-memory-only-key",

@@ -5,13 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.model.ai.entity.AiProfileImportConfig;
 import com.kaipai.service.ai.profileimport.ProfileImportHttpTransport;
+import com.kaipai.service.ai.profileimport.ProfileImportPromptRuntime;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
 @Component
 public class DeepSeekProfileTextExtractor {
-    private static final String SYSTEM_PROMPT = """
+    private static final String LEGACY_SYSTEM_PROMPT = """
             你是演员职业资料结构化提取器。只输出合法 JSON 对象，不输出 Markdown 或解释。
             顶层必须包含 profileCandidates、workCandidates、ignoredMediaPlaceholderCount、unmappedSegments、warnings。
             profileCandidates 的 fieldKey 只允许：public_name, gender, age, height, current_city, weight,
@@ -36,6 +37,8 @@ public class DeepSeekProfileTextExtractor {
             film_tv、micro_film、horizontal、stage、other 或 null。
             syncSoundStatus 只允许 sync、dubbed、unknown 或 null。
             """;
+    private static final String LEGACY_REPAIR_PROMPT =
+            "仅修复以下内容为符合系统合同的合法 JSON，不改变任何事实：";
 
     private final ProfileImportHttpTransport transport;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -45,9 +48,40 @@ public class DeepSeekProfileTextExtractor {
     }
 
     public JsonNode extract(AiProfileImportConfig config, String apiKey, String rawText, String requestId) {
+        return extractWithPrompts(
+                config,
+                apiKey,
+                LEGACY_SYSTEM_PROMPT,
+                LEGACY_REPAIR_PROMPT,
+                rawText,
+                requestId);
+    }
+
+    public JsonNode extract(
+            AiProfileImportConfig config,
+            String apiKey,
+            ProfileImportPromptRuntime promptRuntime,
+            String rawText,
+            String requestId) {
+        return extractWithPrompts(
+                config,
+                apiKey,
+                promptRuntime.systemPrompt(),
+                promptRuntime.repairPrompt(),
+                rawText,
+                requestId);
+    }
+
+    private JsonNode extractWithPrompts(
+            AiProfileImportConfig config,
+            String apiKey,
+            String systemPrompt,
+            String repairPrompt,
+            String rawText,
+            String requestId) {
         String response;
         try {
-            response = post(config, apiKey, payload(rawText, config, false));
+            response = post(config, apiKey, payload(rawText, config, systemPrompt, repairPrompt, false));
             requireBoundedResponse(response, config);
         } catch (BizException error) {
             throw error;
@@ -61,7 +95,10 @@ public class DeepSeekProfileTextExtractor {
         } catch (Exception firstError) {
             String repaired;
             try {
-                repaired = post(config, apiKey, payload(response, config, true));
+                repaired = post(
+                        config,
+                        apiKey,
+                        payload(response, config, systemPrompt, repairPrompt, true));
                 requireBoundedResponse(repaired, config);
             } catch (BizException error) {
                 throw error;
@@ -109,15 +146,18 @@ public class DeepSeekProfileTextExtractor {
                 : trimmed;
     }
 
-    private String payload(String text, AiProfileImportConfig config, boolean repair) {
+    private String payload(
+            String text,
+            AiProfileImportConfig config,
+            String systemPrompt,
+            String repairPrompt,
+            boolean repair) {
         try {
-            String userContent = repair
-                    ? "仅修复以下内容为符合系统合同的合法 JSON，不改变任何事实：\n" + text
-                    : text;
+            String userContent = repair ? repairPrompt + "\n" + text : text;
             return mapper.writeValueAsString(Map.of(
                     "model", config.getModelName(),
                     "messages", List.of(
-                            Map.of("role", "system", "content", SYSTEM_PROMPT),
+                            Map.of("role", "system", "content", systemPrompt),
                             Map.of("role", "user", "content", userContent)),
                     "response_format", Map.of("type", "json_object"),
                     "max_tokens", positive(config.getMaxOutputTokens(), 8000),

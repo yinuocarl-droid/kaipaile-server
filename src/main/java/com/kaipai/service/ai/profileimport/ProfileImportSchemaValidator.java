@@ -18,6 +18,21 @@ import org.springframework.util.StringUtils;
 
 @Component
 public class ProfileImportSchemaValidator {
+    private static final Set<String> GOVERNED_ROOT_FIELDS = Set.of(
+            "profileCandidates", "workCandidates", "ignoredMediaPlaceholderCount",
+            "unmappedSegments", "warnings");
+    private static final Set<String> GOVERNED_PROFILE_CANDIDATE_FIELDS = Set.of(
+            "candidateId", "fieldKey", "candidateValue", "confidence", "sourceText",
+            "sourceType", "warning");
+    private static final Set<String> WORK_FIELD_KEYS = Set.of(
+            "projectName", "roleName", "publishStatus", "workTypeCode", "roleLevelCode",
+            "shootYear", "shootMonth", "platform", "syncSoundStatus", "collaborators",
+            "achievementText", "description");
+    private static final Set<String> GOVERNED_WORK_CANDIDATE_FIELDS = immutableUnion(
+            Set.of("candidateId", "projectName", "fields", "sourceType"),
+            WORK_FIELD_KEYS);
+    private static final Set<String> GOVERNED_WORK_EVIDENCE_FIELDS = Set.of(
+            "candidateValue", "confidence", "sourceText", "sourceType", "warning");
     private static final Set<String> PROFILE_FIELDS = Set.of(
             "public_name", "gender", "age", "height", "current_city", "weight", "origin_place",
             "school_name", "major_name", "language_tags", "specialty_tags", "role_type_tags",
@@ -39,10 +54,6 @@ public class ProfileImportSchemaValidator {
             "female_lead", "female_supporting_1", "female_supporting_2", "female_antagonist_1",
             "male_lead", "male_supporting_1", "male_supporting_2", "male_antagonist_1", "other");
     private static final Set<String> SYNC_SOUND_STATUSES = Set.of("sync", "dubbed", "unknown");
-    private static final Set<String> WORK_FIELD_KEYS = Set.of(
-            "projectName", "roleName", "publishStatus", "workTypeCode", "roleLevelCode",
-            "shootYear", "shootMonth", "platform", "syncSoundStatus", "collaborators",
-            "achievementText", "description");
     private static final Pattern FEMALE_ROLE_TEXT = Pattern.compile(
             "女主|女一|女二|女三|女反|女性角色|饰演[^\n，,]{0,16}(?:妻|母|姐|妹|女儿)");
     private static final Pattern MALE_ROLE_TEXT = Pattern.compile(
@@ -86,6 +97,12 @@ public class ProfileImportSchemaValidator {
             Map.entry("syncSoundStatus:dubbed", Set.of("配音", "后期配音")),
             Map.entry("syncSoundStatus:unknown", Set.of("未知", "不详")));
 
+    private static Set<String> immutableUnion(Set<String> left, Set<String> right) {
+        Set<String> result = new LinkedHashSet<>(left);
+        result.addAll(right);
+        return Set.copyOf(result);
+    }
+
     private final ObjectMapper mapper = new ObjectMapper();
 
     public ValidatedExtraction validate(String json) {
@@ -115,6 +132,55 @@ public class ProfileImportSchemaValidator {
         } catch (Exception error) {
             throw new IllegalArgumentException("invalid extraction", error);
         }
+    }
+
+    public ValidatedExtraction validate(String json, String rawText, String scene) {
+        require(Set.of("full_profile", "works_only").contains(scene),
+                "unsupported extraction scene");
+        JsonNode root;
+        try {
+            root = mapper.readTree(json);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("invalid extraction");
+        }
+        requireExactFields(root, GOVERNED_ROOT_FIELDS, "invalid extraction root fields");
+        JsonNode placeholderCount = root.get("ignoredMediaPlaceholderCount");
+        require(
+                placeholderCount != null
+                        && placeholderCount.isIntegralNumber()
+                        && placeholderCount.canConvertToInt()
+                        && placeholderCount.intValue() >= 0,
+                "invalid ignored media placeholder count structure");
+        require(root.path("profileCandidates").isArray(),
+                "invalid profile candidates structure");
+        for (JsonNode candidate : root.path("profileCandidates")) {
+            requireAllowedFields(
+                    candidate,
+                    GOVERNED_PROFILE_CANDIDATE_FIELDS,
+                    "invalid profile candidate fields");
+        }
+        require(root.path("workCandidates").isArray(),
+                "invalid work candidates structure");
+        for (JsonNode work : root.path("workCandidates")) {
+            requireAllowedFields(
+                    work,
+                    GOVERNED_WORK_CANDIDATE_FIELDS,
+                    "invalid work candidate fields");
+            JsonNode fields = work.path("fields");
+            require(fields.isObject(), "invalid work fields structure");
+            fields.fields().forEachRemaining(entry -> {
+                require(WORK_FIELD_KEYS.contains(entry.getKey()), "invalid work field key");
+                requireAllowedFields(
+                        entry.getValue(),
+                        GOVERNED_WORK_EVIDENCE_FIELDS,
+                        "invalid work field evidence fields");
+            });
+        }
+        if ("works_only".equals(scene)) {
+            require(root.path("profileCandidates").isEmpty(),
+                    "works_only profile candidates must be empty");
+        }
+        return validate(json, rawText);
     }
 
     public void validateProfileFinalValue(String field, String value) {
@@ -551,6 +617,18 @@ public class ProfileImportSchemaValidator {
 
     private void require(boolean condition, String message) {
         if (!condition) throw new IllegalArgumentException(message);
+    }
+
+    private void requireExactFields(JsonNode node, Set<String> expected, String message) {
+        require(node != null && node.isObject(), message);
+        Set<String> actual = new LinkedHashSet<>();
+        node.fieldNames().forEachRemaining(actual::add);
+        require(actual.equals(expected), message);
+    }
+
+    private void requireAllowedFields(JsonNode node, Set<String> allowed, String message) {
+        require(node != null && node.isObject(), message);
+        node.fieldNames().forEachRemaining(field -> require(allowed.contains(field), message));
     }
 
     public record Candidate(

@@ -52,6 +52,8 @@ class ProfileImportConfigServiceImplTest {
         json = new ObjectMapper();
         stored = configuredEntity();
         when(mapper.selectOne(any())).thenAnswer(invocation -> stored);
+        when(mapper.selectByProviderCodeForUpdate("deepseek"))
+                .thenAnswer(invocation -> stored);
         when(mapper.updateById(any())).thenAnswer(invocation -> {
             stored = invocation.getArgument(0);
             return 1;
@@ -110,6 +112,38 @@ class ProfileImportConfigServiceImplTest {
         stored.setLastTestStatus("failed");
         assertEquals(46002,
                 assertThrows(BizException.class, service::runtimeConfig).getCode());
+    }
+
+    @Test
+    void runtimeConfigCarriesTheExactPersistedConfigVersion() {
+        stored.setVersion(17);
+        stored.setEnabled(true);
+        stored.setSecretConfigCiphertext("cipher");
+        stored.setLastTestStatus("success");
+        when(crypto.decrypt("cipher")).thenReturn("{\"apiKey\":\"sk-memory-only\"}");
+
+        ProfileImportRuntimeConfig runtime = service.runtimeConfig();
+
+        assertEquals(1L, runtime.configId());
+        assertEquals(17, runtime.configVersion());
+        assertTrue(runtime.toString().contains("configVersion=17"));
+        assertFalse(runtime.toString().contains("sk-memory-only"));
+    }
+
+    @Test
+    void everyConfigurationMutationLocksDeepSeekBeforeReadingOrChangingIt() {
+        when(crypto.encrypt(any())).thenReturn("cipher");
+        stored.setSecretConfigCiphertext("cipher");
+        when(crypto.decrypt("cipher")).thenReturn("{\"apiKey\":\"sk-memory-only\"}");
+
+        service.savePublicConfig(9L, valid());
+        service.saveSecret(9L, new ProfileImportSecretUpdateDTO("sk-private-value"));
+        service.testConnection(9L);
+        stored.setLastTestStatus("success");
+        service.setEnabled(9L, true);
+
+        verify(mapper, org.mockito.Mockito.times(4))
+                .selectByProviderCodeForUpdate("deepseek");
     }
 
     @Test
@@ -246,7 +280,7 @@ class ProfileImportConfigServiceImplTest {
 
         String secretDto = new ProfileImportSecretUpdateDTO("sk-private-value").toString();
         String runtime = new ProfileImportRuntimeConfig(
-                1L, "https://api.deepseek.com/chat/completions", "deepseek-chat",
+                1L, 7, "https://api.deepseek.com/chat/completions", "deepseek-chat",
                 "sk-private-value", 3000, 30000, 20000, 8000, 10).toString();
         assertFalse(secretDto.contains("sk-private-value"));
         assertFalse(runtime.contains("sk-private-value"));
@@ -283,6 +317,7 @@ class ProfileImportConfigServiceImplTest {
         config.setMaxInputChars(20000);
         config.setMaxOutputTokens(8000);
         config.setPerUserDailyLimit(10);
+        config.setVersion(7);
         return config;
     }
 

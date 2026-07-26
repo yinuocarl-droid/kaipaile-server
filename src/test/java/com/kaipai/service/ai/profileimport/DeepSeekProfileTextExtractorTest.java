@@ -44,6 +44,58 @@ class DeepSeekProfileTextExtractorTest {
     }
 
     @Test
+    void runtimeAwareExtractionUsesTheSuppliedSystemAndRepairPromptsForOneBoundVersion()
+            throws Exception {
+        ProfileImportHttpTransport transport = mock(ProfileImportHttpTransport.class);
+        when(transport.post(any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn("not json", "{\"profileCandidates\":[],\"workCandidates\":[]}");
+        ProfileImportPromptRuntime runtime = new ProfileImportPromptRuntime(
+                11L,
+                "full_profile",
+                "full_profile",
+                101L,
+                4,
+                "profile-import-json-v1",
+                "profile-import-contract-v1",
+                "governed system prompt",
+                "governed repair prompt",
+                "runtime-hash");
+
+        new DeepSeekProfileTextExtractor(transport).extract(
+                config(), "sk-memory-only", runtime, "fixed fixture", "secret-request-id");
+
+        ArgumentCaptor<String> payloads = ArgumentCaptor.forClass(String.class);
+        verify(transport, times(2)).post(
+                eq(config().getEndpoint()), eq("sk-memory-only"), payloads.capture(),
+                anyInt(), anyInt());
+        JsonNode first = new ObjectMapper().readTree(payloads.getAllValues().get(0));
+        JsonNode repair = new ObjectMapper().readTree(payloads.getAllValues().get(1));
+        assertEquals("governed system prompt",
+                first.path("messages").path(0).path("content").asText());
+        assertEquals("fixed fixture",
+                first.path("messages").path(1).path("content").asText());
+        assertEquals("governed system prompt",
+                repair.path("messages").path(0).path("content").asText());
+        assertEquals("governed repair prompt\nnot json",
+                repair.path("messages").path(1).path("content").asText());
+        assertEquals("json_object", first.path("response_format").path("type").asText());
+        assertEquals(0, first.path("temperature").asInt());
+        assertFalse(payloads.getAllValues().stream()
+                .anyMatch(payload -> payload.contains("secret-request-id")));
+    }
+
+    @Test
+    void legacyPromptConstantsRemainExplicitlyNamedForThePhaseAProductionPath()
+            throws Exception {
+        assertNotNull(DeepSeekProfileTextExtractor.class
+                .getDeclaredField("LEGACY_SYSTEM_PROMPT"));
+        assertNotNull(DeepSeekProfileTextExtractor.class
+                .getDeclaredField("LEGACY_REPAIR_PROMPT"));
+        assertThrows(NoSuchFieldException.class,
+                () -> DeepSeekProfileTextExtractor.class.getDeclaredField("SYSTEM_PROMPT"));
+    }
+
+    @Test
     void invalidResponseGetsOneRepairThenReturns46007() {
         ProfileImportHttpTransport transport = mock(ProfileImportHttpTransport.class);
         when(transport.post(any(), any(), any(), anyInt(), anyInt()))

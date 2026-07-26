@@ -2,6 +2,7 @@ package com.kaipai.service.ai;
 
 public record ProfileImportRuntimeConfig(
         Long configId,
+        Integer configVersion,
         String endpoint,
         String modelName,
         String apiKey,
@@ -13,6 +14,7 @@ public record ProfileImportRuntimeConfig(
     @Override
     public String toString() {
         return "ProfileImportRuntimeConfig[configId=" + configId
+                + ", configVersion=" + configVersion
                 + ", endpoint=" + endpoint
                 + ", modelName=" + modelName
                 + ", apiKey=REDACTED"

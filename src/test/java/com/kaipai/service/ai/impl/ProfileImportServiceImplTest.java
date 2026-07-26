@@ -57,7 +57,7 @@ class ProfileImportServiceImplTest {
         ObjectMapper objectMapper = new ObjectMapper();
         proofs = new ProfileImportCandidateProofService("secret");
         when(config.runtimeConfig()).thenReturn(new ProfileImportRuntimeConfig(
-                3L, "https://api.deepseek.com/chat/completions", "deepseek-chat", "sk-memory",
+                3L, 7, "https://api.deepseek.com/chat/completions", "deepseek-chat", "sk-memory",
                 3000, 30000, 20000, 8000, 10));
         when(experienceMapper.selectList(any())).thenReturn(List.of());
         when(audit.insert(any())).thenReturn(1);
@@ -217,7 +217,7 @@ class ProfileImportServiceImplTest {
         when(config.capability()).thenReturn(availableCapability());
         when(limiter.allow(7L, 10)).thenReturn(true);
         ProfileImportRuntimeConfig runtime = new ProfileImportRuntimeConfig(
-                3L, "https://api.deepseek.com/chat/completions", "deepseek-chat", "sk-memory",
+                3L, 7, "https://api.deepseek.com/chat/completions", "deepseek-chat", "sk-memory",
                 3000, 30000, 20000, 8000, 10);
         when(config.runtimeConfig()).thenReturn(runtime);
         ActorProfile current = new ActorProfile();
