@@ -19,6 +19,13 @@ public interface AiProfileImportPromptVersionMapper
             @Param("templateId") Long templateId,
             @Param("promptVersionId") Long promptVersionId);
 
+    @Select("SELECT * FROM ai_profile_import_prompt_version "
+            + "WHERE template_id=#{templateId} AND prompt_version_id=#{promptVersionId} "
+            + "AND deleted=0 LIMIT 1")
+    AiProfileImportPromptVersion selectOwned(
+            @Param("templateId") Long templateId,
+            @Param("promptVersionId") Long promptVersionId);
+
     @Select("SELECT prompt_version_id, template_id, version_no, version_label, lifecycle_status, "
             + "content_sha256, test_status, tested_content_sha256, tested_runtime_sha256, "
             + "test_fixture_code, test_fixture_version, test_fixture_sha256, tested_model_name, "
