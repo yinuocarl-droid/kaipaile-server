@@ -45,6 +45,10 @@ public interface AiProfileImportPromptVersionMapper
             @Param("templateId") Long templateId,
             @Param("promptVersionId") Long promptVersionId);
 
+    @Select("SELECT COALESCE(MAX(version_no),0)+1 "
+            + "FROM ai_profile_import_prompt_version WHERE template_id=#{templateId}")
+    Integer selectNextVersionNo(@Param("templateId") Long templateId);
+
     @Update("UPDATE ai_profile_import_prompt_version SET "
             + "version_label=#{draft.versionLabel}, "
             + "system_prompt_body=#{draft.systemPromptBody}, "
@@ -52,7 +56,9 @@ public interface AiProfileImportPromptVersionMapper
             + "change_summary=#{draft.changeSummary}, "
             + "test_status=CASE WHEN content_sha256<>#{draft.contentSha256} "
             + "THEN 'stale' ELSE test_status END, "
-            + "content_sha256=#{draft.contentSha256}, version=version+1, "
+            + "content_sha256=#{draft.contentSha256}, "
+            + "update_user_id=#{draft.updateUserId}, "
+            + "update_user_name=#{draft.updateUserName}, version=version+1, "
             + "last_update=CURRENT_TIMESTAMP "
             + "WHERE prompt_version_id=#{draft.promptVersionId} "
             + "AND template_id=#{draft.templateId} AND lifecycle_status='draft' AND deleted=0 "
@@ -62,14 +68,17 @@ public interface AiProfileImportPromptVersionMapper
             @Param("expectedVersion") Integer expectedVersion);
 
     @Update("UPDATE ai_profile_import_prompt_version "
-            + "SET lifecycle_status='abandoned', version=version+1, "
+            + "SET lifecycle_status='abandoned', update_user_id=#{operatorId}, "
+            + "update_user_name=#{operatorName}, version=version+1, "
             + "last_update=CURRENT_TIMESTAMP "
             + "WHERE prompt_version_id=#{promptVersionId} AND template_id=#{templateId} "
             + "AND lifecycle_status='draft' AND deleted=0 AND version=#{expectedVersion}")
     int abandonDraftIfExpected(
             @Param("templateId") Long templateId,
             @Param("promptVersionId") Long promptVersionId,
-            @Param("expectedVersion") Integer expectedVersion);
+            @Param("expectedVersion") Integer expectedVersion,
+            @Param("operatorId") Long operatorId,
+            @Param("operatorName") String operatorName);
 
     @Update("UPDATE ai_profile_import_prompt_version SET "
             + "test_status=#{snapshot.testStatus}, "

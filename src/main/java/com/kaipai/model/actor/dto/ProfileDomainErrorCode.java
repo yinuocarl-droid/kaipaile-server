@@ -22,7 +22,9 @@ public enum ProfileDomainErrorCode {
     PROFILE_WORK_DUPLICATE(46015, "作品已存在"),
     PROFILE_WORK_IN_USE(46016, "作品正在被引用"),
     PROFILE_LEGACY_COLLECTION_WRITE_RETIRED(46017, "旧版作品或素材保存方式已停用，请升级后重试"),
-    PROFILE_IMPORT_PROMPT_INVALID(46019, "Prompt 模板或操作参数无效");
+    PROFILE_IMPORT_PROMPT_VERSION_CONFLICT(46018, "Prompt 版本已变化，请重新加载后人工合并"),
+    PROFILE_IMPORT_PROMPT_INVALID(46019, "Prompt 模板或操作参数无效"),
+    PROFILE_IMPORT_PROMPT_STATE_CONFLICT(46022, "Prompt 模板当前状态不允许该操作");
 
     private final int code;
     private final String message;

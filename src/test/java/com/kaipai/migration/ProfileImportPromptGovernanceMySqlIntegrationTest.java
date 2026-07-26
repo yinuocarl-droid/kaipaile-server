@@ -192,9 +192,13 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
     }
 
     @Test
-    void draftUpdatePersistsEditableLabelButKeepsCodeOwnedContractVersions() {
+    void conditionalDraftUpdateMakesSuccessfulTestStaleAndPersistsOperatorMetadata() {
         AiProfileImportPromptTemplate template =
                 templateMapper.selectByCodeForUpdate("full_profile");
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_profile_import_prompt_version SET test_status='success' "
+                        + "WHERE prompt_version_id=?",
+                template.getDraftVersionId()));
         AiProfileImportPromptVersion draft = versionMapper.selectOwnedForUpdate(
                 template.getTemplateId(), template.getDraftVersionId());
         Integer expectedVersion = draft.getVersion();
@@ -207,12 +211,15 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
         draft.setChangeSummary("quality adjustment");
         draft.setSchemaVersion("admin-must-not-change-schema");
         draft.setContractVersion("admin-must-not-change-contract");
+        draft.setUpdateUserId(73L);
+        draft.setUpdateUserName("Review Admin");
 
         assertEquals(1, versionMapper.updateDraftIfExpected(draft, expectedVersion));
 
         Map<String, Object> stored = jdbc.queryForMap(
                 "SELECT version_label, system_prompt_body, repair_prompt_body, "
-                        + "content_sha256, change_summary, schema_version, contract_version "
+                        + "content_sha256, change_summary, schema_version, contract_version, "
+                        + "test_status, update_user_id, update_user_name "
                         + "FROM ai_profile_import_prompt_version WHERE prompt_version_id=?",
                 draft.getPromptVersionId());
         assertEquals("bootstrap-v1-edited", stored.get("version_label"));
@@ -222,6 +229,9 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
         assertEquals("quality adjustment", stored.get("change_summary"));
         assertEquals("profile-import-json-v1", stored.get("schema_version"));
         assertEquals("profile-import-contract-v1", stored.get("contract_version"));
+        assertEquals("stale", stored.get("test_status"));
+        assertEquals(73L, stored.get("update_user_id"));
+        assertEquals("Review Admin", stored.get("update_user_name"));
     }
 
     private void pointFullProfileAtWorksDraft() {
