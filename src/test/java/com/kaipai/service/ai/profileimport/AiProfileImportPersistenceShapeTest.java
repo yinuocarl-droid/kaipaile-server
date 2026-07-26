@@ -12,10 +12,14 @@ import com.kaipai.model.ai.entity.AiProfileImportRequestAudit;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class AiProfileImportPersistenceShapeTest {
@@ -190,6 +194,57 @@ class AiProfileImportPersistenceShapeTest {
         }
     }
 
+    @Test
+    void permissionMigrationRegistersOnlyFiveTemplateActionsForActiveSystemAdmins()
+            throws Exception {
+        String rawSql = Files.readString(Path.of(
+                "src/main/resources/db/migration/"
+                        + "V20260726_002__ai_profile_import_prompt_permission_alignment.sql"));
+        String sql = executableSql(rawSql);
+        Map<String, String> expected = Map.of(
+                "@profile_prompt_read",
+                "action.system.ai-profile-import.template-read",
+                "@profile_prompt_update",
+                "action.system.ai-profile-import.template-update",
+                "@profile_prompt_test",
+                "action.system.ai-profile-import.template-test",
+                "@profile_prompt_publish",
+                "action.system.ai-profile-import.template-publish",
+                "@profile_prompt_restore",
+                "action.system.ai-profile-import.template-restore");
+        List<String> statements = sqlStatements(rawSql);
+        List<String> setStatements = statements.stream()
+                .filter(statement -> statement.startsWith("set @profile_prompt_"))
+                .toList();
+        List<String> updates = statements.stream()
+                .filter(statement -> statement.startsWith("update admin_role "))
+                .toList();
+
+        assertEquals(10, statements.size());
+        assertEquals(Set.copyOf(expected.values()), permissionLiterals(sql));
+        assertEquals(5, permissionLiteralCount(sql));
+        assertEquals(5, setStatements.size());
+        assertEquals(5, updates.size());
+        for (Map.Entry<String, String> grant : expected.entrySet()) {
+            assertEquals(1, setStatements.stream()
+                    .filter(statement -> statement.equals(
+                            "set " + grant.getKey() + " = '" + grant.getValue() + "'"))
+                    .count(), grant.getKey());
+            List<String> matchingUpdates = updates.stream()
+                    .filter(statement -> statement.contains(grant.getKey()))
+                    .toList();
+            assertEquals(1, matchingUpdates.size(), grant.getKey());
+            assertCompletePermissionUpdate(matchingUpdates.get(0), grant.getKey());
+        }
+
+        assertFalse(sql.contains("set menu_permissions_json"));
+        assertFalse(sql.contains("set page_permissions_json"));
+        assertFalse(sql.contains("page."));
+        assertFalse(sql.contains("action.system.ai-profile-import.audit"));
+        assertFalse(sql.contains("route."));
+        assertFalse(sql.contains("navigation."));
+    }
+
     private String governanceMigrationSql() throws Exception {
         return Files.readString(Path.of(
                 "src/main/resources/db/migration/V20260723_004__ai_profile_import_governance.sql"))
@@ -211,6 +266,98 @@ class AiProfileImportPersistenceShapeTest {
             offset += token.length();
         }
         return occurrences;
+    }
+
+    private Set<String> permissionLiterals(String sql) {
+        Set<String> permissions = new HashSet<>();
+        Matcher matcher = permissionPattern().matcher(sql);
+        while (matcher.find()) {
+            permissions.add(matcher.group());
+        }
+        return permissions;
+    }
+
+    private int permissionLiteralCount(String sql) {
+        int count = 0;
+        Matcher matcher = permissionPattern().matcher(sql);
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
+    }
+
+    private Pattern permissionPattern() {
+        return Pattern.compile("action\\.system\\.ai-profile-import\\.template-[a-z-]+");
+    }
+
+    private String executableSql(String rawSql) {
+        return normalizeSql(rawSql.replaceAll("(?m)--.*$", ""));
+    }
+
+    private List<String> sqlStatements(String rawSql) {
+        List<String> statements = new ArrayList<>();
+        for (String statement : executableSql(rawSql).split(";")) {
+            String normalized = statement.trim();
+            if (!normalized.isEmpty()) {
+                statements.add(normalized);
+            }
+        }
+        return statements;
+    }
+
+    private void assertCompletePermissionUpdate(String update, String variable) {
+        assertTrue(update.startsWith(
+                "update admin_role set action_permissions_json = json_array_append("));
+        List<String> assignments = topLevelAssignments(update);
+        assertEquals(1, assignments.size(), variable);
+        assertTrue(assignments.get(0).startsWith(
+                "action_permissions_json = json_array_append("));
+        assertTrue(update.contains(
+                "where status = 1 and deleted = 0 and ( lower(role_code) "
+                        + "in ('admin', 'super_admin')"));
+        assertTrue(update.contains(
+                "json_contains( coalesce(menu_permissions_json, json_array()), "
+                        + "json_quote('menu.system'))"));
+        assertTrue(update.contains(
+                "and not json_contains( coalesce(action_permissions_json, json_array()), "
+                        + "json_quote(" + variable + "))"));
+        for (String other : List.of(
+                "@profile_prompt_read",
+                "@profile_prompt_update",
+                "@profile_prompt_test",
+                "@profile_prompt_publish",
+                "@profile_prompt_restore")) {
+            if (!other.equals(variable)) {
+                assertFalse(update.contains(other), variable + " contains " + other);
+            }
+        }
+    }
+
+    private List<String> topLevelAssignments(String update) {
+        int setStart = update.indexOf(" set ");
+        int whereStart = update.indexOf(" where ", setStart + 5);
+        assertTrue(setStart >= 0 && whereStart > setStart, update);
+        String clause = update.substring(setStart + 5, whereStart);
+        List<String> assignments = new ArrayList<>();
+        int depth = 0;
+        int assignmentStart = 0;
+        boolean quoted = false;
+        for (int index = 0; index < clause.length(); index++) {
+            char current = clause.charAt(index);
+            if (current == '\'') {
+                quoted = !quoted;
+            } else if (!quoted && current == '(') {
+                depth++;
+            } else if (!quoted && current == ')') {
+                depth--;
+            } else if (!quoted && current == ',' && depth == 0) {
+                assignments.add(clause.substring(assignmentStart, index).trim());
+                assignmentStart = index + 1;
+            }
+        }
+        assertEquals(0, depth, update);
+        assignments.add(clause.substring(assignmentStart).trim());
+        return assignments;
     }
 
     private String tableBlock(String sql, String declaration) {

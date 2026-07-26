@@ -53,6 +53,14 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
 
     private static final String V001 =
             "V20260726_001__ai_profile_import_prompt_template_governance.sql";
+    private static final String V002 =
+            "V20260726_002__ai_profile_import_prompt_permission_alignment.sql";
+    private static final List<String> PROMPT_PERMISSIONS = List.of(
+            "action.system.ai-profile-import.template-read",
+            "action.system.ai-profile-import.template-update",
+            "action.system.ai-profile-import.template-test",
+            "action.system.ai-profile-import.template-publish",
+            "action.system.ai-profile-import.template-restore");
     private static final String[] MIGRATIONS = {
         "V20260331_001__platform_admin_baseline.sql",
         "V20260331_002__platform_admin_governance_alignment.sql",
@@ -234,6 +242,32 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
         assertEquals("Review Admin", stored.get("update_user_name"));
     }
 
+    @Test
+    void permissionMigrationIsExecutableIdempotentAndScopesOnlyLiveEligibleRoles()
+            throws Exception {
+        jdbc.update("DELETE FROM admin_role WHERE role_code IN "
+                + "('admin','super_admin','inactive_admin','deleted_admin',"
+                + "'invalid_status_admin','custom_system','unrelated')");
+        seedRole("admin", 1, 0, "[]", "[\"existing.action\"]");
+        seedRole("super_admin", 1, 0, "[]", "[\"super.keep\"]");
+        seedRole("inactive_admin", 2, 0, "[\"menu.system\"]", "[]");
+        seedRole("invalid_status_admin", 0, 0, "[\"menu.system\"]", "[]");
+        seedRole("deleted_admin", 1, 1, "[\"menu.system\"]", "[]");
+        seedRole("custom_system", 1, 0, "[\"menu.system\"]", "[\"custom.keep\"]");
+        seedRole("unrelated", 1, 0, "[\"menu.dashboard\"]", "[]");
+
+        executeSql(permissionMigrationSql());
+        executeSql(permissionMigrationSql());
+
+        assertPermissionsExactlyOnce("admin", "existing.action");
+        assertPermissionsExactlyOnce("super_admin", "super.keep");
+        assertPermissionsExactlyOnce("custom_system", "custom.keep");
+        assertNoPromptPermissions("inactive_admin");
+        assertNoPromptPermissions("invalid_status_admin");
+        assertNoPromptPermissions("deleted_admin");
+        assertNoPromptPermissions("unrelated");
+    }
+
     private void pointFullProfileAtWorksDraft() {
         jdbc.update("UPDATE ai_profile_import_prompt_template "
                         + "SET draft_version_id=? WHERE template_code='full_profile' AND deleted=0",
@@ -334,6 +368,67 @@ class ProfileImportPromptGovernanceMySqlIntegrationTest {
         return Files.readString(
                 Path.of("src/main/resources/db/migration").resolve(V001),
                 StandardCharsets.UTF_8);
+    }
+
+    private String permissionMigrationSql() throws IOException {
+        return Files.readString(
+                Path.of("src/main/resources/db/migration").resolve(V002),
+                StandardCharsets.UTF_8);
+    }
+
+    private void seedRole(
+            String roleCode,
+            int status,
+            int deleted,
+            String menuPermissions,
+            String actionPermissions) {
+        jdbc.update("INSERT INTO admin_role "
+                        + "(role_code, role_name, status, deleted, "
+                        + "menu_permissions_json, action_permissions_json) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                roleCode,
+                roleCode,
+                status,
+                deleted,
+                menuPermissions,
+                actionPermissions);
+    }
+
+    private void assertPermissionsExactlyOnce(String roleCode, String preservedPermission) {
+        assertEquals(1, permissionCount(roleCode, preservedPermission));
+        for (String permission : PROMPT_PERMISSIONS) {
+            assertEquals(1, permissionCount(roleCode, permission), roleCode + ":" + permission);
+        }
+        assertEquals(
+                PROMPT_PERMISSIONS.size(),
+                promptPermissionCount(roleCode),
+                roleCode + " must contain only the five prompt actions once");
+    }
+
+    private void assertNoPromptPermissions(String roleCode) {
+        assertEquals(0, promptPermissionCount(roleCode), roleCode);
+    }
+
+    private int permissionCount(String roleCode, String permission) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM admin_role r "
+                        + "JOIN JSON_TABLE(COALESCE(r.action_permissions_json, JSON_ARRAY()), "
+                        + "'$[*]' COLUMNS(permission VARCHAR(128) PATH '$')) p "
+                        + "WHERE r.role_code=? AND p.permission=?",
+                Integer.class,
+                roleCode,
+                permission);
+    }
+
+    private int promptPermissionCount(String roleCode) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM admin_role r "
+                        + "JOIN JSON_TABLE(COALESCE(r.action_permissions_json, JSON_ARRAY()), "
+                        + "'$[*]' COLUMNS(permission VARCHAR(128) PATH '$')) p "
+                        + "WHERE r.role_code=? "
+                        + "AND p.permission LIKE 'action.system.ai-profile-import.template-%'",
+                Integer.class,
+                roleCode);
     }
 
     private String bootstrapBlock(String sql) {
