@@ -74,6 +74,7 @@ class ActorProfileWriteServiceImplTest {
     @Test
     void mineReturnsVersionedCareerProfile() {
         current.setNickName("王火火");
+        current.setWeight(45);
         current.setLanguageTagsJson("[\"粤语\",\"英语\"]");
 
         var response = service.mine(7L);
@@ -81,6 +82,7 @@ class ActorProfileWriteServiceImplTest {
         assertEquals(3, response.getProfileVersion());
         assertEquals(12L, response.getWorkLibraryVersion());
         assertEquals("王火火", response.getPublicName());
+        assertEquals(45, response.getWeight());
         assertEquals(List.of("粤语", "英语"), response.getLanguageTags());
     }
 

@@ -1,6 +1,7 @@
 package com.kaipai.controller.api.actor;
 
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,6 +23,7 @@ import com.kaipai.service.actor.ActorProfileWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -53,6 +55,7 @@ class ActorProfileControllerContractTest {
         mockMvc.perform(get("/actor/profile/mine").principal(authentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.publicName").value("王火火"))
+                .andExpect(jsonPath("$.data.weight").value(45))
                 .andExpect(jsonPath("$.data.profileVersion").value(3))
                 .andExpect(jsonPath("$.data.workLibraryVersion").value(12));
 
@@ -153,15 +156,21 @@ class ActorProfileControllerContractTest {
                                     "height": 170,
                                     "currentCity": "杭州"
                                   },
-                                  "career": {},
+                                  "career": {
+                                    "weight": 45
+                                  },
                                   "intro": "演员"
                                 }
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.weight").value(45))
                 .andExpect(jsonPath("$.data.profileVersion").value(4))
                 .andExpect(jsonPath("$.data.workLibraryVersion").value(12));
 
-        verify(profileWriteService).saveMine(any(Long.class), any(ActorProfileMineUpdateDTO.class));
+        ArgumentCaptor<ActorProfileMineUpdateDTO> requestCaptor =
+                ArgumentCaptor.forClass(ActorProfileMineUpdateDTO.class);
+        verify(profileWriteService).saveMine(any(Long.class), requestCaptor.capture());
+        assertEquals(45, requestCaptor.getValue().getCareer().getWeight());
         verifyNoInteractions(legacyProfileService);
     }
 
@@ -173,6 +182,7 @@ class ActorProfileControllerContractTest {
         ActorProfileRespDTO profile = new ActorProfileRespDTO();
         profile.setUserId(USER_ID);
         profile.setPublicName("王火火");
+        profile.setWeight(45);
         profile.setProfileVersion(profileVersion);
         profile.setWorkLibraryVersion(workLibraryVersion);
         return profile;

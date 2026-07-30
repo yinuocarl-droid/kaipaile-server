@@ -127,7 +127,8 @@ public class ActorWorkServiceImpl implements ActorWorkService, ActorWorkInternal
     }
 
     public List<ActorWorkRespDTO> representativeWorks(Long userId) {
-        ActorProfile profile = requireProfile(userId);
+        ActorProfile profile = findProfile(userId);
+        if (profile == null) return List.of();
         List<ActorProfileRepresentativeWork> relations = representativeMapper.selectList(
                 new LambdaQueryWrapper<ActorProfileRepresentativeWork>()
                         .eq(ActorProfileRepresentativeWork::getActorProfileId, profile.getActorProfileId())
@@ -141,7 +142,8 @@ public class ActorWorkServiceImpl implements ActorWorkService, ActorWorkInternal
         return ids.stream().map(works::get).filter(Objects::nonNull).map(this::toResponse).toList();
     }
 
-    private ActorProfile requireProfile(Long userId) { ActorProfile p = profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId, userId).last("limit 1")); if (p == null) throw new BizException("演员档案不存在"); return p; }
+    private ActorProfile findProfile(Long userId) { return profileMapper.selectOne(new LambdaQueryWrapper<ActorProfile>().eq(ActorProfile::getUserId, userId).last("limit 1")); }
+    private ActorProfile requireProfile(Long userId) { ActorProfile p = findProfile(userId); if (p == null) throw new BizException("演员档案不存在"); return p; }
     private ActorExperience requireWork(Long userId, Long id) { ActorExperience w = experienceMapper.selectOne(new LambdaQueryWrapper<ActorExperience>().eq(ActorExperience::getUserId, userId).eq(ActorExperience::getExperienceId, id).last("limit 1")); if (w == null) throw new BizException("作品不存在"); return w; }
     private void incrementVersion(ActorProfile p) {
         if (profileMapper.incrementWorkLibraryVersion(p.getActorProfileId()) != 1) {

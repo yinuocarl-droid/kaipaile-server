@@ -49,8 +49,9 @@ tencent:
     connect-timeout-ms: ${TENCENT_FACEID_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${TENCENT_FACEID_READ_TIMEOUT_MS:10000}
   cos:
-    region: ${TENCENT_COS_REGION:}
-    bucket-name: ${TENCENT_COS_BUCKET_NAME:}
+    region: ${TENCENT_COS_REGION:${COS_REGION:}}
+    bucket-name: ${TENCENT_COS_BUCKET_NAME:${COS_BUCKET_NAME:}}
+    private-bucket-name: ${TENCENT_COS_PRIVATE_BUCKET_NAME:${COS_PRIVATE_BUCKET_NAME:}}
 
 kaipai:
   cors:

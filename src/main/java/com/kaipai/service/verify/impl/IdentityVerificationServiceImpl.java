@@ -29,6 +29,7 @@ import com.kaipai.integration.verify.RealNameVerificationProvider;
 import com.kaipai.integration.verify.RealNameVerificationResult;
 import com.kaipai.service.verify.IdentityVerificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DuplicateKeyException;
@@ -37,10 +38,12 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerificationMapper, IdentityVerification> implements IdentityVerificationService {
@@ -66,6 +69,8 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         try {
             latestRecord = selectLatestByUserId(userId);
         } catch (RuntimeException error) {
+            log.warn("读取最新实名记录失败，回退到用户实名状态: userId={}, fallbackStatus={}",
+                    userId, defaultResp.getStatus(), error);
             return defaultResp;
         }
         if (latestRecord == null) {
@@ -214,8 +219,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         dto.setVerificationId(record.getVerificationId());
         dto.setUserId(record.getUserId());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNoCipher(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
-        dto.setIdCardNoMasked(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
+        dto.setIdCardNoMasked(resolveMaskedIdCardNo(record.getIdCardNoMasked()));
         dto.setStatus(record.getStatus());
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmitTime(record.getCreateTime());
@@ -372,11 +376,19 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
         dto.setStatus(record.getStatus());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNo(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
+        dto.setIdCardNo(resolveMaskedIdCardNo(record.getIdCardNoMasked()));
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmittedAt(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
         return dto;
+    }
+
+    private String resolveMaskedIdCardNo(String maskedIdCardNo) {
+        if (maskedIdCardNo == null) {
+            return null;
+        }
+        String normalized = maskedIdCardNo.trim().toUpperCase(Locale.ROOT);
+        return normalized.matches("\\d{3}\\*{11}\\d{3}[\\dX]") ? normalized : null;
     }
 
     private String normalizeIdCardNo(String idCardNo) {

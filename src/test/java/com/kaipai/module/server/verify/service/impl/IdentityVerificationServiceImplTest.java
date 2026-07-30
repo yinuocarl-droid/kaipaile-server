@@ -5,6 +5,7 @@ import com.kaipai.common.auth.AdminOperationLogger;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.model.user.entity.User;
+import com.kaipai.model.verify.dto.IdentityVerificationDetailRespDTO;
 import com.kaipai.model.verify.dto.IdentityVerificationStatusRespDTO;
 import com.kaipai.model.verify.dto.IdentityVerificationSubmitReqDTO;
 import com.kaipai.model.verify.entity.IdentityVerification;
@@ -27,7 +28,10 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -109,14 +113,115 @@ class IdentityVerificationServiceImplTest {
         TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
         User user = new User();
         user.setUserId(10001L);
-        user.setRealAuthStatus(0);
+        user.setRealAuthStatus(2);
         when(fixture.userMapper.selectById(10001L)).thenReturn(user);
-        when(fixture.identityVerificationMapper.selectOne(any()))
+        when(fixture.identityVerificationMapper.selectOne(any(), eq(false)))
                 .thenThrow(new RuntimeException("identity_verification schema unavailable"));
 
         IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10001L);
 
+        assertEquals(2, result.getStatus());
+        verify(fixture.identityVerificationMapper).selectOne(any(), eq(false));
+    }
+
+    @Test
+    void currentStatusShouldNotSwallowUserLookupFailure() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        when(fixture.userMapper.selectById(10001L))
+                .thenThrow(new RuntimeException("user table unavailable"));
+
+        RuntimeException error = assertThrows(RuntimeException.class,
+                () -> fixture.service.currentStatus(10001L));
+
+        assertEquals("user table unavailable", error.getMessage());
+    }
+
+    @Test
+    void currentStatusShouldReturnDefaultStatusWhenNoVerificationRecordExists() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        when(fixture.identityVerificationMapper.selectOne(any(), eq(false))).thenReturn(null);
+
+        IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10000L);
+
         assertEquals(0, result.getStatus());
+    }
+
+    @Test
+    void currentStatusShouldMapLatestVerificationRecord() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        LocalDateTime submittedAt = LocalDateTime.of(2026, 7, 27, 19, 30);
+        LocalDateTime reviewedAt = LocalDateTime.of(2026, 7, 27, 20, 0);
+        IdentityVerification record = new IdentityVerification();
+        record.setStatus(3);
+        record.setRealName("林夏");
+        record.setIdCardNoCipher("encrypted-id-card");
+        record.setIdCardNoMasked("110***********002X");
+        record.setRejectReason("实名认证信息核验未通过");
+        record.setCreateTime(submittedAt);
+        record.setReviewedAt(reviewedAt);
+        when(fixture.identityVerificationMapper.selectOne(any(), eq(false))).thenReturn(record);
+
+        IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10000L);
+
+        assertEquals(3, result.getStatus());
+        assertEquals("林夏", result.getRealName());
+        assertEquals("110***********002X", result.getIdCardNo());
+        assertEquals("实名认证信息核验未通过", result.getRejectReason());
+        assertEquals(submittedAt, result.getSubmittedAt());
+        assertEquals(reviewedAt, result.getReviewedAt());
+    }
+
+    @Test
+    void currentStatusShouldNotExposeCipherWhenMaskedIdCardIsMissing() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        IdentityVerification record = new IdentityVerification();
+        record.setStatus(1);
+        record.setIdCardNoCipher("sha256:stable-internal-identity-hash");
+        record.setIdCardNoMasked(null);
+        when(fixture.identityVerificationMapper.selectOne(any(), eq(false))).thenReturn(record);
+
+        IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10000L);
+
+        assertNull(result.getIdCardNo());
+    }
+
+    @Test
+    void currentStatusShouldRejectCipherCopiedIntoMaskedColumn() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        IdentityVerification record = new IdentityVerification();
+        record.setStatus(1);
+        record.setIdCardNoCipher("sha256:stable-internal-identity-hash");
+        record.setIdCardNoMasked("sha256:stable-internal-identity-hash");
+        when(fixture.identityVerificationMapper.selectOne(any(), eq(false))).thenReturn(record);
+
+        IdentityVerificationStatusRespDTO result = fixture.service.currentStatus(10000L);
+
+        assertNull(result.getIdCardNo());
+    }
+
+    @Test
+    void adminDetailShouldExposeOnlyCanonicalMaskedIdCard() {
+        TestFixture fixture = newFixture(RealNameVerificationResult.manual("unused"));
+        IdentityVerification record = new IdentityVerification();
+        record.setVerificationId(30000L);
+        record.setUserId(10000L);
+        record.setStatus(1);
+        record.setIdCardNoCipher("sha256:stable-internal-identity-hash");
+        when(fixture.identityVerificationMapper.selectById(30000L)).thenReturn(record);
+
+        for (String invalidMaskedValue : new String[] {
+                null,
+                "sha256:stable-internal-identity-hash",
+                "encrypted-id-card"
+        }) {
+            record.setIdCardNoMasked(invalidMaskedValue);
+            IdentityVerificationDetailRespDTO detail = fixture.service.adminDetail(30000L);
+            assertNull(detail.getIdCardNoMasked());
+        }
+
+        record.setIdCardNoMasked("110***********002x");
+        IdentityVerificationDetailRespDTO detail = fixture.service.adminDetail(30000L);
+        assertEquals("110***********002X", detail.getIdCardNoMasked());
     }
 
     private TestFixture newFixture(RealNameVerificationResult providerResult) {

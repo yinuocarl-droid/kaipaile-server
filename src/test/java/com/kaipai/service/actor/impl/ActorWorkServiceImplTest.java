@@ -117,6 +117,15 @@ class ActorWorkServiceImplTest {
     }
 
     @Test
+    void representativeWorksReturnsEmptyListWhenActorProfileDoesNotExist() {
+        when(profileMapper.selectOne(any())).thenReturn(null);
+
+        var result = service.representativeWorks(7L);
+
+        assertEquals(List.of(), result);
+    }
+
+    @Test
     void successfulCreateIncrementsWorkLibraryVersionExactlyOnce() {
         service.createWork(7L, workSave("测试作品", "角色"));
 
