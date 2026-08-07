@@ -3,6 +3,7 @@ package com.kaipai.model.actor.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.kaipai.common.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -50,6 +51,35 @@ public class ActorProfile extends BaseEntity {
     private String locationCity;
 
     private String avatarUrl;
+
+    private Long avatarAssetId;
+
+    private Long currentResumeAssetId;
+
+    private Integer birthYear;
+
+    private Integer birthMonth;
+
+    @TableField("birth_day")
+    private Integer birthDayOfMonth;
+
+    private String birthPrecision;
+
+    private String originPlace;
+
+    private String schoolName;
+
+    private String majorName;
+
+    private String languageTagsJson;
+
+    private String specialtyTagsJson;
+
+    private String roleTypeTagsJson;
+
+    private String professionalAbilityTagsJson;
+
+    private Long workLibraryVersion;
 
     private String coverUrl;
 

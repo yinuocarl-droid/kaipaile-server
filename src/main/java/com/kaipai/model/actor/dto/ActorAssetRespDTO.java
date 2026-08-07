@@ -1,0 +1,1 @@
+package com.kaipai.model.actor.dto; import lombok.Data; @Data public class ActorAssetRespDTO { private Long assetId; private String mediaType; private String categoryCode; private String originalName; private String mimeType; private Long sizeBytes; private Integer pageCount; private String processStatus; private String failureMessage; private String accessUrl; }

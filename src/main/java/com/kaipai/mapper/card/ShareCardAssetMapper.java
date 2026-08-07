@@ -1,0 +1,1 @@
+package com.kaipai.mapper.card; import com.baomidou.mybatisplus.core.mapper.BaseMapper; import com.kaipai.model.card.entity.ShareCardAsset; import org.apache.ibatis.annotations.Mapper; @Mapper public interface ShareCardAssetMapper extends BaseMapper<ShareCardAsset> {}

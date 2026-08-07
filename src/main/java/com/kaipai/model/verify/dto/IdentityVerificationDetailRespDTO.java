@@ -12,7 +12,6 @@ public class IdentityVerificationDetailRespDTO {
     private String userName;
     private String phone;
     private String realName;
-    private String idCardNoCipher;
     private String idCardNoMasked;
     private Integer status;
     private String rejectReason;

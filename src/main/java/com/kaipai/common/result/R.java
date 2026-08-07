@@ -9,6 +9,7 @@ public class R<T> implements Serializable {
 
     private int code;
     private String message;
+    private String errorCode;
     private T data;
 
     private R() {}
@@ -51,6 +52,12 @@ public class R<T> implements Serializable {
         R<T> r = new R<>();
         r.setCode(code);
         r.setMessage(message);
+        return r;
+    }
+
+    public static <T> R<T> fail(int code, String errorCode, String message) {
+        R<T> r = fail(code, message);
+        r.setErrorCode(errorCode);
         return r;
     }
 }

@@ -4,7 +4,10 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.model.actor.dto.ActorProfileDTO;
 import com.kaipai.model.actor.dto.ActorProfileSaveDTO;
+import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
+import com.kaipai.model.actor.dto.ActorProfileRespDTO;
 import com.kaipai.service.actor.ActorProfileService;
+import com.kaipai.service.actor.ActorProfileWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,10 +27,31 @@ import org.springframework.web.bind.annotation.RestController;
 public class ActorProfileController {
 
     private final ActorProfileService actorProfileService;
+    private final ActorProfileWriteService actorProfileWriteService;
 
-    @Operation(summary = "获取我的演员档案")
+    @Operation(summary = "获取我的核心与职业档案")
     @GetMapping("/mine")
-    public R<ActorProfileDTO> mine(Authentication authentication) {
+    public R<ActorProfileRespDTO> mine(Authentication authentication) {
+        return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
+    }
+
+    @Deprecated(forRemoval = false)
+    @Operation(
+            summary = "获取我的核心与职业档案（兼容别名）",
+            description = "已废弃；请改用 GET /api/actor/profile/mine。",
+            deprecated = true)
+    @GetMapping("/mine/career")
+    public R<ActorProfileRespDTO> careerMine(Authentication authentication) {
+        return R.ok(actorProfileWriteService.mine(currentUserId(authentication)));
+    }
+
+    @Deprecated(forRemoval = false)
+    @Operation(
+            summary = "获取我的旧版聚合演员档案（兼容）",
+            description = "已废弃；仅供旧聚合消费者过渡。新版调用 GET /api/actor/profile/mine。",
+            deprecated = true)
+    @GetMapping("/mine/legacy")
+    public R<ActorProfileDTO> legacyMine(Authentication authentication) {
         return R.ok(actorProfileService.mine(currentUserId(authentication)));
     }
 
@@ -45,6 +69,13 @@ public class ActorProfileController {
     public R<Void> save(Authentication authentication, @Valid @RequestBody ActorProfileSaveDTO dto) {
         actorProfileService.saveProfile(currentUserId(authentication), dto);
         return R.ok();
+    }
+
+    @Operation(summary = "保存我的核心与职业档案")
+    @PutMapping("/mine")
+    public R<ActorProfileRespDTO> saveMine(Authentication authentication,
+                                           @Valid @RequestBody ActorProfileMineUpdateDTO dto) {
+        return R.ok(actorProfileWriteService.saveMine(currentUserId(authentication), dto));
     }
 
     private Long currentUserId(Authentication authentication) {

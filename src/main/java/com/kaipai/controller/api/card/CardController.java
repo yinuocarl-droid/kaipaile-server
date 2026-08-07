@@ -17,6 +17,10 @@ import com.kaipai.service.card.ActorSharePreferenceService;
 import com.kaipai.service.card.CardSceneTemplateService;
 import com.kaipai.service.card.TemplatePublishLogService;
 import com.kaipai.service.card.UserShareCardService;
+import com.kaipai.service.card.ShareCardFavoriteService;
+import com.kaipai.common.result.PageResult;
+import com.kaipai.model.card.dto.ShareCardFavoriteItemDTO;
+import com.kaipai.model.card.dto.ShareCardFavoriteStateDTO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -30,6 +34,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 import java.util.List;
 
@@ -45,6 +51,27 @@ public class CardController {
     private final ActorSharePreferenceService sharePreferenceService;
     private final TemplatePublishLogService publishLogService;
     private final UserShareCardService userShareCardService;
+    private final ShareCardFavoriteService shareCardFavoriteService;
+
+    @GetMapping("/favorites")
+    public R<PageResult<ShareCardFavoriteItemDTO>> favorites(Authentication authentication, @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int size) {
+        return R.ok(shareCardFavoriteService.list(currentUserId(authentication), page, size));
+    }
+
+    @PutMapping("/{shareCardId}/favorite")
+    public R<ShareCardFavoriteStateDTO> favorite(Authentication authentication, @PathVariable Long shareCardId) {
+        return R.ok(shareCardFavoriteService.add(currentUserId(authentication), shareCardId));
+    }
+
+    @GetMapping("/{shareCardId}/favorite")
+    public R<ShareCardFavoriteStateDTO> favoriteState(Authentication authentication, @PathVariable Long shareCardId) {
+        return R.ok(shareCardFavoriteService.state(currentUserId(authentication), shareCardId));
+    }
+
+    @DeleteMapping("/{shareCardId}/favorite")
+    public R<ShareCardFavoriteStateDTO> unfavorite(Authentication authentication, @PathVariable Long shareCardId) {
+        return R.ok(shareCardFavoriteService.remove(currentUserId(authentication), shareCardId));
+    }
 
     @Operation(summary = "获取演员端场景模板列表")
     @GetMapping("/scene-templates")
