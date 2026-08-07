@@ -18,6 +18,11 @@ public class ActorCardRespDTO {
     private String sourceImageUrl;
     private String expandedImageUrl;
     private String generatedPreviewUrl;
+    private String profileSnapshotJson;
+    private String photosJson;
+    private String videoUrl;
+    private String attachmentUrl;
+    private String settingsJson;
     private Integer publishedVersion;
     private LocalDateTime publishedAt;
     private LocalDateTime createTime;

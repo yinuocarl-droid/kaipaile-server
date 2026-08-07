@@ -89,6 +89,11 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         dto.setSourceImageUrl(card.getSourceImageUrl());
         dto.setExpandedImageUrl(card.getExpandedImageUrl());
         dto.setGeneratedPreviewUrl(card.getGeneratedPreviewUrl());
+        dto.setProfileSnapshotJson(card.getProfileSnapshotJson());
+        dto.setPhotosJson(card.getPhotosJson());
+        dto.setVideoUrl(card.getVideoUrl());
+        dto.setAttachmentUrl(card.getAttachmentUrl());
+        dto.setSettingsJson(card.getSettingsJson());
         dto.setPublishedVersion(card.getPublishedVersion());
         dto.setPublishedAt(card.getPublishedAt());
         dto.setCreateTime(card.getCreateTime());
