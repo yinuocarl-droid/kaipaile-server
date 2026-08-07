@@ -1,5 +1,6 @@
 package com.kaipai.service.auth.impl;
 
+import com.kaipai.common.exception.BizException;
 import com.kaipai.common.util.JwtUtil;
 import com.kaipai.model.auth.dto.LoginRespDTO;
 import com.kaipai.model.auth.dto.WechatLoginReqDTO;
@@ -22,13 +23,48 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class AuthServiceImplTest {
+
+    @Test
+    void wechatLoginShouldFailBeforeUserLookupWhenMiniProgramConfigIsMissing() {
+        UserMapper userMapper = mock(UserMapper.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        JwtUtil jwtUtil = mock(JwtUtil.class);
+        ReferralRegistrationService referralRegistrationService = mock(ReferralRegistrationService.class);
+        ReferralRecordService referralRecordService = mock(ReferralRecordService.class);
+        WechatMiniProgramService wechatMiniProgramService = mock(WechatMiniProgramService.class);
+        SmsCodeSender smsCodeSender = mock(SmsCodeSender.class);
+        SmsProperties smsProperties = mock(SmsProperties.class);
+        AuthServiceImpl service = new AuthServiceImpl(
+                userMapper,
+                redisTemplate,
+                jwtUtil,
+                referralRegistrationService,
+                referralRecordService,
+                wechatMiniProgramService,
+                smsCodeSender,
+                smsProperties);
+        WechatLoginReqDTO dto = new WechatLoginReqDTO();
+        dto.setCode("wx-phone-code");
+
+        when(wechatMiniProgramService.isConfigured()).thenReturn(false);
+
+        BizException error = assertThrows(BizException.class, () -> service.loginByWechat(dto));
+
+        assertEquals("微信登录未配置小程序 appId/appSecret", error.getMessage());
+        verify(wechatMiniProgramService).isConfigured();
+        verifyNoMoreInteractions(wechatMiniProgramService);
+        verifyNoInteractions(userMapper, referralRegistrationService, referralRecordService);
+    }
 
     @Test
     void wechatLoginShouldRegisterNewUserAsActor() {
