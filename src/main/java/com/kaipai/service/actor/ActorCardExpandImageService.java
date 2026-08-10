@@ -89,7 +89,8 @@ public class ActorCardExpandImageService {
         }
         ActorCardExpandImageRespDTO resp = new ActorCardExpandImageRespDTO();
         resp.setTaskId(taskId);
-        resp.setStatus(task.getStatus());
+        // 边界归一化：持久层 success → 契约 done，见 ActorCardTaskStatus
+        resp.setStatus(ActorCardTaskStatus.toApi(task.getStatus()));
         resp.setOriginalUrl(task.getSourceImageUrl());
         resp.setExpandedUrl(task.getGeneratedImageUrl());
         resp.setFailureReason(task.getFailureReason());

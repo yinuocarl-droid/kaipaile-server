@@ -73,7 +73,8 @@ public class ActorCardGenerateService {
         }
         ActorCardGenerateRespDTO resp = new ActorCardGenerateRespDTO();
         resp.setTaskId(taskId);
-        resp.setStatus(task.getStatus());
+        // 边界归一化：持久层 success → 契约 done，见 ActorCardTaskStatus
+        resp.setStatus(ActorCardTaskStatus.toApi(task.getStatus()));
         resp.setPreviewUrl(task.getGeneratedImageUrl());
         resp.setFailureReason(task.getFailureReason());
         return resp;
