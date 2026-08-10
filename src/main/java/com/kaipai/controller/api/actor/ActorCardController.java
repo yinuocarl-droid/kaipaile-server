@@ -9,6 +9,8 @@ import com.kaipai.model.actor.card.dto.ActorCardGenerateRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
+import com.kaipai.model.actor.card.dto.ActorCardWorkRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardWorksReplaceReqDTO;
 import com.kaipai.model.actor.card.dto.ActorProfileCompletenessRespDTO;
 import com.kaipai.service.actor.ActorCardBackgroundService;
 import com.kaipai.service.actor.ActorCardDraftService;
@@ -17,6 +19,7 @@ import com.kaipai.service.actor.ActorCardGenerateService;
 import com.kaipai.service.actor.ActorCardPublishService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -63,6 +66,22 @@ public class ActorCardController {
     public R<ActorCardRespDTO> getDraft(Authentication authentication,
                                         @PathVariable Long cardId) {
         return R.ok(actorCardDraftService.getDraft(currentUserId(authentication), cardId));
+    }
+
+    @Operation(summary = "步骤3：整体替换参演作品快照")
+    @PutMapping("/draft/{cardId}/works")
+    public R<Void> replaceWorks(Authentication authentication,
+                                @PathVariable Long cardId,
+                                @Valid @RequestBody ActorCardWorksReplaceReqDTO dto) {
+        actorCardDraftService.replaceWorks(currentUserId(authentication), cardId, dto);
+        return R.ok();
+    }
+
+    @Operation(summary = "步骤3：读取已保存的参演作品快照")
+    @GetMapping("/draft/{cardId}/works")
+    public R<List<ActorCardWorkRespDTO>> listWorks(Authentication authentication,
+                                                   @PathVariable Long cardId) {
+        return R.ok(actorCardDraftService.listWorks(currentUserId(authentication), cardId));
     }
 
     @Operation(summary = "查询当前用户的草稿列表")
