@@ -1377,8 +1377,16 @@ class ProfileImportApplyMySqlIntegrationTest {
 
         @Bean
         ActorMediaAssetOwnershipVerifier actorMediaAssetOwnershipVerifier() {
-            return (userId, assetId) -> {
-                throw new UnsupportedOperationException("works_only must not resolve an avatar asset");
+            return new ActorMediaAssetOwnershipVerifier() {
+                @Override
+                public void requireOwnedReadyPhoto(Long userId, Long assetId) {
+                    throw new UnsupportedOperationException("works_only must not resolve an avatar asset");
+                }
+
+                @Override
+                public void requireOwnedReadyPdf(Long userId, Long assetId) {
+                    throw new UnsupportedOperationException("works_only must not resolve a resume asset");
+                }
             };
         }
     }

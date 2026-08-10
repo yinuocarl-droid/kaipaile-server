@@ -401,6 +401,37 @@ class ActorMediaAssetServiceImplTest {
         verify(assetMapper).selectOwnedActiveByIdsForUpdate(7L, List.of(81L));
     }
 
+    @Test void readyPdfOwnershipValidationUsesTheDeletionLockProtocol() {
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(7L, List.of(81L))).thenReturn(List.of(readyPdf(7L)));
+
+        service.requireOwnedReadyPdf(7L, 81L);
+
+        verify(assetMapper).selectOwnedActiveByIdsForUpdate(7L, List.of(81L));
+    }
+
+    /** 越权：归属查询按 userId 收口，他人素材查不出来，回 46012 而不是暴露「存在但不属于你」。 */
+    @Test void readyPdfValidationRejectsAnAssetOwnedBySomeoneElse() {
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(8L, List.of(81L))).thenReturn(List.of());
+
+        assertEquals(46012, assertThrows(BizException.class, () -> service.requireOwnedReadyPdf(8L, 81L)).getCode());
+    }
+
+    @Test void readyPdfValidationRejectsANonPdfAsset() {
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(7L, List.of(81L))).thenReturn(List.of(readyPhoto(7L)));
+
+        assertEquals(46013, assertThrows(BizException.class, () -> service.requireOwnedReadyPdf(7L, 81L)).getCode());
+    }
+
+    @Test void readyPdfValidationRejectsAPdfStillBeingProcessedOrFailed() {
+        ActorMediaAsset processing = readyPdf(7L); processing.setProcessStatus("processing");
+        ActorMediaAsset failed = readyPdf(7L); failed.setProcessStatus("failed");
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(7L, List.of(81L))).thenReturn(List.of(processing), List.of(failed));
+
+        assertAll(
+                () -> assertEquals(46013, assertThrows(BizException.class, () -> service.requireOwnedReadyPdf(7L, 81L)).getCode()),
+                () -> assertEquals(46013, assertThrows(BizException.class, () -> service.requireOwnedReadyPdf(7L, 81L)).getCode()));
+    }
+
     @Test
     void workAssetsReturnsTheMapperSnapshotForAnOwnedActiveWorkWithoutLocking() {
         ActorWorkAssetRespDTO still = workAssetSnapshot(81L, "still", 1);
@@ -690,6 +721,8 @@ class ActorMediaAssetServiceImplTest {
     }
 
     private ActorMediaAsset readyPhoto(Long userId) { ActorMediaAsset a = new ActorMediaAsset(); a.setAssetId(81L); a.setUserId(userId); a.setMediaType("photo"); a.setProcessStatus("ready"); a.setStorageProvider("cos"); a.setBucketCode("private"); a.setObjectKey("actor/7/a.jpg"); return a; }
+
+    private ActorMediaAsset readyPdf(Long userId) { ActorMediaAsset a = readyPhoto(userId); a.setMediaType("pdf"); a.setCategoryCode("resume"); a.setObjectKey("actor/7/resume.pdf"); a.setPageCount(3); return a; }
 
     private void stubStoredPdf(MockMultipartFile file, Long assetId, String objectKey) {
         when(storage.store(7L, "pdf", file)).thenReturn(

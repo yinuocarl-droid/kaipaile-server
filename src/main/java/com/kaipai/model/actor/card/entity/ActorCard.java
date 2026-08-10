@@ -52,8 +52,16 @@ public class ActorCard extends BaseEntity {
     /** 视频简历 URL（步骤 5） */
     private String videoUrl;
 
-    /** 附件简历 URL（步骤 6） */
+    /**
+     * 附件简历 URL（步骤 6）。
+     * 已停写：附件在私有桶，读取只能靠 10 分钟预签名 URL，持久化 URL 必然过期失效。
+     * 仅保留读取兼容旧数据，新逻辑一律走 attachmentAssetId。物理退场见 00-110。
+     */
+    @Deprecated
     private String attachmentUrl;
+
+    /** 附件简历素材 id（步骤 6，指向 actor_media_asset.asset_id） */
+    private Long attachmentAssetId;
 
     /** 生成设置 JSON（步骤 7） */
     private String settingsJson;

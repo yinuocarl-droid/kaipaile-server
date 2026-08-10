@@ -12,8 +12,16 @@ public class ActorMediaAssetOwnershipVerifierConfiguration {
     @Bean
     @ConditionalOnMissingBean(ActorMediaAssetOwnershipVerifier.class)
     ActorMediaAssetOwnershipVerifier unavailableActorMediaAssetOwnershipVerifier() {
-        return (userId, assetId) -> {
-            throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();
+        return new ActorMediaAssetOwnershipVerifier() {
+            @Override
+            public void requireOwnedReadyPhoto(Long userId, Long assetId) {
+                throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();
+            }
+
+            @Override
+            public void requireOwnedReadyPdf(Long userId, Long assetId) {
+                throw ProfileDomainErrorCode.PROFILE_ASSET_NOT_FOUND.toException();
+            }
         };
     }
 }
