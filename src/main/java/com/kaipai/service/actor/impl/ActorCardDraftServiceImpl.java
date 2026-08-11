@@ -6,13 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
+import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorkRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorksReplaceReqDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
+import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.service.actor.ActorCardDraftService;
+import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
+import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +36,8 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
 
     private final ActorCardMapper actorCardMapper;
     private final ActorCardWorkMapper actorCardWorkMapper;
+    private final ActorMediaAssetMapper actorMediaAssetMapper;
+    private final ActorMediaAssetOwnershipVerifier assetOwnershipVerifier;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -45,7 +51,13 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         return toDto(card);
     }
 
+    /**
+     * 必须带事务：附件绑定要走 {@code requireOwnedReadyPdf}，而该校验是
+     * {@code Propagation.MANDATORY} + {@code SELECT ... FOR UPDATE}，
+     * 无事务时会直接抛 IllegalTransactionStateException。
+     */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void saveStep(Long userId, Long cardId, ActorCardStepSaveReqDTO dto) {
         ActorCard card = requireOwned(userId, cardId);
         if (dto.getCurrentStep() != null) card.setCurrentStep(dto.getCurrentStep());
@@ -57,9 +69,34 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         if (StringUtils.hasText(dto.getProfileSnapshotJson())) card.setProfileSnapshotJson(dto.getProfileSnapshotJson());
         if (dto.getPhotosJson() != null) card.setPhotosJson(dto.getPhotosJson());
         if (dto.getVideoUrl() != null) card.setVideoUrl(dto.getVideoUrl());
-        if (dto.getAttachmentUrl() != null) card.setAttachmentUrl(dto.getAttachmentUrl());
+        applyAttachment(userId, card, dto.getAttachment());
         if (StringUtils.hasText(dto.getSettingsJson())) card.setSettingsJson(dto.getSettingsJson());
         actorCardMapper.updateById(card);
+    }
+
+    /**
+     * 步骤6 附件三态：
+     * <ul>
+     *   <li>{@code binding == null}（不传键）→ 不动，跳过/下一步走这条</li>
+     *   <li>{@code assetId != null} → 验权后绑定</li>
+     *   <li>{@code assetId == null}（显式传 null）→ 清空</li>
+     * </ul>
+     * 清空时连历史 {@code attachmentUrl} 一起清：否则用户点了删除、素材 id 清了，
+     * 历史 URL 还在，步骤 6 判据仍为真，页面会永远停在「已添加」且无法再次删除。
+     * <p>{@code dto.attachmentUrl} 已停写，此处刻意不采纳其新值。
+     */
+    private void applyAttachment(Long userId, ActorCard card, ActorCardStepSaveReqDTO.AttachmentBinding binding) {
+        if (binding == null) {
+            return;
+        }
+        if (binding.getAssetId() == null) {
+            card.setAttachmentAssetId(null);
+            card.setAttachmentUrl(null);
+            return;
+        }
+        assetOwnershipVerifier.requireOwnedReadyPdf(userId, binding.getAssetId());
+        card.setAttachmentAssetId(binding.getAssetId());
+        card.setAttachmentUrl(null);
     }
 
     @Override
@@ -185,6 +222,8 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         dto.setPhotosJson(card.getPhotosJson());
         dto.setVideoUrl(card.getVideoUrl());
         dto.setAttachmentUrl(card.getAttachmentUrl());
+        dto.setAttachmentAssetId(card.getAttachmentAssetId());
+        fillAttachmentDerived(dto, card);
         dto.setSettingsJson(card.getSettingsJson());
         dto.setPublishedVersion(card.getPublishedVersion());
         dto.setPublishedAt(card.getPublishedAt());
@@ -195,6 +234,28 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         dto.setStepStatuses(statuses);
         dto.setCompletionPercentage(calcCompletion(statuses));
         return dto;
+    }
+
+    /**
+     * 附件派生字段在服务端 join 资产表填充，前端渲染文件卡不必再发一次请求。
+     * 按 userId 一起过滤：卡本身已验归属，这里再收一次口，
+     * 避免历史脏数据（卡上残留了他人 assetId）把别人的文件名回读出去。
+     * 素材查不到（已删除）时三个派生字段留空，由页面提示重新添加，不让整张卡读不出来。
+     */
+    private void fillAttachmentDerived(ActorCardRespDTO dto, ActorCard card) {
+        if (card.getAttachmentAssetId() == null) {
+            return;
+        }
+        ActorMediaAsset asset = actorMediaAssetMapper.selectOne(new LambdaQueryWrapper<ActorMediaAsset>()
+                .eq(ActorMediaAsset::getAssetId, card.getAttachmentAssetId())
+                .eq(ActorMediaAsset::getUserId, card.getUserId())
+                .last("limit 1"));
+        if (asset == null) {
+            return;
+        }
+        dto.setAttachmentName(asset.getOriginalName());
+        dto.setAttachmentPageCount(asset.getPageCount());
+        dto.setAttachmentStatus(asset.getProcessStatus());
     }
 
     // ── 步骤状态派生（唯一真源） ───────────────────────────────────────────────
@@ -226,7 +287,9 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         boolean hasVideo = StringUtils.hasText(card.getVideoUrl());
         list.add(step(5, hasVideo ? "done" : "empty", hasVideo ? "已添加" : "未添加"));
 
-        boolean hasAttachment = StringUtils.hasText(card.getAttachmentUrl());
+        // 判据必须认 assetId：漏改会让步骤 6 在附件已绑定时仍显示「未添加」，
+        // 功能全对但用户看不到。历史 attachmentUrl 一并认，供老草稿显示与删除。
+        boolean hasAttachment = ActorCardAttachmentCriterion.hasAttachment(card);
         list.add(step(6, hasAttachment ? "done" : "empty", hasAttachment ? "已添加" : "未添加"));
 
         boolean hasSettings = StringUtils.hasText(card.getSettingsJson());

@@ -21,7 +21,26 @@ public class ActorCardRespDTO {
     private String profileSnapshotJson;
     private String photosJson;
     private String videoUrl;
+
+    /**
+     * 步骤6：历史附件 URL。已停写，仅回填供前端识别历史草稿并提供删除入口。
+     * 新数据一律看 {@link #attachmentAssetId}。
+     */
+    @Deprecated
     private String attachmentUrl;
+
+    /** 步骤6：附件简历素材 id */
+    private Long attachmentAssetId;
+
+    /** 附件文件名，服务端派生只读。前端渲染文件卡不必再发一次请求 */
+    private String attachmentName;
+
+    /** 附件页数，服务端派生只读 */
+    private Integer attachmentPageCount;
+
+    /** 附件处理状态 processing|ready|failed，服务端派生只读 */
+    private String attachmentStatus;
+
     private String settingsJson;
     private Integer publishedVersion;
     private LocalDateTime publishedAt;

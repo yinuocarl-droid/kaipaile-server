@@ -9,6 +9,7 @@ import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
 import com.kaipai.model.actor.card.dto.ActorProfileCompletenessRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.entity.ActorProfile;
+import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -122,7 +123,8 @@ public class ActorCardPublishService {
         done++;  // 参演作品：此处不查子表，简化为始终计1（实际由前端 Hub 页显示精确状态）
         if (StringUtils.hasText(card.getPhotosJson())) done++;
         if (StringUtils.hasText(card.getVideoUrl())) done++;
-        if (StringUtils.hasText(card.getAttachmentUrl())) done++;
+        // 与步骤标签共用同一判据，不再各写一份 hasText(attachmentUrl)
+        if (ActorCardAttachmentCriterion.hasAttachment(card)) done++;
         if (StringUtils.hasText(card.getSettingsJson())) done++;
         return done * 100 / total;
     }
