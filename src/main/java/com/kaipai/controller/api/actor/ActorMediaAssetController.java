@@ -6,6 +6,7 @@ import com.kaipai.common.result.R;
 import com.kaipai.model.actor.dto.*;
 import com.kaipai.service.actor.ActorMediaAssetService;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -66,6 +67,11 @@ public class ActorMediaAssetController {
     @PostMapping("/{id}/access-url")
     public R<ActorAssetAccessUrlRespDTO> accessUrl(Authentication auth, @PathVariable Long id) {
         return R.ok(actorMediaAssetService.issueOwnerAccessUrl(userId(auth), id));
+    }
+
+    @GetMapping("/{id}/pages")
+    public R<List<ActorAssetPageRespDTO>> listPages(Authentication auth, @PathVariable Long id) {
+        return R.ok(actorMediaAssetService.listPages(userId(auth), id));
     }
 
     private Long userId(Authentication auth) {

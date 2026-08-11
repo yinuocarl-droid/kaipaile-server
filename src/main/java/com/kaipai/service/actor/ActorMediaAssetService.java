@@ -15,5 +15,6 @@ public interface ActorMediaAssetService extends ActorMediaAssetOwnershipVerifier
     List<ActorWorkAssetRespDTO> workAssets(Long userId, Long experienceId);
     void replaceWorkAssets(Long userId, Long experienceId, ActorWorkAssetsReplaceDTO request);
     ActorAssetAccessUrlRespDTO issueOwnerAccessUrl(Long userId, Long assetId);
+    List<ActorAssetPageRespDTO> listPages(Long userId, Long assetId);
     void delete(Long userId, Long assetId);
 }

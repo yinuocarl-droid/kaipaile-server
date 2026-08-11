@@ -1,0 +1,1 @@
+package com.kaipai.model.actor.dto; import java.time.Instant; import lombok.*; @Data @AllArgsConstructor public class ActorAssetPageRespDTO { private Integer pageNo; private String accessUrl; private Instant expiresAt; }

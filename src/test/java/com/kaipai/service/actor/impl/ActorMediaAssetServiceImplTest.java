@@ -432,6 +432,33 @@ class ActorMediaAssetServiceImplTest {
                 () -> assertEquals(46013, assertThrows(BizException.class, () -> service.requireOwnedReadyPdf(7L, 81L)).getCode()));
     }
 
+    @Test void listPagesVerifiesOwnershipAndRejectsNonPdfOrNotReady() {
+        ActorMediaAsset pdf = readyPdf(7L);
+        ActorMediaAssetPage page1 = new ActorMediaAssetPage(); page1.setPageNo(1); page1.setImageObjectKey("page-1.jpg");
+        ActorMediaAssetPage page2 = new ActorMediaAssetPage(); page2.setPageNo(2); page2.setImageObjectKey("page-2.jpg");
+        when(assetMapper.selectOne(any())).thenReturn(pdf, null, readyPhoto(7L));
+        when(pageMapper.selectList(any())).thenReturn(List.of(page1, page2));
+        when(storage.issueAccessUrl(any(), any(), any())).thenAnswer(call ->
+            new PrivateActorMediaStorage.SignedAccess("https://signed/" + call.getArgument(1),
+                java.time.Instant.now().plusSeconds(600)));
+
+        var pages = service.listPages(7L, 81L);
+
+        assertEquals(2, pages.size());
+        assertEquals(1, pages.get(0).getPageNo());
+        assertEquals("https://signed/page-1.jpg", pages.get(0).getAccessUrl());
+        assertEquals(2, pages.get(1).getPageNo());
+        assertEquals(46012, assertThrows(BizException.class, () -> service.listPages(8L, 81L)).getCode());
+        assertEquals(46013, assertThrows(BizException.class, () -> service.listPages(7L, 81L)).getCode());
+    }
+
+    @Test void listPagesReturnsEmptyForPdfWithNoPages() {
+        when(assetMapper.selectOne(any())).thenReturn(readyPdf(7L));
+        when(pageMapper.selectList(any())).thenReturn(List.of());
+
+        assertEquals(List.of(), service.listPages(7L, 81L));
+    }
+
     @Test
     void workAssetsReturnsTheMapperSnapshotForAnOwnedActiveWorkWithoutLocking() {
         ActorWorkAssetRespDTO still = workAssetSnapshot(81L, "still", 1);
