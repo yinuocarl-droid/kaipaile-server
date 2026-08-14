@@ -7,6 +7,7 @@ import com.kaipai.model.actor.card.dto.ActorCardExpandImageReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardExpandImageRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardGenerateRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
+import com.kaipai.model.actor.card.dto.ActorCardPublicRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorkRespDTO;
@@ -16,6 +17,7 @@ import com.kaipai.service.actor.ActorCardBackgroundService;
 import com.kaipai.service.actor.ActorCardDraftService;
 import com.kaipai.service.actor.ActorCardExpandImageService;
 import com.kaipai.service.actor.ActorCardGenerateService;
+import com.kaipai.service.actor.ActorCardPublicService;
 import com.kaipai.service.actor.ActorCardPublishService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -45,6 +47,7 @@ public class ActorCardController {
     private final ActorCardExpandImageService expandImageService;
     private final ActorCardGenerateService generateService;
     private final ActorCardPublishService publishService;
+    private final ActorCardPublicService publicService;
 
     @Operation(summary = "新建演员卡草稿")
     @PostMapping("/draft")
@@ -168,6 +171,21 @@ public class ActorCardController {
     @GetMapping("/profile/completeness")
     public R<ActorProfileCompletenessRespDTO> completeness(Authentication authentication) {
         return R.ok(publishService.completeness(currentUserId(authentication)));
+    }
+
+    // ── 00-215 / 00-218: 公开观看与复制创建 ─────────────────────────────────────
+
+    @Operation(summary = "公开查看已发布演员卡（观看者分享落地，无需鉴权；草稿 403 / 不存在 404）")
+    @GetMapping("/public/{cardId}")
+    public R<ActorCardPublicRespDTO> publicView(@PathVariable Long cardId) {
+        return R.ok(publicService.getPublicView(cardId));
+    }
+
+    @Operation(summary = "复制已发布演员卡为新草稿（含参演作品子表）")
+    @PostMapping("/{cardId}/copy")
+    public R<ActorCardRespDTO> copy(Authentication authentication,
+                                    @PathVariable Long cardId) {
+        return R.ok(publicService.copy(currentUserId(authentication), cardId));
     }
 
     private Long currentUserId(Authentication authentication) {
