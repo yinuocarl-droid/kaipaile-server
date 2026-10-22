@@ -11,6 +11,7 @@ import com.kaipai.model.ai.entity.ActorAiProfileCardTask;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -33,17 +34,36 @@ public class ActorCardGenerateService {
     private static final String STATUS_RUNNING  = "running";
     private static final String STATUS_SUCCESS  = "success";
     private static final String STATUS_FAILED   = "failed";
+    private static final String USAGE_SOURCE_IMAGE = "source_image";
+    private static final String STRUCTURED_PREVIEW_PREFIX = "structured://actor-card/";
 
     private final ActorCardMapper actorCardMapper;
     private final ActorCardWorkMapper actorCardWorkMapper;
     private final ActorAiProfileCardTaskMapper taskMapper;
+    private final ActorCardMediaBindingService mediaBindingService;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor taskExecutor;
 
     public ActorCardGenerateRespDTO submit(Long userId, Long cardId) {
         ActorCard card = requireOwned(userId, cardId);
-        validateRequiredSteps(card);
+        boolean hasEffectiveSource;
+        String generationInput;
+        try {
+            var sourceBinding = mediaBindingService.list(userId, cardId, USAGE_SOURCE_IMAGE, null);
+            hasEffectiveSource = ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding);
+            generationInput = ActorCardMainVisualResolver.resolveGenerateInput(card, sourceBinding);
+        } catch (DataAccessException ignored) {
+            // migration 尚未落地时保留两个历史 URL；新 assetId 路径仍要求先执行 migration。
+            hasEffectiveSource = StringUtils.hasText(card.getExpandedImageUrl())
+                    || StringUtils.hasText(card.getSourceImageUrl())
+                    || StringUtils.hasText(card.getBackgroundImageUrl());
+            generationInput = StringUtils.hasText(card.getExpandedImageUrl())
+                    ? card.getExpandedImageUrl()
+                    : StringUtils.hasText(card.getSourceImageUrl())
+                            ? card.getSourceImageUrl() : card.getBackgroundImageUrl();
+        }
+        validateRequiredSteps(card, hasEffectiveSource);
 
         ActorAiProfileCardTask task = new ActorAiProfileCardTask();
         task.setTaskId("acgen_" + UUID.randomUUID().toString().replace("-", ""));
@@ -51,14 +71,14 @@ public class ActorCardGenerateService {
         task.setActorProfileId(-1L);
         task.setTemplateSceneCode("actor_card_generate");
         task.setStyleCode(StringUtils.hasText(card.getStyle()) ? card.getStyle() : "classic");
-        task.setSourceImageUrl(card.getExpandedImageUrl() != null
-                ? card.getExpandedImageUrl() : card.getSourceImageUrl());
+        task.setSourceImageUrl(generationInput);
         task.setProviderCode("actor_card_layout");
         task.setGenerationMode(MODE_CARD_GENERATE);
         task.setStatus(STATUS_PENDING);
         taskMapper.insert(task);
 
-        taskExecutor.execute(() -> runGenerate(task.getTaskId(), cardId));
+        final String previewSourceForTask = generationInput;
+        taskExecutor.execute(() -> runGenerate(task.getTaskId(), cardId, previewSourceForTask));
 
         ActorCardGenerateRespDTO resp = new ActorCardGenerateRespDTO();
         resp.setTaskId(task.getTaskId());
@@ -80,15 +100,14 @@ public class ActorCardGenerateService {
         return resp;
     }
 
-    private void runGenerate(String taskId, Long cardId) {
+    private void runGenerate(String taskId, Long cardId, String previewSource) {
         markRunning(taskId);
         try {
             ActorCard card = actorCardMapper.selectById(cardId);
             if (card == null) throw new BizException("演员卡不存在");
 
             // TODO: 接入真实长页渲染引擎（当前以主视觉 URL 作为预览占位）
-            String previewUrl = StringUtils.hasText(card.getExpandedImageUrl())
-                    ? card.getExpandedImageUrl() : card.getSourceImageUrl();
+            String previewUrl = resolveGeneratedPreviewUrl(cardId, previewSource);
 
             markSuccess(taskId, previewUrl);
 
@@ -101,8 +120,8 @@ public class ActorCardGenerateService {
         }
     }
 
-    private void validateRequiredSteps(ActorCard card) {
-        if (!StringUtils.hasText(card.getSourceImageUrl())) {
+    private void validateRequiredSteps(ActorCard card, boolean hasEffectiveSource) {
+        if (!hasEffectiveSource) {
             throw new BizException("步骤1（主视觉照片）尚未完成");
         }
         if (!StringUtils.hasText(card.getProfileSnapshotJson())) {
@@ -116,6 +135,11 @@ public class ActorCardGenerateService {
         if (workCount == 0) {
             throw new BizException("步骤3（参演作品）至少需要 1 部作品");
         }
+    }
+
+    static String resolveGeneratedPreviewUrl(Long cardId, String previewSource) {
+        return StringUtils.hasText(previewSource)
+                ? previewSource.trim() : STRUCTURED_PREVIEW_PREFIX + cardId;
     }
 
     private void markRunning(String taskId) {

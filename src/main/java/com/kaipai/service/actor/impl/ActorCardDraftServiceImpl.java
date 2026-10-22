@@ -1,6 +1,7 @@
 package com.kaipai.service.actor.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
@@ -8,6 +9,8 @@ import com.kaipai.mapper.actor.ActorCardMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemReqDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorkRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorksReplaceReqDTO;
@@ -15,9 +18,12 @@ import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.service.actor.ActorCardDraftService;
+import com.kaipai.service.actor.ActorCardMediaBindingService;
+import com.kaipai.service.actor.ActorCardMainVisualResolver;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
 import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -25,6 +31,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -38,6 +45,7 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     private final ActorCardWorkMapper actorCardWorkMapper;
     private final ActorMediaAssetMapper actorMediaAssetMapper;
     private final ActorMediaAssetOwnershipVerifier assetOwnershipVerifier;
+    private final ActorCardMediaBindingService mediaBindingService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -60,18 +68,55 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     @Transactional(rollbackFor = Exception.class)
     public void saveStep(Long userId, Long cardId, ActorCardStepSaveReqDTO dto) {
         ActorCard card = requireOwned(userId, cardId);
+        String previousBackgroundImageUrl = card.getBackgroundImageUrl();
+        String previousSourceImageUrl = card.getSourceImageUrl();
         if (dto.getCurrentStep() != null) card.setCurrentStep(dto.getCurrentStep());
         if (StringUtils.hasText(dto.getTitle())) card.setTitle(dto.getTitle());
         if (StringUtils.hasText(dto.getStyle())) card.setStyle(dto.getStyle());
-        if (StringUtils.hasText(dto.getBackgroundImageUrl())) card.setBackgroundImageUrl(dto.getBackgroundImageUrl());
-        if (StringUtils.hasText(dto.getSourceImageUrl())) card.setSourceImageUrl(dto.getSourceImageUrl());
-        if (StringUtils.hasText(dto.getExpandedImageUrl())) card.setExpandedImageUrl(dto.getExpandedImageUrl());
+        boolean stepOneRequest = Integer.valueOf(1).equals(dto.getCurrentStep());
+        if (dto.getBackgroundImageUrl() != null && (stepOneRequest || StringUtils.hasText(dto.getBackgroundImageUrl()))) {
+            card.setBackgroundImageUrl(normalizeNullableUrl(dto.getBackgroundImageUrl()));
+        }
+        if (dto.getSourceImageUrl() != null && (stepOneRequest || StringUtils.hasText(dto.getSourceImageUrl()))) {
+            card.setSourceImageUrl(normalizeNullableUrl(dto.getSourceImageUrl()));
+        }
+        boolean sourceChanged = stepOneRequest
+                && (!Objects.equals(previousBackgroundImageUrl, card.getBackgroundImageUrl())
+                || !Objects.equals(previousSourceImageUrl, card.getSourceImageUrl()));
+        // 旧客户端字段继续兼容；来源变化后服务端会强制清掉过期结果。
+        if (dto.getExpandedImageUrl() != null) card.setExpandedImageUrl(dto.getExpandedImageUrl());
         if (StringUtils.hasText(dto.getProfileSnapshotJson())) card.setProfileSnapshotJson(dto.getProfileSnapshotJson());
         if (dto.getPhotosJson() != null) card.setPhotosJson(dto.getPhotosJson());
         if (dto.getVideoUrl() != null) card.setVideoUrl(dto.getVideoUrl());
         applyAttachment(userId, card, dto.getAttachment());
         if (StringUtils.hasText(dto.getSettingsJson())) card.setSettingsJson(dto.getSettingsJson());
         actorCardMapper.updateById(card);
+
+        boolean clearExpanded = sourceChanged
+                || (dto.getExpandedImageUrl() != null
+                && !StringUtils.hasText(dto.getExpandedImageUrl()));
+        boolean exactStepOneWrite = stepOneRequest
+                && (dto.getBackgroundImageUrl() != null || dto.getSourceImageUrl() != null);
+        if (clearExpanded || exactStepOneWrite) {
+            UpdateWrapper<ActorCard> update = new UpdateWrapper<ActorCard>()
+                    .eq("id", cardId)
+                    .eq("user_id", userId);
+            if (stepOneRequest && dto.getBackgroundImageUrl() != null) {
+                update.set("background_image_url", card.getBackgroundImageUrl());
+            }
+            if (stepOneRequest && dto.getSourceImageUrl() != null) {
+                update.set("source_image_url", card.getSourceImageUrl());
+            }
+            if (clearExpanded) {
+                card.setExpandedImageUrl(null);
+                card.setExpandedSourceFingerprint(null);
+                update.set("expanded_image_url", null)
+                        .set("expanded_source_fingerprint", null);
+            }
+            if (actorCardMapper.update(null, update) != 1) {
+                throw new IllegalStateException("主视觉来源状态更新失败");
+            }
+        }
     }
 
     /**
@@ -132,6 +177,8 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     @Transactional(rollbackFor = Exception.class)
     public void replaceWorks(Long userId, Long cardId, ActorCardWorksReplaceReqDTO dto) {
         requireOwned(userId, cardId);
+        List<Long> oldWorkIds = queryWorks(cardId).stream().map(ActorCardWork::getId).toList();
+        mediaBindingService.clearWorkBindings(userId, cardId, oldWorkIds);
         // BaseEntity 带 @TableLogic，这里是逻辑删除：旧行留库但被 selectCount/selectList 自动过滤，
         // 因此重复提交不会把作品数虚高，代价是反复编辑会累积历史行（可接受，与本项目其他子表一致）。
         actorCardWorkMapper.delete(new LambdaQueryWrapper<ActorCardWork>()
@@ -139,7 +186,13 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         List<ActorCardWorksReplaceReqDTO.WorkItem> items = dto.getWorks();
         for (int i = 0; i < items.size(); i++) {
             ActorCardWorksReplaceReqDTO.WorkItem item = items.get(i);
-            if (item.getStills().size() > MAX_STILLS_PER_WORK) {
+            List<String> legacyStills = item.getStills() == null ? Collections.emptyList() : item.getStills();
+            List<Long> stillAssetIds = item.getStillAssetIds() == null
+                    ? Collections.emptyList() : item.getStillAssetIds();
+            if (legacyStills.isEmpty() && stillAssetIds.isEmpty()) {
+                throw new BizException("《" + item.getWorkTitle() + "》至少需要 1 张剧照");
+            }
+            if (legacyStills.size() > MAX_STILLS_PER_WORK || stillAssetIds.size() > MAX_STILLS_PER_WORK) {
                 throw new BizException("《" + item.getWorkTitle() + "》剧照最多 " + MAX_STILLS_PER_WORK + " 张");
             }
             ActorCardWork work = new ActorCardWork();
@@ -148,9 +201,23 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
             work.setWorkTitle(item.getWorkTitle());
             work.setWorkType(item.getWorkType());
             work.setRoleName(item.getRoleName());
-            work.setStillsJson(writeUrlList(item.getStills()));
+            work.setStillsJson(writeUrlList(legacyStills));
             work.setSortOrder(i);
             actorCardWorkMapper.insert(work);
+            if (!stillAssetIds.isEmpty()) {
+                ActorCardMediaBindingReqDTO binding = new ActorCardMediaBindingReqDTO();
+                binding.setUsage(ActorCardMediaBindingServiceImpl.WORK_STILL);
+                binding.setWorkId(work.getId());
+                List<ActorCardMediaBindingItemReqDTO> bindingItems = new ArrayList<>();
+                for (int sortOrder = 0; sortOrder < stillAssetIds.size(); sortOrder++) {
+                    ActorCardMediaBindingItemReqDTO bindingItem = new ActorCardMediaBindingItemReqDTO();
+                    bindingItem.setAssetId(stillAssetIds.get(sortOrder));
+                    bindingItem.setSortOrder(sortOrder);
+                    bindingItems.add(bindingItem);
+                }
+                binding.setItems(bindingItems);
+                mediaBindingService.replace(userId, cardId, binding);
+            }
         }
     }
 
@@ -164,7 +231,13 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
             dto.setWorkTitle(w.getWorkTitle());
             dto.setWorkType(w.getWorkType());
             dto.setRoleName(w.getRoleName());
-            dto.setStills(readUrlList(w.getStillsJson()));
+            var binding = mediaBindingService.list(
+                    userId, cardId, ActorCardMediaBindingServiceImpl.WORK_STILL, w.getId());
+            dto.setStillItems(binding.getItems());
+            dto.setStills(binding.getItems().stream()
+                    .map(item -> item.getPreviewUrl())
+                    .filter(StringUtils::hasText)
+                    .toList());
             dto.setSortOrder(w.getSortOrder());
             return dto;
         }).collect(Collectors.toList());
@@ -269,8 +342,7 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     private List<ActorCardRespDTO.StepStatus> deriveStepStatuses(ActorCard card) {
         List<ActorCardRespDTO.StepStatus> list = new ArrayList<>();
 
-        boolean hasMainImage = StringUtils.hasText(card.getExpandedImageUrl())
-                || StringUtils.hasText(card.getSourceImageUrl());
+        boolean hasMainImage = hasMainVisual(card);
         list.add(step(1, hasMainImage ? "done" : "empty", hasMainImage ? "已完成" : "待完成"));
 
         boolean hasProfile = StringUtils.hasText(card.getProfileSnapshotJson());
@@ -281,10 +353,15 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         list.add(step(3, workCount > 0 ? "done" : "empty",
                 workCount > 0 ? workCount + "部" : "未添加"));
 
-        int photoCount = readUrlList(card.getPhotosJson()).size();
+        int legacyPhotoCount = readUrlList(card.getPhotosJson()).size();
+        int photoCount = bindingItemCount(
+                card, ActorCardMediaBindingServiceImpl.LIFE_PHOTO, legacyPhotoCount);
         list.add(step(4, photoCount > 0 ? "done" : "empty", photoCount + "张"));
 
-        boolean hasVideo = StringUtils.hasText(card.getVideoUrl());
+        boolean hasVideo = bindingItemCount(
+                card,
+                ActorCardMediaBindingServiceImpl.VIDEO_RESUME,
+                StringUtils.hasText(card.getVideoUrl()) ? 1 : 0) > 0;
         list.add(step(5, hasVideo ? "done" : "empty", hasVideo ? "已添加" : "未添加"));
 
         // 判据必须认 assetId：漏改会让步骤 6 在附件已绑定时仍显示「未添加」，
@@ -296,6 +373,34 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         list.add(step(7, hasSettings ? "done" : "empty", hasSettings ? "已完成" : "待完成"));
 
         return list;
+    }
+
+    /**
+     * 新素材集合计入步骤完成状态；旧部署若尚未执行 migration，草稿旧接口仍按 URL 字段降级。
+     */
+    private int bindingItemCount(ActorCard card, String usage, int legacyFallbackCount) {
+        try {
+            var binding = mediaBindingService.list(card.getUserId(), card.getId(), usage, null);
+            return binding == null || binding.getItems() == null ? 0 : binding.getItems().size();
+        } catch (DataAccessException ignored) {
+            return legacyFallbackCount;
+        }
+    }
+
+    private boolean hasMainVisual(ActorCard card) {
+        try {
+            var binding = mediaBindingService.list(
+                    card.getUserId(), card.getId(), ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
+            return ActorCardMainVisualResolver.hasEffectiveSource(card, binding);
+        } catch (DataAccessException ignored) {
+            return StringUtils.hasText(card.getExpandedImageUrl())
+                    || StringUtils.hasText(card.getSourceImageUrl())
+                    || StringUtils.hasText(card.getBackgroundImageUrl());
+        }
+    }
+
+    private String normalizeNullableUrl(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private ActorCardRespDTO.StepStatus step(int step, String statusCode, String statusLabel) {

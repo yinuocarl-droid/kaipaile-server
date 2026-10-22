@@ -43,6 +43,9 @@ public class ActorCard extends BaseEntity {
     /** AI 扩图后首图 URL */
     private String expandedImageUrl;
 
+    /** AI 扩图结果对应的当前首图 SHA-256 指纹；历史数据为空时按兼容语义读取 */
+    private String expandedSourceFingerprint;
+
     /** 个人资料快照 JSON（步骤 2） */
     private String profileSnapshotJson;
 

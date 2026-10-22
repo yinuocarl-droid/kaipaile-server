@@ -1,7 +1,6 @@
 package com.kaipai.model.actor.card.dto;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -32,7 +31,7 @@ public class ActorCardWorksReplaceReqDTO {
         /** 来源演艺经历 id；「新增作品」时为 null */
         private Long sourceWorkId;
 
-        @NotEmpty(message = "作品名称不能为空")
+        @jakarta.validation.constraints.NotBlank(message = "作品名称不能为空")
         @Size(max = 200, message = "作品名称不能超过 200 字")
         private String workTitle;
 
@@ -47,8 +46,11 @@ public class ActorCardWorksReplaceReqDTO {
          * 剧照 URL 列表，最多 3 张，第一张为封面。
          * 按 00-206 §3.5，勾选的作品剧照数为 0 时硬阻断，故此处至少 1 张。
          */
-        @NotEmpty(message = "每部作品至少需要 1 张剧照")
         @Size(max = 3, message = "每部作品最多 3 张剧照")
         private List<String> stills;
+
+        /** 新素材库剧照 id；与 stills 旧 URL 合同二选一。 */
+        @Size(max = 3, message = "每部作品最多 3 张剧照")
+        private List<Long> stillAssetIds;
     }
 }

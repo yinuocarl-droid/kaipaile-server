@@ -12,6 +12,8 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorProfileMapper;
+import com.kaipai.mapper.user.UserMapper;
+import com.kaipai.model.user.entity.User;
 import com.kaipai.model.actor.dto.ActorProfileCareerUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileCoreUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
@@ -28,12 +30,23 @@ class ActorProfileWriteServiceImplTest {
     private ActorMediaAssetOwnershipVerifier assetVerifier;
     private ActorProfileWriteServiceImpl service;
     private ActorProfile current;
+    private UserMapper userMapper;
+    private User user;
 
     @BeforeEach
     void setUp() {
         profileMapper = org.mockito.Mockito.mock(ActorProfileMapper.class);
         assetVerifier = org.mockito.Mockito.mock(ActorMediaAssetOwnershipVerifier.class);
-        service = new ActorProfileWriteServiceImpl(profileMapper, assetVerifier, new ObjectMapper());
+        userMapper = org.mockito.Mockito.mock(UserMapper.class);
+        service = new ActorProfileWriteServiceImpl(profileMapper, assetVerifier, new ObjectMapper(), userMapper);
+        user = new User();
+        user.setUserId(7L);
+        user.setUserName("旧昵称");
+        when(userMapper.selectById(7L)).thenReturn(user);
+        when(userMapper.updateById(any(User.class))).thenAnswer(invocation -> {
+            user.setUserName(((User) invocation.getArgument(0)).getUserName());
+            return 1;
+        });
         current = new ActorProfile();
         current.setActorProfileId(11L);
         current.setUserId(7L);
@@ -121,6 +134,46 @@ class ActorProfileWriteServiceImplTest {
         assertEquals(1, saved.getProfileStatus());
         assertEquals("王火火", response.getPublicName());
         assertEquals(0, response.getProfileVersion());
+    }
+
+    @Test
+    void nicknameIsSavedSeparatelyFromPublicNameAndReturned() {
+        var request = validRequest();
+        request.setNickname("  一诺  ");
+        var response = service.saveMine(7L, request);
+        assertEquals("一诺", response.getNickname());
+        assertEquals("王火火", response.getPublicName());
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        assertEquals(7L, captor.getValue().getUserId());
+        assertEquals("一诺", captor.getValue().getUserName());
+        assertNull(captor.getValue().getAvatarUrl());
+    }
+
+    @Test
+    void legacyRequestPreservesAccountNickname() {
+        var response = service.saveMine(7L, validRequest());
+        assertEquals("旧昵称", response.getNickname());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void invalidNicknameIsRejectedBeforeAnyProfileWrite() {
+        for (String nickname : List.of("", "  ", "a".repeat(65))) {
+            var request = validRequest();
+            request.setNickname(nickname);
+            assertThrows(BizException.class, () -> service.saveMine(7L, request));
+        }
+        verify(profileMapper, never()).updateById(any());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void failedNicknameWriteDoesNotReportSuccessfulProfileSave() {
+        when(userMapper.updateById(any(User.class))).thenReturn(0);
+        var request = validRequest();
+        request.setNickname("新昵称");
+        assertThrows(BizException.class, () -> service.saveMine(7L, request));
     }
 
     private ActorProfileMineUpdateDTO validRequest() {

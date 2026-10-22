@@ -4,17 +4,23 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.dto.ActorProfileCompletenessRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,8 +31,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ActorCardPublishService {
 
+    private static final Duration MAIN_VISUAL_READ_TTL = Duration.ofMinutes(10);
+
     private final ActorCardMapper actorCardMapper;
+    private final ActorCardWorkMapper actorCardWorkMapper;
     private final ActorProfileMapper actorProfileMapper;
+    private final ActorCardMediaBindingService mediaBindingService;
+    private final AiGeneratedImageStorage generatedImageStorage;
 
     // ── 发布 ──────────────────────────────────────────────────────────────────
 
@@ -86,18 +97,21 @@ public class ActorCardPublishService {
     }
 
     private ActorCardListItemDTO toListItem(ActorCard card) {
+        var sourceBinding = sourceBinding(card);
+        long workCount = workCount(card);
         ActorCardListItemDTO dto = new ActorCardListItemDTO();
         dto.setId(card.getId());
         dto.setStatus(card.getStatus());
         dto.setTitle(card.getTitle());
         dto.setStyle(card.getStyle());
-        // 封面图优先取扩图，其次原图，最后生成预览
-        dto.setCoverImageUrl(firstNonBlank(
-                card.getExpandedImageUrl(), card.getSourceImageUrl(), card.getGeneratedPreviewUrl()));
+        dto.setCoverImageUrl(resolveCoverImageUrl(card, sourceBinding));
         dto.setPublishedVersion(card.getPublishedVersion());
         dto.setPublishedAt(card.getPublishedAt());
         dto.setLastUpdate(card.getLastUpdate());
-        dto.setCompletionPercentage(calcCardCompletion(card));
+        dto.setCompletionPercentage(calcCardCompletion(card, sourceBinding, workCount));
+        boolean draft = "draft".equals(card.getStatus());
+        dto.setGenerateReady(draft && hasRequiredGenerationInputs(card, sourceBinding, workCount));
+        dto.setPublishReady(draft && StringUtils.hasText(card.getGeneratedPreviewUrl()));
         return dto;
     }
 
@@ -116,11 +130,14 @@ public class ActorCardPublishService {
         return done * 100 / fields;
     }
 
-    private int calcCardCompletion(ActorCard card) {
+    private int calcCardCompletion(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO sourceBinding,
+            long workCount) {
         int total = 7, done = 0;
-        if (StringUtils.hasText(card.getExpandedImageUrl()) || StringUtils.hasText(card.getSourceImageUrl())) done++;
+        if (ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding)) done++;
         if (StringUtils.hasText(card.getProfileSnapshotJson())) done++;
-        done++;  // 参演作品：此处不查子表，简化为始终计1（实际由前端 Hub 页显示精确状态）
+        if (workCount > 0) done++;
         if (StringUtils.hasText(card.getPhotosJson())) done++;
         if (StringUtils.hasText(card.getVideoUrl())) done++;
         // 与步骤标签共用同一判据，不再各写一份 hasText(attachmentUrl)
@@ -129,10 +146,53 @@ public class ActorCardPublishService {
         return done * 100 / total;
     }
 
-    private String firstNonBlank(String... values) {
-        for (String v : values) {
-            if (StringUtils.hasText(v)) return v;
-        }
-        return null;
+    private boolean hasRequiredGenerationInputs(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO sourceBinding,
+            long workCount) {
+        return ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding)
+                && StringUtils.hasText(card.getProfileSnapshotJson())
+                && workCount > 0
+                && StringUtils.hasText(card.getSettingsJson());
     }
+
+    private long workCount(ActorCard card) {
+        try {
+            return actorCardWorkMapper.selectCount(new LambdaQueryWrapper<ActorCardWork>()
+                    .eq(ActorCardWork::getCardId, card.getId()));
+        } catch (DataAccessException ignored) {
+            return 0;
+        }
+    }
+
+    private ActorCardMediaBindingRespDTO sourceBinding(ActorCard card) {
+        try {
+            return mediaBindingService.list(card.getUserId(), card.getId(), "source_image", null);
+        } catch (DataAccessException ignored) {
+            return null;
+        }
+    }
+
+    private String resolveCoverImageUrl(ActorCard card, ActorCardMediaBindingRespDTO sourceBinding) {
+        String resolved = ActorCardMainVisualResolver.resolveDisplayUrl(
+                card, sourceBinding, this::isHttpUrl);
+        if (!StringUtils.hasText(resolved)) {
+            return null;
+        }
+        try {
+            return generatedImageStorage.issueReadUrl(resolved, MAIN_VISUAL_READ_TTL);
+        } catch (RuntimeException ignored) {
+            return ActorCardMainVisualResolver.resolveSourceDisplayUrl(
+                    card, sourceBinding, this::isHttpUrl);
+        }
+    }
+
+    private boolean isHttpUrl(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase();
+        return normalized.startsWith("http://") || normalized.startsWith("https://");
+    }
+
 }

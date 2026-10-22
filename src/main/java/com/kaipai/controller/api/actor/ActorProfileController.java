@@ -3,6 +3,7 @@ package com.kaipai.controller.api.actor;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.R;
 import com.kaipai.model.actor.dto.ActorProfileDTO;
+import com.kaipai.model.actor.dto.ActorProfileIntroUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileSaveDTO;
 import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileRespDTO;
@@ -76,6 +77,13 @@ public class ActorProfileController {
     public R<ActorProfileRespDTO> saveMine(Authentication authentication,
                                            @Valid @RequestBody ActorProfileMineUpdateDTO dto) {
         return R.ok(actorProfileWriteService.saveMine(currentUserId(authentication), dto));
+    }
+
+    @Operation(summary = "保存我的自我介绍")
+    @PutMapping("/mine/intro")
+    public R<ActorProfileRespDTO> saveMineIntro(Authentication authentication,
+                                                @Valid @RequestBody ActorProfileIntroUpdateDTO dto) {
+        return R.ok(actorProfileWriteService.saveIntro(currentUserId(authentication), dto));
     }
 
     private Long currentUserId(Authentication authentication) {

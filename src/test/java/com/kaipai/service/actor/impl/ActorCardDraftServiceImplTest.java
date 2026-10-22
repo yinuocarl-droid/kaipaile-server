@@ -9,14 +9,22 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingReqDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
+import com.kaipai.model.actor.card.dto.ActorCardWorksReplaceReqDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
+import com.kaipai.service.actor.ActorCardMediaBindingService;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.BadSqlGrammarException;
 
 /** 覆盖步骤 6 附件三态语义与判据切换——判据漏改会让附件已绑定却显示「未添加」。 */
 class ActorCardDraftServiceImplTest {
@@ -29,6 +37,7 @@ class ActorCardDraftServiceImplTest {
     private ActorCardWorkMapper workMapper;
     private ActorMediaAssetMapper assetMapper;
     private ActorMediaAssetOwnershipVerifier verifier;
+    private ActorCardMediaBindingService mediaBindingService;
     private ActorCardDraftServiceImpl service;
 
     @BeforeEach void setUp() {
@@ -36,7 +45,9 @@ class ActorCardDraftServiceImplTest {
         workMapper = mock(ActorCardWorkMapper.class);
         assetMapper = mock(ActorMediaAssetMapper.class);
         verifier = mock(ActorMediaAssetOwnershipVerifier.class);
-        service = new ActorCardDraftServiceImpl(cardMapper, workMapper, assetMapper, verifier, new ObjectMapper());
+        mediaBindingService = mock(ActorCardMediaBindingService.class);
+        service = new ActorCardDraftServiceImpl(
+                cardMapper, workMapper, assetMapper, verifier, mediaBindingService, new ObjectMapper());
     }
 
     // ── 三态语义 ──────────────────────────────────────────────────────────────
@@ -170,6 +181,87 @@ class ActorCardDraftServiceImplTest {
         verify(assetMapper, never()).selectOne(any());
     }
 
+    @Test void mediaBindingsCountTowardStepsOneFourAndFive() {
+        when(cardMapper.selectById(CARD_ID)).thenReturn(draft());
+        when(mediaBindingService.list(USER_ID, CARD_ID, "source_image", null))
+                .thenReturn(binding("source_image", 1));
+        when(mediaBindingService.list(USER_ID, CARD_ID, "life_photo", null))
+                .thenReturn(binding("life_photo", 2));
+        when(mediaBindingService.list(USER_ID, CARD_ID, "video_resume", null))
+                .thenReturn(binding("video_resume", 1));
+
+        ActorCardRespDTO dto = service.getDraft(USER_ID, CARD_ID);
+
+        assertAll(
+                () -> assertEquals("done", step(dto, 1).getStatusCode()),
+                () -> assertEquals("done", step(dto, 4).getStatusCode()),
+                () -> assertEquals("2张", step(dto, 4).getStatusLabel()),
+                () -> assertEquals("done", step(dto, 5).getStatusCode()));
+    }
+
+    @Test void activeEmptyBindingsSuppressLegacyStepStatusFallback() {
+        ActorCard card = draft();
+        card.setSourceImageUrl("https://legacy.test/source.jpg");
+        card.setPhotosJson("[\"https://legacy.test/life.jpg\"]");
+        card.setVideoUrl("https://legacy.test/video.mp4");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(mediaBindingService.list(eq(USER_ID), eq(CARD_ID), any(), isNull()))
+                .thenAnswer(invocation -> binding(invocation.getArgument(2), 0));
+
+        ActorCardRespDTO dto = service.getDraft(USER_ID, CARD_ID);
+
+        assertAll(
+                () -> assertEquals("empty", step(dto, 1).getStatusCode()),
+                () -> assertEquals("0张", step(dto, 4).getStatusLabel()),
+                () -> assertEquals("empty", step(dto, 5).getStatusCode()));
+    }
+
+    @Test void anExplicitEmptyAssetBindingStillCountsATemplateMainVisual() {
+        ActorCard card = draft();
+        card.setSourceImageUrl("https://legacy.test/stale-source.jpg");
+        card.setBackgroundImageUrl("https://cdn.test/template.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(mediaBindingService.list(eq(USER_ID), eq(CARD_ID), any(), isNull()))
+                .thenAnswer(invocation -> binding(invocation.getArgument(2), 0));
+
+        assertEquals("done", step(service.getDraft(USER_ID, CARD_ID), 1).getStatusCode());
+    }
+
+    @Test void stepOneCanExplicitlyClearHistoricalImageMirrors() {
+        ActorCard card = draft();
+        card.setBackgroundImageUrl("https://legacy.test/background.jpg");
+        card.setSourceImageUrl("https://legacy.test/source.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(cardMapper.update(isNull(), any())).thenReturn(1);
+        ActorCardStepSaveReqDTO dto = new ActorCardStepSaveReqDTO();
+        dto.setCurrentStep(1);
+        dto.setBackgroundImageUrl("");
+        dto.setSourceImageUrl("");
+
+        service.saveStep(USER_ID, CARD_ID, dto);
+
+        assertAll(
+                () -> assertNull(persistedCard().getBackgroundImageUrl()),
+                () -> assertNull(card.getSourceImageUrl()));
+    }
+
+    @Test void aMissingMediaBindingTableKeepsLegacyStepStatusReadable() {
+        ActorCard card = draft();
+        card.setSourceImageUrl("https://legacy.test/source.jpg");
+        card.setPhotosJson("[\"https://legacy.test/life.jpg\"]");
+        card.setVideoUrl("https://legacy.test/video.mp4");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(mediaBindingService.list(eq(USER_ID), eq(CARD_ID), any(), isNull()))
+                .thenThrow(new BadSqlGrammarException("select media bindings", "missing table", new java.sql.SQLException()));
+
+        ActorCardRespDTO dto = service.getDraft(USER_ID, CARD_ID);
+
+        assertAll(
+                () -> assertEquals("done", step(dto, 1).getStatusCode()),
+                () -> assertEquals("1张", step(dto, 4).getStatusLabel()),
+                () -> assertEquals("done", step(dto, 5).getStatusCode()));
+    }
+
     // ── 归属 ──────────────────────────────────────────────────────────────────
 
     @Test void anotherUsersCardCannotBeSaved() {
@@ -177,6 +269,41 @@ class ActorCardDraftServiceImplTest {
 
         assertThrows(BizException.class, () -> service.saveStep(8L, CARD_ID, withAttachment(ASSET_ID)));
         verify(cardMapper, never()).updateById(any());
+    }
+
+    @Test void replaceWorksBindsNewStillAssetIdsInTheSameOperation() {
+        when(cardMapper.selectById(CARD_ID)).thenReturn(draft());
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        when(workMapper.insert(any(ActorCardWork.class))).thenAnswer(invocation -> {
+            ActorCardWork work = invocation.getArgument(0);
+            work.setId(101L);
+            return 1;
+        });
+
+        service.replaceWorks(USER_ID, CARD_ID, worksWithAssets(91L, 92L));
+
+        ArgumentCaptor<ActorCardMediaBindingReqDTO> binding =
+                ArgumentCaptor.forClass(ActorCardMediaBindingReqDTO.class);
+        verify(mediaBindingService).replace(eq(USER_ID), eq(CARD_ID), binding.capture());
+        assertAll(
+                () -> assertEquals("work_still", binding.getValue().getUsage()),
+                () -> assertEquals(101L, binding.getValue().getWorkId()),
+                () -> assertEquals(List.of(91L, 92L), binding.getValue().getItems().stream()
+                        .map(item -> item.getAssetId()).toList()),
+                () -> assertEquals(List.of(0, 1), binding.getValue().getItems().stream()
+                        .map(item -> item.getSortOrder()).toList()));
+    }
+
+    @Test void replaceWorksKeepsLegacyStillUrlsWithoutCreatingNewBindings() {
+        when(cardMapper.selectById(CARD_ID)).thenReturn(draft());
+        when(workMapper.selectList(any())).thenReturn(List.of());
+
+        service.replaceWorks(USER_ID, CARD_ID, worksWithLegacyUrl("https://example.test/still.jpg"));
+
+        ArgumentCaptor<ActorCardWork> inserted = ArgumentCaptor.forClass(ActorCardWork.class);
+        verify(workMapper).insert(inserted.capture());
+        assertEquals("[\"https://example.test/still.jpg\"]", inserted.getValue().getStillsJson());
+        verify(mediaBindingService, never()).replace(any(), any(), any());
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -222,6 +349,30 @@ class ActorCardDraftServiceImplTest {
         return dto;
     }
 
+    private ActorCardWorksReplaceReqDTO worksWithAssets(Long... assetIds) {
+        ActorCardWorksReplaceReqDTO.WorkItem work = baseWork();
+        work.setStillAssetIds(List.of(assetIds));
+        ActorCardWorksReplaceReqDTO request = new ActorCardWorksReplaceReqDTO();
+        request.setWorks(List.of(work));
+        return request;
+    }
+
+    private ActorCardWorksReplaceReqDTO worksWithLegacyUrl(String url) {
+        ActorCardWorksReplaceReqDTO.WorkItem work = baseWork();
+        work.setStills(List.of(url));
+        ActorCardWorksReplaceReqDTO request = new ActorCardWorksReplaceReqDTO();
+        request.setWorks(List.of(work));
+        return request;
+    }
+
+    private ActorCardWorksReplaceReqDTO.WorkItem baseWork() {
+        ActorCardWorksReplaceReqDTO.WorkItem work = new ActorCardWorksReplaceReqDTO.WorkItem();
+        work.setWorkTitle("测试作品");
+        work.setWorkType("movie");
+        work.setRoleName("角色");
+        return work;
+    }
+
     private ActorCard persistedCard() {
         ArgumentCaptor<ActorCard> saved = ArgumentCaptor.forClass(ActorCard.class);
         verify(cardMapper).updateById(saved.capture());
@@ -229,7 +380,24 @@ class ActorCardDraftServiceImplTest {
     }
 
     private ActorCardRespDTO.StepStatus stepSix(ActorCardRespDTO dto) {
+        return step(dto, 6);
+    }
+
+    private ActorCardRespDTO.StepStatus step(ActorCardRespDTO dto, int step) {
         return dto.getStepStatuses().stream()
-                .filter(s -> s.getStep() == 6).findFirst().orElseThrow();
+                .filter(s -> s.getStep() == step).findFirst().orElseThrow();
+    }
+
+    private ActorCardMediaBindingRespDTO binding(String usage, int count) {
+        ActorCardMediaBindingRespDTO response = new ActorCardMediaBindingRespDTO();
+        response.setSetId(91L);
+        response.setUsage(usage);
+        response.setItems(java.util.stream.IntStream.range(0, count).mapToObj(index -> {
+            ActorCardMediaBindingItemRespDTO item = new ActorCardMediaBindingItemRespDTO();
+            item.setAssetId(100L + index);
+            item.setSortOrder(index);
+            return item;
+        }).toList());
+        return response;
     }
 }

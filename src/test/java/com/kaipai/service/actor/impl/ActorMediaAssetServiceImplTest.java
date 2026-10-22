@@ -31,6 +31,8 @@ class ActorMediaAssetServiceImplTest {
     private ActorWorkAssetMapper workAssetMapper;
     private ActorExperienceMapper experienceMapper;
     private ShareCardAssetMapper shareAssetMapper;
+    private ActorCardMapper actorCardMapper;
+    private ActorCardMediaItemMapper cardMediaItemMapper;
     private ActorMediaAssetPageMapper pageMapper;
     private PrivateActorMediaStorage storage;
     private ActorPrivatePdfProcessor pdfProcessor;
@@ -41,10 +43,12 @@ class ActorMediaAssetServiceImplTest {
         assetMapper = mock(ActorMediaAssetMapper.class); profileMapper = mock(ActorProfileMapper.class);
         profileAssetMapper = mock(ActorProfileAssetMapper.class); workAssetMapper = mock(ActorWorkAssetMapper.class); experienceMapper = mock(ActorExperienceMapper.class);
         shareAssetMapper = mock(ShareCardAssetMapper.class); storage = mock(PrivateActorMediaStorage.class);
+        actorCardMapper = mock(ActorCardMapper.class); cardMediaItemMapper = mock(ActorCardMediaItemMapper.class);
         pageMapper = mock(ActorMediaAssetPageMapper.class); pdfProcessor = mock(ActorPrivatePdfProcessor.class);
         pdfLifecycle = mock(ActorPdfAssetLifecycleService.class);
         service = new ActorMediaAssetServiceImpl(assetMapper, profileMapper, profileAssetMapper, workAssetMapper,
-                experienceMapper, shareAssetMapper, pageMapper, storage, pdfProcessor, pdfLifecycle);
+                experienceMapper, shareAssetMapper, actorCardMapper, cardMediaItemMapper,
+                pageMapper, storage, pdfProcessor, pdfLifecycle);
     }
 
     @Test void createdAssetPersistsObjectIdentityWithoutAccessUrl() {
@@ -105,6 +109,35 @@ class ActorMediaAssetServiceImplTest {
         when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyPhoto(7L)));
         when(profileMapper.selectCount(any())).thenReturn(1L);
         assertEquals(46014, assertThrows(BizException.class, () -> service.delete(7L, 81L)).getCode());
+        verify(assetMapper, never()).deleteById(any(Long.class));
+    }
+
+    @Test void aiPhotoAccessRejectsNonPhotoAssets() {
+        ActorMediaAsset pdf = readyPdf(7L);
+        when(assetMapper.selectOne(any())).thenReturn(pdf);
+
+        assertEquals(46013, assertThrows(BizException.class,
+                () -> service.issueOwnerReadyPhotoAccessUrl(7L, 81L)).getCode());
+
+        verify(storage, never()).issueAccessUrl(any(), any(), any());
+    }
+
+    @Test void actorCardAttachmentAssetCannotBeDeleted() {
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyPdf(7L)));
+        when(actorCardMapper.selectCount(any())).thenReturn(1L);
+
+        assertEquals(46014, assertThrows(BizException.class, () -> service.delete(7L, 81L)).getCode());
+
+        verify(cardMediaItemMapper, never()).selectCount(any());
+        verify(assetMapper, never()).deleteById(any(Long.class));
+    }
+
+    @Test void actorCardMediaBindingAssetCannotBeDeleted() {
+        when(assetMapper.selectOwnedActiveByIdsForUpdate(any(), any())).thenReturn(List.of(readyPhoto(7L)));
+        when(cardMediaItemMapper.selectCount(any())).thenReturn(1L);
+
+        assertEquals(46014, assertThrows(BizException.class, () -> service.delete(7L, 81L)).getCode());
+
         verify(assetMapper, never()).deleteById(any(Long.class));
     }
 

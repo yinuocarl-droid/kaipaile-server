@@ -11,6 +11,7 @@ public class ActorProfileRespDTO {
     private Integer profileVersion;
     private Long workLibraryVersion;
     private Long avatarAssetId;
+    private String nickname;
     private String publicName;
     private String gender;
     private Integer age;

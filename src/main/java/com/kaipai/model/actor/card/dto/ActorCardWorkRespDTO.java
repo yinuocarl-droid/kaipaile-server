@@ -30,5 +30,8 @@ public class ActorCardWorkRespDTO {
     /** 剧照 URL 列表，第一张为封面 */
     private List<String> stills;
 
+    /** 新素材库剧照元数据；旧客户端可继续只消费 stills。 */
+    private List<ActorCardMediaBindingItemRespDTO> stillItems;
+
     private Integer sortOrder;
 }

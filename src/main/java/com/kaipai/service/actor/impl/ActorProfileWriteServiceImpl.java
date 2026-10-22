@@ -4,8 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
+import com.kaipai.mapper.user.UserMapper;
+import com.kaipai.model.user.entity.User;
+import com.kaipai.common.exception.BizException;
 import com.kaipai.model.actor.dto.ActorProfileCareerUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileCoreUpdateDTO;
+import com.kaipai.model.actor.dto.ActorProfileIntroUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
 import com.kaipai.model.actor.dto.ActorProfileRespDTO;
 import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
@@ -27,6 +31,7 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     private final ActorProfileMapper profileMapper;
     private final ActorMediaAssetOwnershipVerifier assetOwnershipVerifier;
     private final ObjectMapper objectMapper;
+    private final UserMapper userMapper;
 
     @Override
     public ActorProfileRespDTO mine(Long currentUserId) {
@@ -40,6 +45,10 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ActorProfileRespDTO saveMine(Long currentUserId, ActorProfileMineUpdateDTO request) {
+        if (request.getNickname() != null
+                && (!StringUtils.hasText(request.getNickname()) || request.getNickname().length() > 64)) {
+            throw new BizException("昵称须为1至64个字符");
+        }
         ActorProfile profile = findMine(currentUserId);
         boolean creating = profile == null;
         if (creating) {
@@ -58,6 +67,47 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         profile.setAvatarAssetId(request.getAvatarAssetId());
         profile.setIntro(trimToNull(request.getIntro()));
 
+        Integer previousVersion = profile.getVersion();
+        int affectedRows = creating ? profileMapper.insert(profile) : profileMapper.updateById(profile);
+        if (affectedRows != 1) {
+            throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
+        }
+        if (!creating && Objects.equals(previousVersion, profile.getVersion())) {
+            profile.setVersion(previousVersion + 1);
+        }
+        if (request.getNickname() != null) {
+            String nickname = request.getNickname().trim();
+            User user = userMapper.selectById(currentUserId);
+            if (user == null) throw new BizException("用户不存在");
+            if (!nickname.equals(user.getUserName())) {
+                User update = new User();
+                update.setUserId(currentUserId);
+                update.setUserName(nickname);
+                update.setUpdateUserId(currentUserId);
+                update.setUpdateUserName(nickname);
+                if (userMapper.updateById(update) != 1) {
+                    throw new BizException("昵称保存失败，请重试");
+                }
+            }
+        }
+        return toResponse(profile);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ActorProfileRespDTO saveIntro(Long currentUserId, ActorProfileIntroUpdateDTO request) {
+        ActorProfile profile = findMine(currentUserId);
+        boolean creating = profile == null;
+        if (creating) {
+            if (request.getExpectedProfileVersion() != 0) {
+                throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
+            }
+            profile = newProfileDraft(currentUserId);
+        } else if (!request.getExpectedProfileVersion().equals(profile.getVersion())) {
+            throw ProfileDomainErrorCode.PROFILE_IMPORT_CONTEXT_VERSION_CONFLICT.toException();
+        }
+
+        profile.setIntro(trimToNull(request.getIntro()));
         Integer previousVersion = profile.getVersion();
         int affectedRows = creating ? profileMapper.insert(profile) : profileMapper.updateById(profile);
         if (affectedRows != 1) {
@@ -110,6 +160,8 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         response.setProfileVersion(profile.getVersion());
         response.setWorkLibraryVersion(profile.getWorkLibraryVersion() == null ? 0L : profile.getWorkLibraryVersion());
         response.setAvatarAssetId(profile.getAvatarAssetId());
+        User user = userMapper.selectById(profile.getUserId());
+        response.setNickname(user == null ? null : user.getUserName());
         response.setPublicName(profile.getNickName());
         response.setGender(profile.getGender() == null || profile.getGender() == 0
                 ? null

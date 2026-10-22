@@ -20,6 +20,9 @@ public class ActorCardPublicRespDTO {
     /** 风格: classic|urban|ancient|fresh */
     private String style;
 
+    /** 用户为演员卡选择的完整分享背景视觉。 */
+    private String backgroundImageUrl;
+
     /** 主视觉：扩图 > 原图 > 生成预览 */
     private String previewImageUrl;
 
@@ -38,11 +41,28 @@ public class ActorCardPublicRespDTO {
     @Data
     public static class ProfileVO {
         private String name;
+        private String gender;
+        private Integer age;
         private String height;
+        private String weight;
         private String city;
         private String school;
+        private String bodyType;
+        private String hairStyle;
+        private List<String> languages = List.of();
+        private List<String> skills = List.of();
+        /** 结构化技能分组；旧客户端继续使用 skills。 */
+        private SkillGroupsVO skillGroups = new SkillGroupsVO();
+        private Boolean certified = false;
         private String contact;
         private String introduction;
+    }
+
+    @Data
+    public static class SkillGroupsVO {
+        private List<String> specialty = List.of();
+        private List<String> professionalAbility = List.of();
+        private List<String> roleType = List.of();
     }
 
     @Data
@@ -64,6 +84,8 @@ public class ActorCardPublicRespDTO {
     public static class AttachmentVO {
         private Long assetId;
         private String filename;
+        /** 公开长页直接展示的 PDF 签名页图；读取失败时为空，保留附件降级入口。 */
+        private List<String> pageImages = List.of();
     }
 
     @Data

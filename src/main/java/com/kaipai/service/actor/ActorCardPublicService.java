@@ -15,6 +15,12 @@ public interface ActorCardPublicService {
     ActorCardPublicRespDTO getPublicView(Long cardId);
 
     /**
+     * 卡主预览自己的草稿，返回与公开页相同的结构化演员卡数据。
+     * 不要求已发布，但必须校验归属。
+     */
+    ActorCardPublicRespDTO getOwnerPreview(Long userId, Long cardId);
+
+    /**
      * 复制已发布演员卡为新草稿（含参演作品子表），返回新草稿。
      */
     ActorCardRespDTO copy(Long userId, Long cardId);

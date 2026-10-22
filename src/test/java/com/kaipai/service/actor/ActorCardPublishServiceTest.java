@@ -2,12 +2,17 @@ package com.kaipai.service.actor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
+import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,11 +26,22 @@ class ActorCardPublishServiceTest {
     private static final Long USER_ID = 7L;
 
     private ActorCardMapper cardMapper;
+    private ActorCardWorkMapper cardWorkMapper;
+    private ActorCardMediaBindingService mediaBindingService;
+    private AiGeneratedImageStorage generatedImageStorage;
     private ActorCardPublishService service;
 
     @BeforeEach void setUp() {
         cardMapper = mock(ActorCardMapper.class);
-        service = new ActorCardPublishService(cardMapper, mock(ActorProfileMapper.class));
+        cardWorkMapper = mock(ActorCardWorkMapper.class);
+        mediaBindingService = mock(ActorCardMediaBindingService.class);
+        generatedImageStorage = mock(AiGeneratedImageStorage.class);
+        when(generatedImageStorage.issueReadUrl(anyString(), any(Duration.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(cardWorkMapper.selectCount(any())).thenReturn(1L);
+        service = new ActorCardPublishService(
+                cardMapper, cardWorkMapper, mock(ActorProfileMapper.class),
+                mediaBindingService, generatedImageStorage);
     }
 
     @Test void completionCountsAnAssetIdBoundAttachment() {
@@ -44,6 +60,130 @@ class ActorCardPublishServiceTest {
 
     @Test void completionDropsTheAttachmentWhenNeitherFormIsPresent() {
         assertEquals(85, completionOf(cardWithEverythingExceptAttachment()));
+    }
+
+    @Test void listCoverFallsBackToAHistoricalBackgroundOnlyCard() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setExpandedImageUrl(null);
+        card.setBackgroundImageUrl("https://cdn.test/background.jpg");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        assertEquals("https://cdn.test/background.jpg", service.list(USER_ID, null).get(0).getCoverImageUrl());
+    }
+
+    @Test void listCoverUsesTheBoundAssetMainVisual() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setExpandedImageUrl(null);
+        card.setSourceImageUrl(null);
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+        var item = new com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO();
+        item.setAssetId(81L);
+        item.setPreviewUrl("https://signed.test/source");
+        var binding = new com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO();
+        binding.setSetId(91L);
+        binding.setItems(List.of(item));
+        when(mediaBindingService.list(USER_ID, card.getId(), "source_image", null)).thenReturn(binding);
+
+        ActorCardListItemDTO result = service.list(USER_ID, null).get(0);
+
+        assertEquals("https://signed.test/source", result.getCoverImageUrl());
+        assertEquals(85, result.getCompletionPercentage());
+    }
+
+    @Test void listCoverSignsTheExpandedPrivateObject() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setExpandedImageUrl("https://private.test/actor-card-expand/result.png");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+        when(generatedImageStorage.issueReadUrl(
+                "https://private.test/actor-card-expand/result.png", Duration.ofMinutes(10)))
+                .thenReturn("https://private.test/actor-card-expand/result.png?signature=test");
+
+        assertEquals("https://private.test/actor-card-expand/result.png?signature=test",
+                service.list(USER_ID, null).get(0).getCoverImageUrl());
+    }
+
+    @Test void listCoverFallsBackToTheBoundSourceWhenSigningFails() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setExpandedImageUrl("https://private.test/actor-card-expand/result.png");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+        var item = new com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO();
+        item.setAssetId(81L);
+        item.setPreviewUrl("https://signed.test/source");
+        var binding = new com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO();
+        binding.setSetId(91L);
+        binding.setItems(List.of(item));
+        when(mediaBindingService.list(USER_ID, card.getId(), "source_image", null)).thenReturn(binding);
+        when(generatedImageStorage.issueReadUrl(
+                "https://private.test/actor-card-expand/result.png", Duration.ofMinutes(10)))
+                .thenThrow(new IllegalStateException("signing unavailable"));
+
+        assertEquals("https://signed.test/source", service.list(USER_ID, null).get(0).getCoverImageUrl());
+    }
+
+    @Test void structuredGenerationMarkerIsNeverExposedAsAListImage() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setExpandedImageUrl(null);
+        card.setGeneratedPreviewUrl("structured://actor-card/31");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        assertNull(service.list(USER_ID, null).get(0).getCoverImageUrl());
+    }
+
+    @Test void requiredCompleteDraftIsReadyToGenerateButNotPublish() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        ActorCardListItemDTO result = service.list(USER_ID, "draft").get(0);
+
+        assertTrue(result.getGenerateReady());
+        assertFalse(result.getPublishReady());
+    }
+
+    @Test void generatedDraftIsReadyToPreviewAndPublish() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setGeneratedPreviewUrl("structured://actor-card/31");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        ActorCardListItemDTO result = service.list(USER_ID, "draft").get(0);
+
+        assertTrue(result.getGenerateReady());
+        assertTrue(result.getPublishReady());
+    }
+
+    @Test void publishedCardDoesNotExposeDraftStageActions() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setStatus("published");
+        card.setGeneratedPreviewUrl("structured://actor-card/31");
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        ActorCardListItemDTO result = service.list(USER_ID, "published").get(0);
+
+        assertFalse(result.getGenerateReady());
+        assertFalse(result.getPublishReady());
+    }
+
+    @Test void missingWorkDisablesGenerationAndReducesCompletion() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        card.setAttachmentAssetId(81L);
+        when(cardWorkMapper.selectCount(any())).thenReturn(0L);
+        when(cardMapper.selectList(any())).thenReturn(List.of(card));
+
+        ActorCardListItemDTO result = service.list(USER_ID, "draft").get(0);
+
+        assertFalse(result.getGenerateReady());
+        assertFalse(result.getPublishReady());
+        assertEquals(85, result.getCompletionPercentage());
+    }
+
+    @Test void publishStillRejectsDraftWithoutGeneratedPreview() {
+        ActorCard card = cardWithEverythingExceptAttachment();
+        when(cardMapper.selectById(card.getId())).thenReturn(card);
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.publish(USER_ID, card.getId()));
+
+        assertEquals("演员卡尚未生成预览，请先完成 AI 生成步骤", error.getMessage());
+        verify(cardMapper, never()).update(any(), any());
     }
 
     private int completionOf(ActorCard card) {

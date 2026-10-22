@@ -7,6 +7,8 @@ import com.kaipai.model.actor.card.dto.ActorCardExpandImageReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardExpandImageRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardGenerateRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingReqDTO;
+import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardPublicRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
@@ -17,6 +19,7 @@ import com.kaipai.service.actor.ActorCardBackgroundService;
 import com.kaipai.service.actor.ActorCardDraftService;
 import com.kaipai.service.actor.ActorCardExpandImageService;
 import com.kaipai.service.actor.ActorCardGenerateService;
+import com.kaipai.service.actor.ActorCardMediaBindingService;
 import com.kaipai.service.actor.ActorCardPublicService;
 import com.kaipai.service.actor.ActorCardPublishService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -43,6 +46,7 @@ import java.util.List;
 public class ActorCardController {
 
     private final ActorCardDraftService actorCardDraftService;
+    private final ActorCardMediaBindingService mediaBindingService;
     private final ActorCardBackgroundService backgroundService;
     private final ActorCardExpandImageService expandImageService;
     private final ActorCardGenerateService generateService;
@@ -60,7 +64,11 @@ public class ActorCardController {
     public R<Void> saveStep(Authentication authentication,
                             @PathVariable Long cardId,
                             @RequestBody ActorCardStepSaveReqDTO dto) {
-        actorCardDraftService.saveStep(currentUserId(authentication), cardId, dto);
+        Long userId = currentUserId(authentication);
+        actorCardDraftService.saveStep(userId, cardId, dto);
+        if (Integer.valueOf(1).equals(dto.getCurrentStep())) {
+            expandImageService.requestAutomaticExpansion(userId, cardId);
+        }
         return R.ok();
     }
 
@@ -68,7 +76,42 @@ public class ActorCardController {
     @GetMapping("/draft/{cardId}")
     public R<ActorCardRespDTO> getDraft(Authentication authentication,
                                         @PathVariable Long cardId) {
-        return R.ok(actorCardDraftService.getDraft(currentUserId(authentication), cardId));
+        Long userId = currentUserId(authentication);
+        ActorCardRespDTO response = actorCardDraftService.getDraft(userId, cardId);
+        expandImageService.requestAutomaticExpansion(userId, cardId);
+        return R.ok(response);
+    }
+
+    @Operation(summary = "预览自己的草稿演员卡（结构与公开观看页一致）")
+    @GetMapping("/draft/{cardId}/preview")
+    public R<ActorCardPublicRespDTO> previewDraft(Authentication authentication,
+                                                   @PathVariable Long cardId) {
+        return R.ok(publicService.getOwnerPreview(currentUserId(authentication), cardId));
+    }
+
+    @Operation(summary = "读取草稿素材绑定集合；无集合时回退旧 URL")
+    @GetMapping("/draft/{cardId}/media")
+    public R<ActorCardMediaBindingRespDTO> getMediaBindings(
+            Authentication authentication,
+            @PathVariable Long cardId,
+            @RequestParam String usage,
+            @RequestParam(required = false) Long workId) {
+        return R.ok(mediaBindingService.list(
+                currentUserId(authentication), cardId, usage, workId));
+    }
+
+    @Operation(summary = "整体替换草稿素材绑定集合")
+    @PutMapping("/draft/{cardId}/media")
+    public R<ActorCardMediaBindingRespDTO> replaceMediaBindings(
+            Authentication authentication,
+            @PathVariable Long cardId,
+            @Valid @RequestBody ActorCardMediaBindingReqDTO request) {
+        Long userId = currentUserId(authentication);
+        ActorCardMediaBindingRespDTO response = mediaBindingService.replace(userId, cardId, request);
+        if ("source_image".equalsIgnoreCase(request.getUsage())) {
+            expandImageService.requestAutomaticExpansion(userId, cardId);
+        }
+        return R.ok(response);
     }
 
     @Operation(summary = "步骤3：整体替换参演作品快照")
@@ -137,7 +180,9 @@ public class ActorCardController {
     public R<ActorCardGenerateRespDTO> generate(
             Authentication authentication,
             @PathVariable Long cardId) {
-        return R.ok(generateService.submit(currentUserId(authentication), cardId));
+        Long userId = currentUserId(authentication);
+        expandImageService.requestAutomaticExpansion(userId, cardId);
+        return R.ok(generateService.submit(userId, cardId));
     }
 
     @Operation(summary = "轮询演员卡生成任务状态")

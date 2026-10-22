@@ -9,6 +9,8 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.common.handler.MetaObjectHandlerConfig;
+import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardMediaItemMapper;
 import com.kaipai.mapper.actor.ActorExperienceMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetPageMapper;
@@ -669,6 +671,8 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                 ActorWorkAssetMapper workAssetMapper,
                 ActorExperienceMapper experienceMapper,
                 ShareCardAssetMapper shareAssetMapper,
+                ActorCardMapper actorCardMapper,
+                ActorCardMediaItemMapper cardMediaItemMapper,
                 ActorMediaAssetPageMapper pageMapper,
                 PrivateActorMediaStorage storage,
                 ActorPrivatePdfProcessor pdfProcessor,
@@ -680,6 +684,8 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                     workAssetMapper,
                     experienceMapper,
                     shareAssetMapper,
+                    actorCardMapper,
+                    cardMediaItemMapper,
                     pageMapper,
                     storage,
                     pdfProcessor,
