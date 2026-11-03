@@ -1,6 +1,7 @@
 package com.kaipai.service.actor.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -11,17 +12,22 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.model.actor.dto.ActorAssetPageRespDTO;
+import com.kaipai.model.actor.dto.ActorAssetAccessUrlRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardDecorationAssignmentDTO.DecorationEnvelope;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.service.actor.ActorCardMediaBindingService;
+import com.kaipai.service.actor.ActorCardDecorationAssignmentService;
 import com.kaipai.service.actor.ActorMediaAssetService;
 import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import java.time.Duration;
@@ -30,8 +36,26 @@ import java.util.Map;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.BadSqlGrammarException;
 
 class ActorCardPublicServiceImplTest {
+
+    @Test void badgeOwnerAndPublicUseOnlySnapshotAndNeverLiveProfileFallback() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        ActorProfile live = new ActorProfile();
+        json.readerForUpdating(live).readValue("{\"heroBadgeText\":\"后来填写的实时文案\"}");
+        when(profileMapper.selectOne(any())).thenReturn(live);
+        ActorCard card = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        card.setProfileSnapshotJson("{\"heroBadgeText\":\"卡片锁定文案\"}");
+        assertEquals("卡片锁定文案",json.valueToTree(service.getPublicView(11L)).at("/profile/heroBadgeText").asText());
+        assertEquals("卡片锁定文案",json.valueToTree(service.getOwnerPreview(7L,11L)).at("/profile/heroBadgeText").asText());
+        card.setProfileSnapshotJson("{\"heroBadgeText\":\"\"}");
+        assertEquals("",json.valueToTree(service.getPublicView(11L)).at("/profile/heroBadgeText").asText());
+        card.setProfileSnapshotJson("{}");
+        org.junit.jupiter.api.Assertions.assertTrue(json.valueToTree(service.getPublicView(11L)).at("/profile/heroBadgeText").isNull());
+    }
 
     private ActorCardMapper cardMapper;
     private ActorCardWorkMapper workMapper;
@@ -39,7 +63,9 @@ class ActorCardPublicServiceImplTest {
     private ActorMediaAssetMapper assetMapper;
     private ActorProfileMapper profileMapper;
     private ActorMediaAssetService assetService;
+    private ActorCardVisualInputMapper visualInputMapper;
     private AiGeneratedImageStorage generatedImageStorage;
+    private ActorCardDecorationAssignmentService decorationAssignmentService;
     private ActorCardPublicServiceImpl service;
 
     @BeforeEach
@@ -50,7 +76,10 @@ class ActorCardPublicServiceImplTest {
         bindingService = mock(ActorCardMediaBindingService.class);
         profileMapper = mock(ActorProfileMapper.class);
         assetService = mock(ActorMediaAssetService.class);
+        visualInputMapper = mock(ActorCardVisualInputMapper.class);
         generatedImageStorage = mock(AiGeneratedImageStorage.class);
+        decorationAssignmentService = mock(ActorCardDecorationAssignmentService.class);
+        when(visualInputMapper.insert(any(ActorCardVisualInput.class))).thenReturn(1);
         when(generatedImageStorage.issueReadUrl(anyString(), any(Duration.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         service = new ActorCardPublicServiceImpl(
@@ -60,8 +89,26 @@ class ActorCardPublicServiceImplTest {
                 profileMapper,
                 bindingService,
                 assetService,
+                visualInputMapper,
                 generatedImageStorage,
+                decorationAssignmentService,
                 new ObjectMapper());
+    }
+
+    @Test
+    void ownerAndPublicViewsExposeTheSameLockedDecorationEnvelope() throws Exception {
+        ActorCard card = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        DecorationEnvelope locked = new DecorationEnvelope(101L, 2L, 3, 1,
+                new ObjectMapper().readTree("{\"schemaVersion\":1,\"modules\":[]}"));
+        when(decorationAssignmentService.resolve(11L)).thenReturn(locked);
+
+        var publicView = service.getPublicView(11L);
+        var ownerView = service.getOwnerPreview(7L, 11L);
+
+        assertEquals(locked, publicView.getDecoration());
+        assertEquals(locked, ownerView.getDecoration());
     }
 
     @Test
@@ -136,6 +183,109 @@ class ActorCardPublicServiceImplTest {
 
         assertEquals("https://signed.test/source", result.getPreviewImageUrl());
         assertEquals(result.getPreviewImageUrl(), result.getBackgroundImageUrl());
+    }
+
+    @Test
+    void visualInputUsesOnlyFingerprintGuardedResultThenItsStablePersonUrl() {
+        ActorCard card = publishedCard(11L);
+        card.setExpandedImageUrl("https://cdn.test/legacy-expanded.jpg");
+        card.setBackgroundImageUrl("https://cdn.test/legacy-background.jpg");
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", "stale");
+        visual.setPersonImageUrl("https://managed.test/person.jpg");
+        visual.setGeneratedImageUrl("https://managed.test/stale-generated.jpg");
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+
+        var stale = service.getPublicView(11L);
+
+        assertEquals("https://managed.test/person.jpg", stale.getPreviewImageUrl());
+
+        visual.setGeneratedFingerprint("current");
+        var current = service.getPublicView(11L);
+
+        assertEquals("https://managed.test/stale-generated.jpg", current.getPreviewImageUrl());
+    }
+
+    @Test
+    void visualInputWithOnlyBackgroundDoesNotReviveLegacyMainVisuals() {
+        ActorCard card = publishedCard(11L);
+        card.setSourceImageUrl("https://cdn.test/legacy-source.jpg");
+        card.setBackgroundImageUrl("https://cdn.test/legacy-background.jpg");
+        card.setExpandedImageUrl("https://cdn.test/legacy-expanded.jpg");
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", "stale");
+        visual.setBackgroundId(55L);
+        visual.setGeneratedImageUrl("https://managed.test/stale-generated.jpg");
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+
+        var result = service.getPublicView(11L);
+
+        assertNull(result.getPreviewImageUrl());
+        assertNull(result.getBackgroundImageUrl());
+    }
+
+    @Test
+    void visualInputPersonAssetReusesTheExistingOwnedPhotoSigningPath() {
+        ActorCard card = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", null);
+        visual.setPersonAssetId(51L);
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+        when(assetService.issueOwnerReadyPhotoAccessUrl(7L, 51L))
+                .thenReturn(new ActorAssetAccessUrlRespDTO(
+                        "https://signed.test/person-asset.jpg", Instant.now().plusSeconds(600)));
+
+        var result = service.getOwnerPreview(7L, 11L);
+
+        assertEquals("https://signed.test/person-asset.jpg", result.getPreviewImageUrl());
+        verify(assetService).issueOwnerReadyPhotoAccessUrl(7L, 51L);
+    }
+
+    @Test
+    void currentGeneratedVisualSurvivesAnUnavailableOriginalPersonAsset() {
+        ActorCard card = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", "current");
+        visual.setPersonAssetId(51L);
+        visual.setGeneratedImageUrl("https://managed.test/generated.jpg");
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+        when(assetService.issueOwnerReadyPhotoAccessUrl(7L, 51L))
+                .thenThrow(new BizException("原人物素材不可用"));
+
+        var result = service.getPublicView(11L);
+
+        assertEquals("https://managed.test/generated.jpg", result.getPreviewImageUrl());
+    }
+
+    @Test
+    void missingVisualInputTableKeepsLegacyPublicViewReadable() {
+        ActorCard card = publishedCard(11L);
+        card.setSourceImageUrl("https://legacy.test/source.jpg");
+        when(cardMapper.selectById(11L)).thenReturn(card);
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        when(visualInputMapper.selectByCardId(11L)).thenThrow(new BadSqlGrammarException(
+                "select visual input", "missing table",
+                new java.sql.SQLException(
+                        "Table 'test.actor_card_visual_input' doesn't exist", "42S02", 1146)));
+
+        var result = service.getPublicView(11L);
+
+        assertEquals("https://legacy.test/source.jpg", result.getPreviewImageUrl());
+    }
+
+    @Test
+    void nonMissingTableVisualInputSqlFailureIsNotDowngradedInPublicView() {
+        when(cardMapper.selectById(11L)).thenReturn(publishedCard(11L));
+        when(visualInputMapper.selectByCardId(11L)).thenThrow(new BadSqlGrammarException(
+                "select visual input", "broken sql",
+                new java.sql.SQLException(
+                        "syntax error near actor_card_visual_input", "42000", 1064)));
+
+        assertThrows(BadSqlGrammarException.class, () -> service.getPublicView(11L));
     }
 
     @Test
@@ -310,6 +460,76 @@ class ActorCardPublicServiceImplTest {
         service.copy(7L, 11L);
 
         verify(bindingService).copyBindings(7L, 11L, 12L, Map.of(101L, 202L));
+        verify(decorationAssignmentService).copyAssignment(7L, 11L, 12L);
+    }
+
+    @Test
+    void copyKeepsStableVisualInputAndOnlyItsFingerprintMatchedResult() {
+        ActorCard source = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(source);
+        when(cardMapper.insert(any(ActorCard.class))).thenAnswer(invocation -> {
+            ActorCard card = invocation.getArgument(0);
+            card.setId(12L);
+            return 1;
+        });
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", "current");
+        visual.setGenerationMode("person_background_ai");
+        visual.setPersonSourceType("asset");
+        visual.setPersonAssetId(51L);
+        visual.setBackgroundId(55L);
+        visual.setBackgroundImageUrl("https://managed.test/background.jpg");
+        visual.setGenerationConfigVersion("visual-v1");
+        visual.setGeneratedImageUrl("https://managed.test/generated.jpg");
+        visual.setLatestTaskId("task-must-not-copy");
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+
+        service.copy(7L, 11L);
+
+        var captured = org.mockito.ArgumentCaptor.forClass(ActorCardVisualInput.class);
+        verify(visualInputMapper).insert(captured.capture());
+        ActorCardVisualInput copied = captured.getValue();
+        assertEquals(12L, copied.getCardId());
+        assertEquals(7L, copied.getUserId());
+        assertEquals("person_background_ai", copied.getGenerationMode());
+        assertEquals("asset", copied.getPersonSourceType());
+        assertEquals(51L, copied.getPersonAssetId());
+        assertEquals(55L, copied.getBackgroundId());
+        assertEquals("https://managed.test/background.jpg", copied.getBackgroundImageUrl());
+        assertEquals("current", copied.getInputFingerprint());
+        assertEquals("visual-v1", copied.getGenerationConfigVersion());
+        assertEquals("https://managed.test/generated.jpg", copied.getGeneratedImageUrl());
+        assertEquals("current", copied.getGeneratedFingerprint());
+        assertNull(copied.getLatestTaskId());
+    }
+
+    @Test
+    void copyClearsAVisualResultWhoseFingerprintIsStale() {
+        ActorCard source = publishedCard(11L);
+        when(cardMapper.selectById(11L)).thenReturn(source);
+        when(cardMapper.insert(any(ActorCard.class))).thenAnswer(invocation -> {
+            ActorCard card = invocation.getArgument(0);
+            card.setId(12L);
+            return 1;
+        });
+        when(workMapper.selectList(any())).thenReturn(List.of());
+        ActorCardVisualInput visual = visualInput(11L, "current", "stale");
+        visual.setPersonSourceType("managed_url");
+        visual.setPersonImageUrl("https://managed.test/person.jpg");
+        visual.setGenerationConfigVersion("visual-v1");
+        visual.setGeneratedImageUrl("https://managed.test/stale-generated.jpg");
+        visual.setLatestTaskId("stale-task");
+        when(visualInputMapper.selectByCardId(11L)).thenReturn(visual);
+
+        service.copy(7L, 11L);
+
+        var captured = org.mockito.ArgumentCaptor.forClass(ActorCardVisualInput.class);
+        verify(visualInputMapper).insert(captured.capture());
+        ActorCardVisualInput copied = captured.getValue();
+        assertEquals("https://managed.test/person.jpg", copied.getPersonImageUrl());
+        assertNull(copied.getGeneratedImageUrl());
+        assertNull(copied.getGeneratedFingerprint());
+        assertNull(copied.getLatestTaskId());
     }
 
     private ActorCard publishedCard(Long cardId) {
@@ -329,5 +549,15 @@ class ActorCardPublicServiceImplTest {
         response.setUsage(usage);
         response.setItems(List.of(item));
         return response;
+    }
+
+    private ActorCardVisualInput visualInput(Long cardId, String inputFingerprint, String generatedFingerprint) {
+        ActorCardVisualInput visual = new ActorCardVisualInput();
+        visual.setCardId(cardId);
+        visual.setUserId(7L);
+        visual.setGenerationMode("person_ai");
+        visual.setInputFingerprint(inputFingerprint);
+        visual.setGeneratedFingerprint(generatedFingerprint);
+        return visual;
     }
 }

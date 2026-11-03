@@ -549,6 +549,7 @@ class ActorWorkAssetReplacementMySqlIntegrationTest {
                       avatar_url VARCHAR(1024) DEFAULT NULL,
                       cover_url VARCHAR(1024) DEFAULT NULL,
                       intro TEXT DEFAULT NULL,
+                      hero_badge_text VARCHAR(80) DEFAULT NULL,
                       skill_tag VARCHAR(1024) DEFAULT NULL,
                       style_tag VARCHAR(1024) DEFAULT NULL,
                       video_url VARCHAR(1024) DEFAULT NULL,

@@ -6,6 +6,8 @@ import lombok.Data;
 
 @Data
 public class ActorProfileRespDTO {
+
+    private String heroBadgeText;
     private Long actorProfileId;
     private Long userId;
     private Integer profileVersion;

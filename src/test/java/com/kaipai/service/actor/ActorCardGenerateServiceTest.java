@@ -7,23 +7,28 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.ai.ActorAiProfileCardTaskMapper;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.ai.entity.ActorAiProfileCardTask;
 import java.util.List;
+import java.sql.SQLSyntaxErrorException;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class ActorCardGenerateServiceTest {
@@ -35,6 +40,7 @@ class ActorCardGenerateServiceTest {
     private ActorCardWorkMapper workMapper;
     private ActorAiProfileCardTaskMapper taskMapper;
     private ActorCardMediaBindingService mediaBindingService;
+    private ActorCardVisualInputMapper visualInputMapper;
     private ActorCardGenerateService service;
 
     @BeforeEach
@@ -43,7 +49,9 @@ class ActorCardGenerateServiceTest {
         workMapper = mock(ActorCardWorkMapper.class);
         taskMapper = mock(ActorAiProfileCardTaskMapper.class);
         mediaBindingService = mock(ActorCardMediaBindingService.class);
-        service = new ActorCardGenerateService(cardMapper, workMapper, taskMapper, mediaBindingService);
+        visualInputMapper = mock(ActorCardVisualInputMapper.class);
+        service = new ActorCardGenerateService(
+                cardMapper, workMapper, taskMapper, mediaBindingService, visualInputMapper);
         ReflectionTestUtils.setField(service, "taskExecutor", (Executor) task -> { });
     }
 
@@ -142,6 +150,100 @@ class ActorCardGenerateServiceTest {
         assertEquals("https://legacy.test/background.jpg", task.getValue().getSourceImageUrl());
     }
 
+    @Test
+    void aMissingVisualInputTablePreciselyFallsBackButOtherSqlErrorsRemainVisible() {
+        ActorCard card = requiredDraft();
+        card.setSourceImageUrl("https://legacy.test/source.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(workMapper.selectCount(any())).thenReturn(1L);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenThrow(new BadSqlGrammarException(
+                "select", "select", new SQLSyntaxErrorException(
+                "Table 'test.actor_card_visual_input' doesn't exist", "42S02", 1146)));
+
+        service.submit(USER_ID, CARD_ID);
+
+        ArgumentCaptor<ActorAiProfileCardTask> task =
+                ArgumentCaptor.forClass(ActorAiProfileCardTask.class);
+        verify(taskMapper).insert(task.capture());
+        assertEquals("https://legacy.test/source.jpg", task.getValue().getSourceImageUrl());
+
+        doThrow(new BadSqlGrammarException(
+                "select", "bad sql", new SQLSyntaxErrorException("syntax error", "42000", 1064)))
+                .when(visualInputMapper).selectByCardId(CARD_ID);
+        assertThrows(BadSqlGrammarException.class, () -> service.submit(USER_ID, CARD_ID));
+    }
+
+    @Test
+    void anExplicitVisualAssetIsThePersonSourceEvenWhenTheLegacyBindingIsEmpty() {
+        ActorCard card = requiredDraft();
+        card.setBackgroundImageUrl("https://legacy.test/background-that-is-not-a-person.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(workMapper.selectCount(any())).thenReturn(1L);
+        when(mediaBindingService.list(USER_ID, CARD_ID, "source_image", null))
+                .thenReturn(emptyBinding());
+        ActorCardVisualInput visual = visualInput("asset-fingerprint", null, null);
+        visual.setPersonAssetId(81L);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visual);
+
+        service.submit(USER_ID, CARD_ID);
+
+        ArgumentCaptor<ActorAiProfileCardTask> task =
+                ArgumentCaptor.forClass(ActorAiProfileCardTask.class);
+        verify(taskMapper).insert(task.capture());
+        assertNull(task.getValue().getSourceImageUrl(),
+                "private asset access URLs must never be persisted on the layout task");
+    }
+
+    @Test
+    void aVisualManagedPersonUrlSuppressesAStaleLegacyExpansion() {
+        ActorCard card = requiredDraft();
+        card.setExpandedImageUrl("https://legacy.test/stale-expanded.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(workMapper.selectCount(any())).thenReturn(1L);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visualInput(
+                "current-fingerprint", "old-fingerprint", "https://managed.test/person.jpg"));
+
+        service.submit(USER_ID, CARD_ID);
+
+        ArgumentCaptor<ActorAiProfileCardTask> task =
+                ArgumentCaptor.forClass(ActorAiProfileCardTask.class);
+        verify(taskMapper).insert(task.capture());
+        assertEquals("https://managed.test/person.jpg", task.getValue().getSourceImageUrl());
+    }
+
+    @Test
+    void onlyTheFingerprintGuardedVisualResultMayFeedStructuredGeneration() {
+        ActorCard card = requiredDraft();
+        card.setExpandedImageUrl("https://legacy.test/stale-expanded.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(workMapper.selectCount(any())).thenReturn(1L);
+        ActorCardVisualInput visual = visualInput(
+                "current-fingerprint", "current-fingerprint", "https://managed.test/person.jpg");
+        visual.setGeneratedImageUrl("https://managed.test/current-result.jpg");
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visual);
+
+        service.submit(USER_ID, CARD_ID);
+
+        ArgumentCaptor<ActorAiProfileCardTask> task =
+                ArgumentCaptor.forClass(ActorAiProfileCardTask.class);
+        verify(taskMapper).insert(task.capture());
+        assertEquals("https://managed.test/current-result.jpg", task.getValue().getSourceImageUrl());
+    }
+
+    @Test
+    void aVisualBackgroundNeverCountsAsThePersonSource() {
+        ActorCard card = requiredDraft();
+        card.setBackgroundImageUrl("https://legacy.test/background.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        ActorCardVisualInput invalid = visualInput("fingerprint", null, null);
+        invalid.setBackgroundId(31L);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(invalid);
+
+        assertThrows(BizException.class, () -> service.submit(USER_ID, CARD_ID));
+
+        verify(taskMapper, never()).insert(any());
+    }
+
     private ActorCard requiredDraft() {
         ActorCard card = new ActorCard();
         card.setId(CARD_ID);
@@ -162,5 +264,27 @@ class ActorCardGenerateServiceTest {
         binding.setUsage("source_image");
         binding.setItems(List.of(item));
         return binding;
+    }
+
+    private ActorCardMediaBindingRespDTO emptyBinding() {
+        ActorCardMediaBindingRespDTO binding = new ActorCardMediaBindingRespDTO();
+        binding.setSetId(91L);
+        binding.setUsage("source_image");
+        binding.setItems(List.of());
+        return binding;
+    }
+
+    private ActorCardVisualInput visualInput(
+            String inputFingerprint,
+            String generatedFingerprint,
+            String personImageUrl) {
+        ActorCardVisualInput visual = new ActorCardVisualInput();
+        visual.setCardId(CARD_ID);
+        visual.setUserId(USER_ID);
+        visual.setGenerationMode(ActorCardVisualInputService.MODE_PERSON_AI);
+        visual.setInputFingerprint(inputFingerprint);
+        visual.setGeneratedFingerprint(generatedFingerprint);
+        visual.setPersonImageUrl(personImageUrl);
+        return visual;
     }
 }

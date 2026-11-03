@@ -199,4 +199,47 @@ class ActorProfileWriteServiceImplTest {
         request.setIntro("演员");
         return request;
     }
+
+    @Test void badgeMineRoundTripsTrimmedTextAndExplicitEmptyClears() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        var request = validRequest();
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":\"  剧宣合作  \"}");
+        assertEquals("剧宣合作", json.valueToTree(service.saveMine(7L, request)).path("heroBadgeText").asText());
+        request.setExpectedProfileVersion(current.getVersion());
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":\"\"}");
+        assertEquals("", json.valueToTree(service.saveMine(7L, request)).path("heroBadgeText").asText());
+        assertEquals("", json.valueToTree(current).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeOmittedOrNullInOldMineRequestsPreservesExistingValue() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        json.readerForUpdating(current).readValue("{\"heroBadgeText\":\"已存文案\"}");
+        assertEquals("已存文案", json.valueToTree(service.mine(7L)).path("heroBadgeText").asText());
+        var request = validRequest();
+        assertEquals("已存文案", json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+        request.setExpectedProfileVersion(current.getVersion());
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":null}");
+        assertEquals("已存文案", json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeRejectsUnsafeTextAndCountsUtf16AfterTrim() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        for (String value : List.of("a".repeat(41), "😀".repeat(21), "a\nb", "a\tb", "a\u0000b", "<b>", "a\u2028b")) {
+            var request = validRequest();
+            json.readerForUpdating(request).readValue(json.writeValueAsString(java.util.Map.of("heroBadgeText",value)));
+            assertThrows(BizException.class, () -> service.saveMine(7L,request));
+        }
+        verify(profileMapper, never()).updateById(any());
+        var request = validRequest();
+        json.readerForUpdating(request).readValue(json.writeValueAsString(java.util.Map.of("heroBadgeText","  " + "😀".repeat(20) + "  ")));
+        assertEquals("😀".repeat(20), json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeMineJsonRejectsScalarCoercionInsteadOfInventingText() {
+        var json = new ObjectMapper();
+        for (String value : List.of("12","true","[]","{}")) {
+            assertThrows(com.fasterxml.jackson.core.JsonProcessingException.class,
+                    () -> json.readValue("{\"heroBadgeText\":" + value + "}",ActorProfileMineUpdateDTO.class));
+        }
+    }
 }

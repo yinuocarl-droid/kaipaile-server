@@ -85,6 +85,9 @@ public class ActorProfile extends BaseEntity {
 
     private String intro;
 
+    /** Actor-authored optional hero pill, empty string explicitly hides it. */
+    private String heroBadgeText;
+
     /** 技能标签，逗号分隔 */
     private String skillTag;
 

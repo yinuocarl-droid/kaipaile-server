@@ -8,6 +8,7 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
 import com.kaipai.mapper.actor.ActorCardMediaItemMapper;
 import com.kaipai.mapper.actor.ActorCardMediaSetMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemReqDTO;
@@ -17,11 +18,15 @@ import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.card.entity.ActorCardMediaItem;
 import com.kaipai.model.actor.card.entity.ActorCardMediaSet;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
 import com.kaipai.service.actor.ActorCardMediaBindingService;
 import com.kaipai.service.actor.ActorMediaAssetService;
+import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -45,6 +50,7 @@ public class ActorCardMediaBindingServiceImpl implements ActorCardMediaBindingSe
     public static final String VIDEO_RESUME = "video_resume";
 
     private static final Set<String> USAGES = Set.of(SOURCE_IMAGE, WORK_STILL, LIFE_PHOTO, VIDEO_RESUME);
+    private static final Duration MAIN_VISUAL_READ_TTL = Duration.ofMinutes(10);
 
     private final ActorCardMapper cardMapper;
     private final ActorCardWorkMapper workMapper;
@@ -52,6 +58,8 @@ public class ActorCardMediaBindingServiceImpl implements ActorCardMediaBindingSe
     private final ActorCardMediaItemMapper itemMapper;
     private final ActorMediaAssetMapper assetMapper;
     private final ActorMediaAssetService assetService;
+    private final ActorCardVisualInputMapper visualInputMapper;
+    private final AiGeneratedImageStorage generatedImageStorage;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -60,6 +68,13 @@ public class ActorCardMediaBindingServiceImpl implements ActorCardMediaBindingSe
         ActorCard card = requireOwnedCard(userId, cardId);
         String normalizedUsage = normalizeUsage(usage);
         validateScope(cardId, normalizedUsage, workId);
+        if (SOURCE_IMAGE.equals(normalizedUsage)) {
+            ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                    visualInputMapper, cardId);
+            if (visualInput != null) {
+                return visualSourceResponse(card, visualInput);
+            }
+        }
 
         ActorCardMediaSet set = setMapper.selectActive(cardId, normalizedUsage, workId);
         if (set == null) {
@@ -87,6 +102,13 @@ public class ActorCardMediaBindingServiceImpl implements ActorCardMediaBindingSe
 
         String usage = normalizeUsage(request.getUsage());
         validateScope(cardId, usage, request.getWorkId());
+        if (SOURCE_IMAGE.equals(usage)) {
+            ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                    visualInputMapper, cardId);
+            if (visualInput != null) {
+                throw new BizException(409, "当前演员卡已启用新版首图，请使用新版首图入口");
+            }
+        }
         List<ActorCardMediaBindingItemReqDTO> requested = request.getItems() == null
                 ? Collections.emptyList()
                 : request.getItems();
@@ -301,6 +323,81 @@ public class ActorCardMediaBindingServiceImpl implements ActorCardMediaBindingSe
             response.getItems().add(item);
         }
         return response;
+    }
+
+    /**
+     * Compatibility projection for old clients still reading the source-image
+     * binding endpoint. V003 remains authoritative: legacy sets and actor_card
+     * mirrors are never consulted and the projection is never persisted.
+     */
+    private ActorCardMediaBindingRespDTO visualSourceResponse(
+            ActorCard card,
+            ActorCardVisualInput visualInput) {
+        ActorCardMediaBindingRespDTO response = emptyResponse(card.getId(), null, SOURCE_IMAGE);
+        ActorCardMediaBindingItemRespDTO item = visualPersonItem(card, visualInput);
+        if (item == null && hasCurrentGeneratedResult(visualInput)) {
+            String generatedPreview = issueVisualReadUrl(visualInput.getGeneratedImageUrl());
+            if (StringUtils.hasText(generatedPreview)) {
+                item = new ActorCardMediaBindingItemRespDTO();
+                item.setPreviewUrl(generatedPreview);
+                item.setSortOrder(0);
+            }
+        }
+        if (item != null) {
+            response.getItems().add(item);
+        }
+        return response;
+    }
+
+    private ActorCardMediaBindingItemRespDTO visualPersonItem(
+            ActorCard card,
+            ActorCardVisualInput visualInput) {
+        if (visualInput.getPersonAssetId() != null) {
+            try {
+                var access = assetService.issueOwnerReadyPhotoAccessUrl(
+                        card.getUserId(), visualInput.getPersonAssetId());
+                if (access != null && StringUtils.hasText(access.getAccessUrl())) {
+                    ActorCardMediaBindingItemRespDTO item = new ActorCardMediaBindingItemRespDTO();
+                    item.setAssetId(visualInput.getPersonAssetId());
+                    item.setMediaType("photo");
+                    item.setProcessStatus("ready");
+                    item.setPreviewUrl(access.getAccessUrl());
+                    item.setExpiresAt(access.getExpiresAt());
+                    item.setSortOrder(0);
+                    return item;
+                }
+            } catch (RuntimeException ignored) {
+                // A current generated result may remain usable after its source asset is removed.
+            }
+            return null;
+        }
+        String personPreview = issueVisualReadUrl(visualInput.getPersonImageUrl());
+        if (!StringUtils.hasText(personPreview)) {
+            return null;
+        }
+        ActorCardMediaBindingItemRespDTO item = new ActorCardMediaBindingItemRespDTO();
+        item.setMediaType("photo");
+        item.setProcessStatus("ready");
+        item.setPreviewUrl(personPreview);
+        item.setSortOrder(0);
+        return item;
+    }
+
+    private String issueVisualReadUrl(String stableUrl) {
+        if (!StringUtils.hasText(stableUrl)) {
+            return null;
+        }
+        try {
+            return generatedImageStorage.issueReadUrl(stableUrl, MAIN_VISUAL_READ_TTL);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private boolean hasCurrentGeneratedResult(ActorCardVisualInput visualInput) {
+        return StringUtils.hasText(visualInput.getInputFingerprint())
+                && visualInput.getInputFingerprint().equals(visualInput.getGeneratedFingerprint())
+                && StringUtils.hasText(visualInput.getGeneratedImageUrl());
     }
 
     private List<String> readUrlList(String json) {

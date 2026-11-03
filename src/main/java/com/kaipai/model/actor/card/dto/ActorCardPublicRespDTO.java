@@ -1,8 +1,8 @@
 package com.kaipai.model.actor.card.dto;
 
-import lombok.Data;
-
+import com.kaipai.model.actor.card.dto.ActorCardDecorationAssignmentDTO.DecorationEnvelope;
 import java.util.List;
+import lombok.Data;
 
 /**
  * 已发布演员卡公开视图（观看者分享落地页数据）。
@@ -38,8 +38,13 @@ public class ActorCardPublicRespDTO {
 
     private SettingsVO settings;
 
+    /** Locked immutable decoration snapshot; null is the explicit legacy-renderer path. */
+    private DecorationEnvelope decoration;
+
     @Data
     public static class ProfileVO {
+        /** Snapshot-only; deliberately never falls back to the live actor profile. */
+        private String heroBadgeText;
         private String name;
         private String gender;
         private Integer age;

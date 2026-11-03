@@ -18,6 +18,7 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
 import com.kaipai.mapper.actor.ActorCardMediaItemMapper;
 import com.kaipai.mapper.actor.ActorCardMediaSetMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemReqDTO;
@@ -26,16 +27,19 @@ import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.card.entity.ActorCardMediaItem;
 import com.kaipai.model.actor.card.entity.ActorCardMediaSet;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.model.actor.dto.ActorAssetAccessUrlRespDTO;
 import com.kaipai.service.actor.ActorMediaAssetService;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.BadSqlGrammarException;
 
 class ActorCardMediaBindingServiceImplTest {
 
@@ -48,6 +52,8 @@ class ActorCardMediaBindingServiceImplTest {
     private ActorCardMediaItemMapper itemMapper;
     private ActorMediaAssetMapper assetMapper;
     private ActorMediaAssetService assetService;
+    private ActorCardVisualInputMapper visualInputMapper;
+    private AiGeneratedImageStorage generatedImageStorage;
     private ActorCardMediaBindingServiceImpl service;
 
     @BeforeEach
@@ -58,8 +64,11 @@ class ActorCardMediaBindingServiceImplTest {
         itemMapper = mock(ActorCardMediaItemMapper.class);
         assetMapper = mock(ActorMediaAssetMapper.class);
         assetService = mock(ActorMediaAssetService.class);
+        visualInputMapper = mock(ActorCardVisualInputMapper.class);
+        generatedImageStorage = mock(AiGeneratedImageStorage.class);
         service = new ActorCardMediaBindingServiceImpl(
-                cardMapper, workMapper, setMapper, itemMapper, assetMapper, assetService, new ObjectMapper());
+                cardMapper, workMapper, setMapper, itemMapper, assetMapper, assetService,
+                visualInputMapper, generatedImageStorage, new ObjectMapper());
     }
 
     @Test
@@ -94,6 +103,159 @@ class ActorCardMediaBindingServiceImplTest {
 
         assertEquals(23L, result.getSetId());
         assertEquals(List.of(), result.getItems());
+    }
+
+    @Test
+    void visualInputRejectsLegacySourceImageReplacementBeforeAssetLocks() {
+        when(cardMapper.selectOwnedForUpdate(USER_ID, CARD_ID)).thenReturn(ownedDraft());
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visualInput());
+
+        BizException error = assertThrows(BizException.class, () -> service.replace(
+                USER_ID,
+                CARD_ID,
+                request(ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null, item(51L, 0))));
+
+        assertEquals(409, error.getCode());
+        assertEquals("当前演员卡已启用新版首图，请使用新版首图入口", error.getMessage());
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(eq(USER_ID), anyList());
+        verify(setMapper, never()).selectActiveForUpdate(any(), any(), any());
+        verify(itemMapper, never()).deleteActiveBySetId(any());
+        verify(cardMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void visualInputDoesNotBlockOtherMediaUsages() {
+        when(cardMapper.selectOwnedForUpdate(USER_ID, CARD_ID)).thenReturn(ownedDraft());
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visualInput());
+        when(setMapper.selectActiveForUpdate(
+                CARD_ID, ActorCardMediaBindingServiceImpl.LIFE_PHOTO, null)).thenReturn(null);
+        when(setMapper.insert(any(ActorCardMediaSet.class))).thenAnswer(invocation -> {
+            ActorCardMediaSet set = invocation.getArgument(0);
+            set.setSetId(23L);
+            return 1;
+        });
+        when(itemMapper.selectActiveBySetId(23L)).thenReturn(List.of());
+
+        ActorCardMediaBindingRespDTO result = service.replace(
+                USER_ID,
+                CARD_ID,
+                request(ActorCardMediaBindingServiceImpl.LIFE_PHOTO, null));
+
+        assertEquals(23L, result.getSetId());
+    }
+
+    @Test
+    void missingVisualInputTableKeepsLegacySourceReplacementCompatible() {
+        when(cardMapper.selectOwnedForUpdate(USER_ID, CARD_ID)).thenReturn(ownedDraft());
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenThrow(missingVisualInputTable());
+        when(cardMapper.update(isNull(), any())).thenReturn(1);
+        when(setMapper.selectActiveForUpdate(
+                CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null)).thenReturn(null);
+        when(setMapper.insert(any(ActorCardMediaSet.class))).thenAnswer(invocation -> {
+            ActorCardMediaSet set = invocation.getArgument(0);
+            set.setSetId(23L);
+            return 1;
+        });
+        when(itemMapper.selectActiveBySetId(23L)).thenReturn(List.of());
+
+        ActorCardMediaBindingRespDTO result = service.replace(
+                USER_ID,
+                CARD_ID,
+                request(ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null));
+
+        assertEquals(23L, result.getSetId());
+    }
+
+    @Test
+    void nonMissingVisualInputSqlFailureIsNotDowngradedDuringReplace() {
+        when(cardMapper.selectOwnedForUpdate(USER_ID, CARD_ID)).thenReturn(ownedDraft());
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenThrow(new BadSqlGrammarException(
+                "select visual input", "broken sql",
+                new java.sql.SQLException(
+                        "syntax error near actor_card_visual_input", "42000", 1064)));
+
+        assertThrows(BadSqlGrammarException.class, () -> service.replace(
+                USER_ID,
+                CARD_ID,
+                request(ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null, item(51L, 0))));
+        verify(assetMapper, never()).selectOwnedActiveByIdsForUpdate(eq(USER_ID), anyList());
+    }
+
+    @Test
+    void sourceImageReadProjectsVisualPersonWithoutCreatingLegacyBindings() {
+        when(cardMapper.selectById(CARD_ID)).thenReturn(ownedDraft());
+        ActorCardVisualInput visual = visualInput();
+        visual.setPersonAssetId(51L);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visual);
+        Instant expiresAt = Instant.parse("2026-10-22T13:00:00Z");
+        when(assetService.issueOwnerReadyPhotoAccessUrl(USER_ID, 51L))
+                .thenReturn(new ActorAssetAccessUrlRespDTO("https://signed.test/person", expiresAt));
+
+        ActorCardMediaBindingRespDTO result = service.list(
+                USER_ID, CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
+
+        assertNull(result.getSetId());
+        assertEquals(1, result.getItems().size());
+        assertEquals(51L, result.getItems().get(0).getAssetId());
+        assertEquals("https://signed.test/person", result.getItems().get(0).getPreviewUrl());
+        assertEquals(expiresAt, result.getItems().get(0).getExpiresAt());
+        verify(setMapper, never()).selectActive(any(), any(), any());
+        verify(itemMapper, never()).insert(any());
+    }
+
+    @Test
+    void sourceImageReadCanUseCurrentGeneratedResultWhenPersonPreviewIsUnavailable() {
+        when(cardMapper.selectById(CARD_ID)).thenReturn(ownedDraft());
+        ActorCardVisualInput visual = visualInput();
+        visual.setPersonAssetId(51L);
+        visual.setGeneratedImageUrl("https://managed.test/generated.jpg");
+        visual.setGeneratedFingerprint("current");
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visual);
+        when(assetService.issueOwnerReadyPhotoAccessUrl(USER_ID, 51L))
+                .thenThrow(new BizException("人物素材不可用"));
+        when(generatedImageStorage.issueReadUrl(
+                eq("https://managed.test/generated.jpg"), any()))
+                .thenReturn("https://signed.test/generated");
+
+        ActorCardMediaBindingRespDTO result = service.list(
+                USER_ID, CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
+
+        assertEquals(1, result.getItems().size());
+        assertNull(result.getItems().get(0).getAssetId());
+        assertEquals("https://signed.test/generated", result.getItems().get(0).getPreviewUrl());
+    }
+
+    @Test
+    void sourceImageReadNeverTreatsSelectedBackgroundOrLegacyMirrorsAsPerson() {
+        ActorCard card = ownedDraft();
+        card.setSourceImageUrl("https://legacy.test/person.jpg");
+        card.setBackgroundImageUrl("https://legacy.test/background.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        ActorCardVisualInput visual = visualInput();
+        visual.setBackgroundId(71L);
+        visual.setBackgroundImageUrl("https://managed.test/background.jpg");
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visual);
+
+        ActorCardMediaBindingRespDTO result = service.list(
+                USER_ID, CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
+
+        assertEquals(List.of(), result.getItems());
+        verify(setMapper, never()).selectActive(any(), any(), any());
+    }
+
+    @Test
+    void missingVisualInputTableKeepsLegacySourceReadCompatible() {
+        ActorCard card = ownedDraft();
+        card.setSourceImageUrl("https://legacy.test/person.jpg");
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenThrow(missingVisualInputTable());
+        when(setMapper.selectActive(
+                CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null)).thenReturn(null);
+
+        ActorCardMediaBindingRespDTO result = service.list(
+                USER_ID, CARD_ID, ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
+
+        assertEquals("https://legacy.test/person.jpg", result.getItems().get(0).getPreviewUrl());
     }
 
     @Test
@@ -365,6 +527,22 @@ class ActorCardMediaBindingServiceImplTest {
         asset.setMediaType(mediaType);
         asset.setProcessStatus(status);
         return asset;
+    }
+
+    private ActorCardVisualInput visualInput() {
+        ActorCardVisualInput visual = new ActorCardVisualInput();
+        visual.setCardId(CARD_ID);
+        visual.setUserId(USER_ID);
+        visual.setGenerationMode("person_background_ai");
+        visual.setInputFingerprint("current");
+        return visual;
+    }
+
+    private BadSqlGrammarException missingVisualInputTable() {
+        return new BadSqlGrammarException(
+                "select visual input", "missing table",
+                new java.sql.SQLException(
+                        "Table 'test.actor_card_visual_input' doesn't exist", "42S02", 1146));
     }
 
     private ActorCardMediaBindingReqDTO request(

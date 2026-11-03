@@ -2,6 +2,7 @@ package com.kaipai.service.actor;
 
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -41,6 +42,22 @@ public final class ActorCardMainVisualResolver {
     }
 
     /**
+     * Once an explicit visual input exists it is authoritative. Only the stable
+     * person source can satisfy step one; a selected background is never a
+     * substitute for the person's identity image.
+     */
+    public static boolean hasEffectiveSource(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO binding,
+            ActorCardVisualInput visualInput) {
+        if (visualInput == null) {
+            return hasEffectiveSource(card, binding);
+        }
+        return visualInput.getPersonAssetId() != null
+                || StringUtils.hasText(visualInput.getPersonImageUrl());
+    }
+
+    /**
      * 生成任务不能持久化素材私有桶的短时签名 URL，asset 绑定由调用方以 null 表示。
      */
     public static String resolveGenerateInput(ActorCard card, ActorCardMediaBindingRespDTO binding) {
@@ -62,6 +79,28 @@ public final class ActorCardMainVisualResolver {
                 ? card.getBackgroundImageUrl().trim() : null;
     }
 
+    /**
+     * Returns only a stable value that may be persisted on the structured
+     * layout task. Private asset URLs remain null; their access signatures are
+     * response/runtime data and must never be stored.
+     */
+    public static String resolveGenerateInput(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO binding,
+            ActorCardVisualInput visualInput) {
+        if (visualInput == null) {
+            return resolveGenerateInput(card, binding);
+        }
+        if (hasCurrentGeneratedResult(visualInput)) {
+            return visualInput.getGeneratedImageUrl().trim();
+        }
+        if (visualInput.getPersonAssetId() != null) {
+            return null;
+        }
+        return StringUtils.hasText(visualInput.getPersonImageUrl())
+                ? visualInput.getPersonImageUrl().trim() : null;
+    }
+
     public static String resolveDisplayUrl(
             ActorCard card,
             ActorCardMediaBindingRespDTO binding,
@@ -72,6 +111,33 @@ public final class ActorCardMainVisualResolver {
             return value;
         }
         return resolveSourceDisplayUrl(card, binding, usable, fallbacks);
+    }
+
+    /**
+     * B5 mode-aware resolution. Once a card has an explicit visual input, a
+     * legacy single-image expansion must never win. Only a result carrying the
+     * current input fingerprint is eligible; otherwise the stable person source
+     * remains visible while the new task is pending or failed.
+     */
+    public static String resolveDisplayUrl(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO binding,
+            ActorCardVisualInput visualInput,
+            Predicate<String> usable,
+            String... fallbacks) {
+        if (visualInput == null) {
+            return resolveDisplayUrl(card, binding, usable, fallbacks);
+        }
+        if (hasCurrentGeneratedResult(visualInput)) {
+            String generated = firstUsable(usable, visualInput.getGeneratedImageUrl());
+            if (generated != null) {
+                return generated;
+            }
+        }
+        if (visualInput.getPersonAssetId() != null) {
+            return firstUsable(usable, fallbacks);
+        }
+        return firstUsable(usable, visualInput.getPersonImageUrl());
     }
 
     public static String resolveSourceDisplayUrl(
@@ -182,5 +248,11 @@ public final class ActorCardMainVisualResolver {
             }
         }
         return null;
+    }
+
+    private static boolean hasCurrentGeneratedResult(ActorCardVisualInput visualInput) {
+        return StringUtils.hasText(visualInput.getInputFingerprint())
+                && visualInput.getInputFingerprint().equals(visualInput.getGeneratedFingerprint())
+                && StringUtils.hasText(visualInput.getGeneratedImageUrl());
     }
 }

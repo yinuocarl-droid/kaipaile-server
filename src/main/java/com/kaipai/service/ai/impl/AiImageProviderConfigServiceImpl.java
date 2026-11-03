@@ -57,6 +57,7 @@ public class AiImageProviderConfigServiceImpl
             "aliyun-qwen-image",
             "aliyun-wanxiang",
             "tencent-hunyuan",
+            "tencent-tokenhub",
             "baidu-qianfan"
     );
     private static final Map<String, List<String>> REQUIRED_SECRET_FIELDS = Map.of(
@@ -67,10 +68,12 @@ public class AiImageProviderConfigServiceImpl
             "aliyun-qwen-image", List.of("apiKey"),
             "aliyun-wanxiang", List.of("apiKey"),
             "tencent-hunyuan", List.of("secretId", "secretKey"),
+            "tencent-tokenhub", List.of("apiKey"),
             "baidu-qianfan", List.of("apiKey")
     );
     private static final Map<String, List<String>> REQUIRED_PUBLIC_FIELDS = Map.of(
             "tencent-hunyuan", List.of("endpoint", "region", "model"),
+            "tencent-tokenhub", List.of("endpoint", "model"),
             "kplyyk", List.of("endpoint", "model"),
             "http", List.of("endpoint", "model"),
             "openai", List.of("endpoint", "model"),
@@ -87,6 +90,7 @@ public class AiImageProviderConfigServiceImpl
             "aliyun-qwen-image", "阿里云百炼 Qwen Image",
             "aliyun-wanxiang", "阿里云通义万相",
             "tencent-hunyuan", "腾讯混元生图",
+            "tencent-tokenhub", "腾讯 TokenHub Hy-Image 3.5",
             "baidu-qianfan", "百度千帆图像生成"
     );
     private static final Map<String, Integer> DEFAULT_PRIORITIES = Map.of(
@@ -95,6 +99,7 @@ public class AiImageProviderConfigServiceImpl
             "aliyun-qwen-image", 30,
             "aliyun-wanxiang", 40,
             "tencent-hunyuan", 50,
+            "tencent-tokenhub", 55,
             "baidu-qianfan", 60,
             "http", 90,
             "openai", 100

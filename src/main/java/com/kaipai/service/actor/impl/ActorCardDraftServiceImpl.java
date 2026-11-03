@@ -4,8 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
@@ -15,19 +18,26 @@ import com.kaipai.model.actor.card.dto.ActorCardStepSaveReqDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorkRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardWorksReplaceReqDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.service.actor.ActorCardDraftService;
+import com.kaipai.service.actor.ActorCardDecorationAssignmentService;
 import com.kaipai.service.actor.ActorCardMediaBindingService;
 import com.kaipai.service.actor.ActorCardMainVisualResolver;
+import com.kaipai.service.actor.ActorMediaAssetService;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
 import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
+import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
+import com.kaipai.service.actor.support.HeroBadgeText;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -40,15 +50,21 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
 
     /** 步骤3 每部作品最多 3 张剧照，与 ActorCardWorksReplaceReqDTO 的 @Size 约束保持一致 */
     private static final int MAX_STILLS_PER_WORK = 3;
+    private static final Duration MAIN_VISUAL_READ_TTL = Duration.ofMinutes(10);
 
     private final ActorCardMapper actorCardMapper;
     private final ActorCardWorkMapper actorCardWorkMapper;
     private final ActorMediaAssetMapper actorMediaAssetMapper;
     private final ActorMediaAssetOwnershipVerifier assetOwnershipVerifier;
     private final ActorCardMediaBindingService mediaBindingService;
+    private final ActorCardVisualInputMapper visualInputMapper;
+    private final ActorCardDecorationAssignmentService decorationAssignmentService;
+    private final ActorMediaAssetService actorMediaAssetService;
+    private final AiGeneratedImageStorage generatedImageStorage;
     private final ObjectMapper objectMapper;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ActorCardRespDTO createDraft(Long userId) {
         ActorCard card = new ActorCard();
         card.setUserId(userId);
@@ -56,6 +72,8 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         card.setCurrentStep(1);
         card.setPublishedVersion(0);
         actorCardMapper.insert(card);
+        decorationAssignmentService.selectForMode(
+                userId, card.getId(), ActorCardDecorationAssignmentService.PERSON_AI, null);
         return toDto(card);
     }
 
@@ -67,7 +85,10 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveStep(Long userId, Long cardId, ActorCardStepSaveReqDTO dto) {
-        ActorCard card = requireOwned(userId, cardId);
+        ActorCard card = requireOwnedForUpdate(userId, cardId);
+        rejectLegacyMainVisualWrite(cardId, dto);
+        String snapshot = StringUtils.hasText(dto.getProfileSnapshotJson())
+                ? normalizeProfileSnapshot(card, dto.getProfileSnapshotJson()) : null;
         String previousBackgroundImageUrl = card.getBackgroundImageUrl();
         String previousSourceImageUrl = card.getSourceImageUrl();
         if (dto.getCurrentStep() != null) card.setCurrentStep(dto.getCurrentStep());
@@ -85,7 +106,7 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
                 || !Objects.equals(previousSourceImageUrl, card.getSourceImageUrl()));
         // 旧客户端字段继续兼容；来源变化后服务端会强制清掉过期结果。
         if (dto.getExpandedImageUrl() != null) card.setExpandedImageUrl(dto.getExpandedImageUrl());
-        if (StringUtils.hasText(dto.getProfileSnapshotJson())) card.setProfileSnapshotJson(dto.getProfileSnapshotJson());
+        if (snapshot != null) card.setProfileSnapshotJson(snapshot);
         if (dto.getPhotosJson() != null) card.setPhotosJson(dto.getPhotosJson());
         if (dto.getVideoUrl() != null) card.setVideoUrl(dto.getVideoUrl());
         applyAttachment(userId, card, dto.getAttachment());
@@ -116,6 +137,55 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
             if (actorCardMapper.update(null, update) != 1) {
                 throw new IllegalStateException("主视觉来源状态更新失败");
             }
+        }
+    }
+
+    /** Validate only B12's explicit field, retaining all unrelated historical snapshot behavior. */
+    private String normalizeProfileSnapshot(ActorCard card, String input) {
+        JsonNode previous = readSnapshot(card.getProfileSnapshotJson());
+        JsonNode next = readSnapshot(input);
+        boolean locked = "published".equals(card.getStatus())
+                || (card.getPublishedVersion() != null && card.getPublishedVersion() > 0);
+        if (locked && !Objects.equals(badgeNode(previous), badgeNode(next))) {
+            throw new BizException(409, "已发布演员卡的首图文案已锁定，请复制后编辑");
+        }
+        if (next == null || !next.isObject()) {
+            if (input.contains("heroBadgeText")) throw new BizException("首图胶囊文案快照格式不正确");
+            return input;
+        }
+        if (!next.has("heroBadgeText")) return input;
+        JsonNode badge = next.get("heroBadgeText");
+        if (!badge.isTextual()) throw new BizException("首图胶囊文案必须为字符串");
+        ((ObjectNode) next).put("heroBadgeText", HeroBadgeText.normalize(badge.textValue()));
+        return next.toString();
+    }
+
+    private JsonNode readSnapshot(String value) {
+        try { return value == null ? null : objectMapper.readTree(value); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private JsonNode badgeNode(JsonNode snapshot) {
+        return snapshot != null && snapshot.isObject() ? snapshot.get("heroBadgeText") : null;
+    }
+
+    /**
+     * Once V003 owns a card's visual input, legacy clients may keep editing the
+     * remaining wizard fields but must not overwrite any main-visual mirror.
+     * The check deliberately runs before mutating the loaded card or validating
+     * attachments so a rejected legacy request has no side effects.
+     */
+    private void rejectLegacyMainVisualWrite(Long cardId, ActorCardStepSaveReqDTO dto) {
+        boolean writesLegacyMainVisual = dto.getSourceImageUrl() != null
+                || dto.getBackgroundImageUrl() != null
+                || dto.getExpandedImageUrl() != null;
+        if (!writesLegacyMainVisual) {
+            return;
+        }
+        ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, cardId);
+        if (visualInput != null) {
+            throw new BizException(409, "当前演员卡已启用新版首图，请使用新版首图入口");
         }
     }
 
@@ -280,6 +350,14 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         return card;
     }
 
+    private ActorCard requireOwnedForUpdate(Long userId, Long cardId) {
+        ActorCard card = actorCardMapper.selectOwnedForUpdate(userId, cardId);
+        if (card == null) {
+            throw new BizException("演员卡不存在");
+        }
+        return card;
+    }
+
     private ActorCardRespDTO toDto(ActorCard card) {
         ActorCardRespDTO dto = new ActorCardRespDTO();
         dto.setId(card.getId());
@@ -291,6 +369,11 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         dto.setSourceImageUrl(card.getSourceImageUrl());
         dto.setExpandedImageUrl(card.getExpandedImageUrl());
         dto.setGeneratedPreviewUrl(card.getGeneratedPreviewUrl());
+        ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, card.getId());
+        if (visualInput != null) {
+            applyVisualCompatibilityProjection(dto, card, visualInput);
+        }
         dto.setProfileSnapshotJson(card.getProfileSnapshotJson());
         dto.setPhotosJson(card.getPhotosJson());
         dto.setVideoUrl(card.getVideoUrl());
@@ -307,6 +390,55 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         dto.setStepStatuses(statuses);
         dto.setCompletionPercentage(calcCompletion(statuses));
         return dto;
+    }
+
+    /**
+     * Old clients still consume actor_card's four historical URL fields. Once
+     * V003 exists those response fields become a read-only projection of the
+     * authoritative visual input; the actor_card entity itself is never changed.
+     */
+    private void applyVisualCompatibilityProjection(
+            ActorCardRespDTO dto,
+            ActorCard card,
+            ActorCardVisualInput visualInput) {
+        String personPreview = resolveVisualPersonPreview(card, visualInput);
+        String generatedPreview = hasCurrentGeneratedResult(visualInput)
+                ? issueVisualReadUrl(visualInput.getGeneratedImageUrl())
+                : null;
+        dto.setSourceImageUrl(personPreview);
+        dto.setExpandedImageUrl(generatedPreview);
+        dto.setBackgroundImageUrl(StringUtils.hasText(generatedPreview)
+                ? generatedPreview : personPreview);
+    }
+
+    private String resolveVisualPersonPreview(ActorCard card, ActorCardVisualInput visualInput) {
+        if (visualInput.getPersonAssetId() != null) {
+            try {
+                var access = actorMediaAssetService.issueOwnerReadyPhotoAccessUrl(
+                        card.getUserId(), visualInput.getPersonAssetId());
+                return access == null ? null : access.getAccessUrl();
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+        }
+        return issueVisualReadUrl(visualInput.getPersonImageUrl());
+    }
+
+    private String issueVisualReadUrl(String stableUrl) {
+        if (!StringUtils.hasText(stableUrl)) {
+            return null;
+        }
+        try {
+            return generatedImageStorage.issueReadUrl(stableUrl, MAIN_VISUAL_READ_TTL);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private boolean hasCurrentGeneratedResult(ActorCardVisualInput visualInput) {
+        return StringUtils.hasText(visualInput.getInputFingerprint())
+                && visualInput.getInputFingerprint().equals(visualInput.getGeneratedFingerprint())
+                && StringUtils.hasText(visualInput.getGeneratedImageUrl());
     }
 
     /**
@@ -388,14 +520,27 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
     }
 
     private boolean hasMainVisual(ActorCard card) {
+        ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, card.getId());
+        String visualAssetMarker = visualInput != null && visualInput.getPersonAssetId() != null
+                ? "asset:" + visualInput.getPersonAssetId()
+                : null;
         try {
             var binding = mediaBindingService.list(
                     card.getUserId(), card.getId(), ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
-            return ActorCardMainVisualResolver.hasEffectiveSource(card, binding);
+            if (visualInput == null) {
+                return ActorCardMainVisualResolver.hasEffectiveSource(card, binding);
+            }
+            return ActorCardMainVisualResolver.resolveDisplayUrl(
+                    card, binding, visualInput, StringUtils::hasText, visualAssetMarker) != null;
         } catch (DataAccessException ignored) {
-            return StringUtils.hasText(card.getExpandedImageUrl())
-                    || StringUtils.hasText(card.getSourceImageUrl())
-                    || StringUtils.hasText(card.getBackgroundImageUrl());
+            if (visualInput == null) {
+                return StringUtils.hasText(card.getExpandedImageUrl())
+                        || StringUtils.hasText(card.getSourceImageUrl())
+                        || StringUtils.hasText(card.getBackgroundImageUrl());
+            }
+            return ActorCardMainVisualResolver.resolveDisplayUrl(
+                    card, null, visualInput, StringUtils::hasText, visualAssetMarker) != null;
         }
     }
 

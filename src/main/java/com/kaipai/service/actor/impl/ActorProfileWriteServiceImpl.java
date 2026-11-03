@@ -16,6 +16,7 @@ import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
 import com.kaipai.service.actor.ActorProfileWriteService;
+import com.kaipai.service.actor.support.HeroBadgeText;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -45,6 +46,7 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ActorProfileRespDTO saveMine(Long currentUserId, ActorProfileMineUpdateDTO request) {
+        String badgeText = request.getHeroBadgeText() == null ? null : HeroBadgeText.normalize(request.getHeroBadgeText());
         if (request.getNickname() != null
                 && (!StringUtils.hasText(request.getNickname()) || request.getNickname().length() > 64)) {
             throw new BizException("昵称须为1至64个字符");
@@ -66,6 +68,7 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         applyCareer(profile, request.getCareer());
         profile.setAvatarAssetId(request.getAvatarAssetId());
         profile.setIntro(trimToNull(request.getIntro()));
+        if (badgeText != null) profile.setHeroBadgeText(badgeText);
 
         Integer previousVersion = profile.getVersion();
         int affectedRows = creating ? profileMapper.insert(profile) : profileMapper.updateById(profile);
@@ -178,6 +181,7 @@ public class ActorProfileWriteServiceImpl implements ActorProfileWriteService {
         response.setRoleTypeTags(readTags(profile.getRoleTypeTagsJson()));
         response.setProfessionalAbilityTags(readTags(profile.getProfessionalAbilityTagsJson()));
         response.setIntro(profile.getIntro());
+        response.setHeroBadgeText(profile.getHeroBadgeText());
         return response;
     }
 

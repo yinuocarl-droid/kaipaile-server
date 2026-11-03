@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingItemRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +73,30 @@ class ActorCardMainVisualResolverTest {
 
         assertFalse(ActorCardMainVisualResolver.hasEffectiveSource(card, emptyBinding()));
         assertNull(ActorCardMainVisualResolver.resolveGenerateInput(card, emptyBinding()));
+    }
+
+    @Test
+    void configuredVisualInputUsesOnlyItsFingerprintGuardedResultNotLegacyExpansion() {
+        ActorCard card = card("https://cdn.test/source.jpg", "https://cdn.test/background.jpg");
+        card.setExpandedImageUrl("https://cdn.test/legacy-expanded.jpg");
+        ActorCardVisualInput visual = new ActorCardVisualInput();
+        visual.setPersonAssetId(81L);
+        visual.setInputFingerprint("current");
+        visual.setGeneratedFingerprint("stale");
+        visual.setGeneratedImageUrl("https://cdn.test/stale-ai.jpg");
+
+        assertEquals("https://signed.test/asset",
+                ActorCardMainVisualResolver.resolveDisplayUrl(
+                        card, binding("https://signed.test/asset"), visual,
+                        value -> value.startsWith("https://"),
+                        "https://signed.test/asset"));
+
+        visual.setGeneratedFingerprint("current");
+        assertEquals("https://cdn.test/stale-ai.jpg",
+                ActorCardMainVisualResolver.resolveDisplayUrl(
+                        card, binding("https://signed.test/asset"), visual,
+                        value -> value.startsWith("https://"),
+                        "https://signed.test/asset"));
     }
 
     private ActorCard card(String source, String background) {

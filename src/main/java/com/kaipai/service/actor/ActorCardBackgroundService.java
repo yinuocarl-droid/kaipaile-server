@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.kaipai.mapper.actor.ActorCardBackgroundMapper;
 import com.kaipai.model.actor.card.dto.ActorCardBackgroundLibraryRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCardBackground;
+import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
+import java.time.Duration;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +20,8 @@ import java.util.stream.Collectors;
 public class ActorCardBackgroundService {
 
     private final ActorCardBackgroundMapper backgroundMapper;
+    private final AiGeneratedImageStorage imageStorage;
+    private final ActorCardDecorationAssignmentService decorationAssignments;
 
     /**
      * 按风格加载背景图库，只返回 enabled=1 的图片，按 sort_order 排序。
@@ -31,7 +36,7 @@ public class ActorCardBackgroundService {
                     new LambdaQueryWrapper<ActorCardBackground>()
                             .eq(ActorCardBackground::getStyle, style)
                             .eq(ActorCardBackground::getEnabled, 1)
-                            .orderByAsc(ActorCardBackground::getSortOrder));
+                            .orderByAsc(ActorCardBackground::getSortOrder, ActorCardBackground::getId));
         } catch (org.springframework.dao.InvalidDataAccessResourceUsageException ex) {
             log.warn("[background-library] actor_card_background 表不可用（可能未执行 V20260814_002 预置迁移），返回空图库: {}", ex.getMessage());
             items = List.of();
@@ -39,13 +44,22 @@ public class ActorCardBackgroundService {
 
         ActorCardBackgroundLibraryRespDTO dto = new ActorCardBackgroundLibraryRespDTO();
         dto.setStyle(style);
+        Map<Long, ActorCardDecorationAssignmentService.DecorationReadiness> readiness = items.isEmpty()
+                ? Map.of()
+                : decorationAssignments.backgroundReadiness(items.stream().map(ActorCardBackground::getId).toList());
         dto.setImages(items.stream().map(bg -> {
             ActorCardBackgroundLibraryRespDTO.BackgroundItem item =
                     new ActorCardBackgroundLibraryRespDTO.BackgroundItem();
             item.setId(bg.getId());
-            item.setImageUrl(bg.getImageUrl());
-            item.setThumbnailUrl(bg.getThumbnailUrl());
+            item.setImageUrl(imageStorage.issueReadUrl(bg.getImageUrl(), Duration.ofMinutes(10)));
+            item.setThumbnailUrl(bg.getThumbnailUrl() == null || bg.getThumbnailUrl().isBlank()
+                    ? item.getImageUrl() : bg.getThumbnailUrl().equals(bg.getImageUrl())
+                    ? item.getImageUrl() : imageStorage.issueReadUrl(bg.getThumbnailUrl(), Duration.ofMinutes(10)));
             item.setSortOrder(bg.getSortOrder());
+            ActorCardDecorationAssignmentService.DecorationReadiness decoration = readiness.get(bg.getId());
+            item.setDecorationReady(decoration != null && decoration.ready());
+            item.setDecorationUnavailableReason(decoration == null
+                    ? "当前背景尚未绑定已发布装修版本" : decoration.unavailableReason());
             return item;
         }).collect(Collectors.toList()));
         return dto;

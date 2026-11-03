@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.databind.JsonNode;
 
 @Data
 public class ActorProfileMineUpdateDTO {
@@ -30,4 +32,15 @@ public class ActorProfileMineUpdateDTO {
 
     @Size(max = 2000)
     private String intro;
+
+    /** Missing/null preserves the existing value; empty string explicitly clears. */
+    private String heroBadgeText;
+
+    /** JSON numbers/booleans must not silently coerce into actor-authored text. */
+    @JsonSetter("heroBadgeText")
+    public void readHeroBadgeText(JsonNode value) {
+        if (value == null || value.isNull()) { heroBadgeText = null; return; }
+        if (!value.isTextual()) throw new IllegalArgumentException("heroBadgeText must be a string or null");
+        heroBadgeText = value.textValue();
+    }
 }

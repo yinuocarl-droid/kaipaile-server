@@ -4,15 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.model.actor.card.dto.ActorCardListItemDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.dto.ActorProfileCompletenessRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
+import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
 import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
@@ -38,6 +41,8 @@ public class ActorCardPublishService {
     private final ActorProfileMapper actorProfileMapper;
     private final ActorCardMediaBindingService mediaBindingService;
     private final AiGeneratedImageStorage generatedImageStorage;
+    private final ActorCardVisualInputMapper visualInputMapper;
+    private final ActorMediaAssetService actorMediaAssetService;
 
     // ── 发布 ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +71,11 @@ public class ActorCardPublishService {
         }
         return actorCardMapper.selectList(query)
                 .stream().map(this::toListItem).collect(Collectors.toList());
+    }
+
+    /** 00-265: 后台治理列表复用名片夹列表项计算，保证完成度与封面两端同源。 */
+    public ActorCardListItemDTO describe(ActorCard card) {
+        return toListItem(card);
     }
 
     // ── 资料完整度 ────────────────────────────────────────────────────────────
@@ -98,19 +108,22 @@ public class ActorCardPublishService {
 
     private ActorCardListItemDTO toListItem(ActorCard card) {
         var sourceBinding = sourceBinding(card);
+        var visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, card.getId());
         long workCount = workCount(card);
         ActorCardListItemDTO dto = new ActorCardListItemDTO();
         dto.setId(card.getId());
         dto.setStatus(card.getStatus());
         dto.setTitle(card.getTitle());
         dto.setStyle(card.getStyle());
-        dto.setCoverImageUrl(resolveCoverImageUrl(card, sourceBinding));
+        dto.setCoverImageUrl(resolveCoverImageUrl(card, sourceBinding, visualInput));
         dto.setPublishedVersion(card.getPublishedVersion());
         dto.setPublishedAt(card.getPublishedAt());
         dto.setLastUpdate(card.getLastUpdate());
-        dto.setCompletionPercentage(calcCardCompletion(card, sourceBinding, workCount));
+        dto.setCompletionPercentage(calcCardCompletion(card, sourceBinding, visualInput, workCount));
         boolean draft = "draft".equals(card.getStatus());
-        dto.setGenerateReady(draft && hasRequiredGenerationInputs(card, sourceBinding, workCount));
+        dto.setGenerateReady(draft && hasRequiredGenerationInputs(
+                card, sourceBinding, visualInput, workCount));
         dto.setPublishReady(draft && StringUtils.hasText(card.getGeneratedPreviewUrl()));
         return dto;
     }
@@ -133,9 +146,10 @@ public class ActorCardPublishService {
     private int calcCardCompletion(
             ActorCard card,
             ActorCardMediaBindingRespDTO sourceBinding,
+            ActorCardVisualInput visualInput,
             long workCount) {
         int total = 7, done = 0;
-        if (ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding)) done++;
+        if (ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding, visualInput)) done++;
         if (StringUtils.hasText(card.getProfileSnapshotJson())) done++;
         if (workCount > 0) done++;
         if (StringUtils.hasText(card.getPhotosJson())) done++;
@@ -149,8 +163,9 @@ public class ActorCardPublishService {
     private boolean hasRequiredGenerationInputs(
             ActorCard card,
             ActorCardMediaBindingRespDTO sourceBinding,
+            ActorCardVisualInput visualInput,
             long workCount) {
-        return ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding)
+        return ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding, visualInput)
                 && StringUtils.hasText(card.getProfileSnapshotJson())
                 && workCount > 0
                 && StringUtils.hasText(card.getSettingsJson());
@@ -173,17 +188,39 @@ public class ActorCardPublishService {
         }
     }
 
-    private String resolveCoverImageUrl(ActorCard card, ActorCardMediaBindingRespDTO sourceBinding) {
+    private String resolveCoverImageUrl(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO sourceBinding,
+            ActorCardVisualInput visualInput) {
+        String personAssetAccessUrl = resolveVisualPersonAssetAccessUrl(card, visualInput);
         String resolved = ActorCardMainVisualResolver.resolveDisplayUrl(
-                card, sourceBinding, this::isHttpUrl);
+                card, sourceBinding, visualInput, this::isHttpUrl, personAssetAccessUrl);
         if (!StringUtils.hasText(resolved)) {
             return null;
         }
         try {
             return generatedImageStorage.issueReadUrl(resolved, MAIN_VISUAL_READ_TTL);
         } catch (RuntimeException ignored) {
+            if (visualInput != null) {
+                return personAssetAccessUrl;
+            }
             return ActorCardMainVisualResolver.resolveSourceDisplayUrl(
                     card, sourceBinding, this::isHttpUrl);
+        }
+    }
+
+    private String resolveVisualPersonAssetAccessUrl(
+            ActorCard card,
+            ActorCardVisualInput visualInput) {
+        if (visualInput == null || visualInput.getPersonAssetId() == null) {
+            return null;
+        }
+        try {
+            var access = actorMediaAssetService.issueOwnerReadyPhotoAccessUrl(
+                    card.getUserId(), visualInput.getPersonAssetId());
+            return access == null ? null : access.getAccessUrl();
+        } catch (RuntimeException ignored) {
+            return null;
         }
     }
 

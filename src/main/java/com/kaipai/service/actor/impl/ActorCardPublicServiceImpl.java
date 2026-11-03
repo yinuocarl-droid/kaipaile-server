@@ -5,23 +5,29 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.actor.ActorMediaAssetMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.model.actor.card.dto.ActorCardPublicRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardDecorationAssignmentDTO.DecorationEnvelope;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardMediaBindingRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.actor.card.entity.ActorCardWork;
 import com.kaipai.model.actor.entity.ActorMediaAsset;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.service.actor.ActorCardPublicService;
+import com.kaipai.service.actor.ActorCardDecorationAssignmentService;
 import com.kaipai.service.actor.ActorCardMediaBindingService;
 import com.kaipai.service.actor.ActorCardMainVisualResolver;
 import com.kaipai.service.actor.ActorMediaAssetService;
+import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
 import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -47,7 +53,9 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
     private final ActorProfileMapper actorProfileMapper;
     private final ActorCardMediaBindingService mediaBindingService;
     private final ActorMediaAssetService actorMediaAssetService;
+    private final ActorCardVisualInputMapper visualInputMapper;
     private final AiGeneratedImageStorage generatedImageStorage;
+    private final ActorCardDecorationAssignmentService decorationAssignmentService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -60,7 +68,7 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
             throw new BizException(403, "该演员卡尚未发布");
         }
 
-        return buildView(card);
+        return buildView(card, decorationAssignmentService.resolve(card.getId()));
     }
 
     @Override
@@ -69,30 +77,46 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
         if (card == null || !userId.equals(card.getUserId())) {
             throw new BizException("演员卡不存在");
         }
-        return buildView(card);
+        return buildView(card, decorationAssignmentService.resolve(card.getId()));
     }
 
-    private ActorCardPublicRespDTO buildView(ActorCard card) {
+    @Override
+    public ActorCardPublicRespDTO getAdminPreview(Long cardId, DecorationEnvelope decoration) {
+        ActorCard card = actorCardMapper.selectById(cardId);
+        if (card == null) throw new BizException(404, "演员卡不存在");
+        return buildView(card, decoration);
+    }
+
+    private ActorCardPublicRespDTO buildView(ActorCard card, DecorationEnvelope decoration) {
 
         ActorCardPublicRespDTO resp = new ActorCardPublicRespDTO();
         ActorProfile actorProfile = findActorProfile(card.getUserId());
         resp.setId(card.getId());
         resp.setTitle(card.getTitle());
         resp.setStyle(card.getStyle());
+        resp.setDecoration(decoration);
         ActorCardMediaBindingRespDTO sourceBinding = mediaBindingService.list(
                 card.getUserId(), card.getId(), ActorCardMediaBindingServiceImpl.SOURCE_IMAGE, null);
-        String mainVisualUrl = ActorCardMainVisualResolver.resolveDisplayUrl(
-                card, sourceBinding, this::isHttpUrl,
-                actorProfile == null ? null : actorProfile.getCoverUrl(),
-                actorProfile == null ? null : actorProfile.getAvatarUrl());
-        if (StringUtils.hasText(mainVisualUrl)) {
-            try {
-                mainVisualUrl = generatedImageStorage.issueReadUrl(mainVisualUrl, MAIN_VISUAL_READ_TTL);
-            } catch (RuntimeException ignored) {
-                mainVisualUrl = ActorCardMainVisualResolver.resolveSourceDisplayUrl(
+        ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, card.getId());
+        String visualAssetUrl = hasCurrentUsableGeneratedResult(visualInput)
+                ? null
+                : resolveVisualAssetUrl(card, sourceBinding, visualInput);
+        String mainVisualUrl = visualInput == null
+                ? ActorCardMainVisualResolver.resolveDisplayUrl(
                         card, sourceBinding, this::isHttpUrl,
                         actorProfile == null ? null : actorProfile.getCoverUrl(),
-                        actorProfile == null ? null : actorProfile.getAvatarUrl());
+                        actorProfile == null ? null : actorProfile.getAvatarUrl())
+                : ActorCardMainVisualResolver.resolveDisplayUrl(
+                        card, sourceBinding, visualInput, this::isHttpUrl, visualAssetUrl);
+        if (StringUtils.hasText(mainVisualUrl)) {
+            try {
+                if (!isAlreadySignedVisualAsset(mainVisualUrl, visualAssetUrl, visualInput)) {
+                    mainVisualUrl = generatedImageStorage.issueReadUrl(mainVisualUrl, MAIN_VISUAL_READ_TTL);
+                }
+            } catch (RuntimeException ignored) {
+                mainVisualUrl = fallbackAfterSigningFailure(
+                        card, sourceBinding, actorProfile, visualInput, visualAssetUrl, mainVisualUrl);
             }
         }
         // 两个字段只为旧前端兼容保留；单一首图合同要求同次响应严格同值。
@@ -121,6 +145,7 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ActorCardRespDTO copy(Long userId, Long cardId) {
         ActorCard src = actorCardMapper.selectById(cardId);
         if (src == null || !userId.equals(src.getUserId())) {
@@ -164,6 +189,8 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
             workIdMapping.put(w.getId(), nw.getId());
         }
         mediaBindingService.copyBindings(userId, cardId, copy.getId(), workIdMapping);
+        decorationAssignmentService.copyAssignment(userId, cardId, copy.getId());
+        copyVisualInput(userId, cardId, copy.getId());
 
         ActorCardRespDTO dto = new ActorCardRespDTO();
         dto.setId(copy.getId());
@@ -172,6 +199,111 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
         dto.setStyle(copy.getStyle());
         dto.setCurrentStep(7);
         return dto;
+    }
+
+    private void copyVisualInput(Long userId, Long sourceCardId, Long targetCardId) {
+        ActorCardVisualInput source = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, sourceCardId);
+        if (source == null) {
+            return;
+        }
+        ActorCardVisualInput copy = new ActorCardVisualInput();
+        copy.setCardId(targetCardId);
+        copy.setUserId(userId);
+        copy.setGenerationMode(source.getGenerationMode());
+        copy.setPersonSourceType(source.getPersonSourceType());
+        copy.setPersonAssetId(source.getPersonAssetId());
+        copy.setPersonImageUrl(source.getPersonImageUrl());
+        copy.setBackgroundId(source.getBackgroundId());
+        copy.setBackgroundImageUrl(source.getBackgroundImageUrl());
+        copy.setRevision(1L);
+        copy.setInputFingerprint(source.getInputFingerprint());
+        copy.setGenerationConfigVersion(source.getGenerationConfigVersion());
+        boolean currentResult = StringUtils.hasText(source.getInputFingerprint())
+                && source.getInputFingerprint().equals(source.getGeneratedFingerprint())
+                && StringUtils.hasText(source.getGeneratedImageUrl());
+        if (currentResult) {
+            copy.setGeneratedImageUrl(source.getGeneratedImageUrl());
+            copy.setGeneratedFingerprint(source.getGeneratedFingerprint());
+        }
+        if (visualInputMapper.insert(copy) != 1) {
+            throw new BizException("复制首图输入失败");
+        }
+    }
+
+    private String resolveVisualAssetUrl(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO sourceBinding,
+            ActorCardVisualInput visualInput) {
+        if (visualInput == null || visualInput.getPersonAssetId() == null) {
+            return null;
+        }
+        if (sourceBinding != null && sourceBinding.getItems() != null) {
+            String boundUrl = sourceBinding.getItems().stream()
+                    .filter(item -> visualInput.getPersonAssetId().equals(item.getAssetId()))
+                    .map(item -> item.getPreviewUrl())
+                    .filter(this::isHttpUrl)
+                    .findFirst()
+                    .orElse(null);
+            if (boundUrl != null) {
+                return boundUrl;
+            }
+        }
+        try {
+            var access = actorMediaAssetService.issueOwnerReadyPhotoAccessUrl(
+                    card.getUserId(), visualInput.getPersonAssetId());
+            return access == null ? null : access.getAccessUrl();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private boolean hasCurrentUsableGeneratedResult(ActorCardVisualInput visualInput) {
+        return visualInput != null
+                && StringUtils.hasText(visualInput.getInputFingerprint())
+                && visualInput.getInputFingerprint().equals(visualInput.getGeneratedFingerprint())
+                && isHttpUrl(visualInput.getGeneratedImageUrl());
+    }
+
+    private boolean isAlreadySignedVisualAsset(
+            String mainVisualUrl,
+            String visualAssetUrl,
+            ActorCardVisualInput visualInput) {
+        return visualInput != null
+                && visualInput.getPersonAssetId() != null
+                && mainVisualUrl.equals(visualAssetUrl);
+    }
+
+    private String fallbackAfterSigningFailure(
+            ActorCard card,
+            ActorCardMediaBindingRespDTO sourceBinding,
+            ActorProfile actorProfile,
+            ActorCardVisualInput visualInput,
+            String visualAssetUrl,
+            String failedUrl) {
+        if (visualInput == null) {
+            return ActorCardMainVisualResolver.resolveSourceDisplayUrl(
+                    card, sourceBinding, this::isHttpUrl,
+                    actorProfile == null ? null : actorProfile.getCoverUrl(),
+                    actorProfile == null ? null : actorProfile.getAvatarUrl());
+        }
+        if (visualInput.getPersonAssetId() != null && !StringUtils.hasText(visualAssetUrl)) {
+            return resolveVisualAssetUrl(card, sourceBinding, visualInput);
+        }
+        if (StringUtils.hasText(visualAssetUrl) && !visualAssetUrl.equals(failedUrl)) {
+            return visualAssetUrl;
+        }
+        if (visualInput.getPersonAssetId() == null
+                && StringUtils.hasText(visualInput.getPersonImageUrl())
+                && !visualInput.getPersonImageUrl().equals(failedUrl)) {
+            try {
+                return generatedImageStorage.issueReadUrl(
+                        visualInput.getPersonImageUrl(), MAIN_VISUAL_READ_TTL);
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     // ── 组装 ───────────────────────────────────────────────────────────────────
@@ -235,6 +367,12 @@ public class ActorCardPublicServiceImpl implements ActorCardPublicService {
         p.setIntroduction(firstNonBlank(
                 text(snapshot, "introduction"), text(snapshot, "intro"),
                 profile == null ? null : profile.getIntro()));
+        // B12 actor facts are immutable per-card; old/missing snapshots must stay hidden.
+        JsonNode badge = snapshot == null ? null : snapshot.get("heroBadgeText");
+        if (badge != null && badge.isTextual()) {
+            try { p.setHeroBadgeText(com.kaipai.service.actor.support.HeroBadgeText.normalize(badge.textValue())); }
+            catch (BizException ignored) { /* Invalid historical content stays hidden, never uses live profile. */ }
+        }
         return p;
     }
 

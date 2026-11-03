@@ -16,5 +16,7 @@ public class ActorCardBackgroundLibraryRespDTO {
         private String imageUrl;
         private String thumbnailUrl;
         private Integer sortOrder;
+        private boolean decorationReady;
+        private String decorationUnavailableReason;
     }
 }

@@ -3,11 +3,14 @@ package com.kaipai.service.actor;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.kaipai.common.exception.BizException;
 import com.kaipai.mapper.actor.ActorCardMapper;
+import com.kaipai.mapper.actor.ActorCardVisualInputMapper;
 import com.kaipai.mapper.actor.ActorCardWorkMapper;
 import com.kaipai.mapper.ai.ActorAiProfileCardTaskMapper;
 import com.kaipai.model.actor.card.dto.ActorCardGenerateRespDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
+import com.kaipai.model.actor.card.entity.ActorCardVisualInput;
 import com.kaipai.model.ai.entity.ActorAiProfileCardTask;
+import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,27 +44,29 @@ public class ActorCardGenerateService {
     private final ActorCardWorkMapper actorCardWorkMapper;
     private final ActorAiProfileCardTaskMapper taskMapper;
     private final ActorCardMediaBindingService mediaBindingService;
+    private final ActorCardVisualInputMapper visualInputMapper;
 
     @Resource(name = "aiProfileCardTaskExecutor")
     private Executor taskExecutor;
 
     public ActorCardGenerateRespDTO submit(Long userId, Long cardId) {
         ActorCard card = requireOwned(userId, cardId);
+        ActorCardVisualInput visualInput = ActorCardVisualInputReadSupport.selectOrLegacy(
+                visualInputMapper, cardId);
         boolean hasEffectiveSource;
         String generationInput;
         try {
             var sourceBinding = mediaBindingService.list(userId, cardId, USAGE_SOURCE_IMAGE, null);
-            hasEffectiveSource = ActorCardMainVisualResolver.hasEffectiveSource(card, sourceBinding);
-            generationInput = ActorCardMainVisualResolver.resolveGenerateInput(card, sourceBinding);
+            hasEffectiveSource = ActorCardMainVisualResolver.hasEffectiveSource(
+                    card, sourceBinding, visualInput);
+            generationInput = ActorCardMainVisualResolver.resolveGenerateInput(
+                    card, sourceBinding, visualInput);
         } catch (DataAccessException ignored) {
             // migration 尚未落地时保留两个历史 URL；新 assetId 路径仍要求先执行 migration。
-            hasEffectiveSource = StringUtils.hasText(card.getExpandedImageUrl())
-                    || StringUtils.hasText(card.getSourceImageUrl())
-                    || StringUtils.hasText(card.getBackgroundImageUrl());
-            generationInput = StringUtils.hasText(card.getExpandedImageUrl())
-                    ? card.getExpandedImageUrl()
-                    : StringUtils.hasText(card.getSourceImageUrl())
-                            ? card.getSourceImageUrl() : card.getBackgroundImageUrl();
+            hasEffectiveSource = ActorCardMainVisualResolver.hasEffectiveSource(
+                    card, null, visualInput);
+            generationInput = ActorCardMainVisualResolver.resolveGenerateInput(
+                    card, null, visualInput);
         }
         validateRequiredSteps(card, hasEffectiveSource);
 

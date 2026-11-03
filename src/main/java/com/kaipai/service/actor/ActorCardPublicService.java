@@ -2,6 +2,7 @@ package com.kaipai.service.actor;
 
 import com.kaipai.model.actor.card.dto.ActorCardPublicRespDTO;
 import com.kaipai.model.actor.card.dto.ActorCardRespDTO;
+import com.kaipai.model.actor.card.dto.ActorCardDecorationAssignmentDTO.DecorationEnvelope;
 
 /**
  * 已发布演员卡公开视图与复制创建（00-215 / 00-218）。
@@ -19,6 +20,9 @@ public interface ActorCardPublicService {
      * 不要求已发布，但必须校验归属。
      */
     ActorCardPublicRespDTO getOwnerPreview(Long userId, Long cardId);
+
+    /** Admin-authorized real-card preview with a transient saved binding; never changes the card. */
+    ActorCardPublicRespDTO getAdminPreview(Long cardId, DecorationEnvelope decoration);
 
     /**
      * 复制已发布演员卡为新草稿（含参演作品子表），返回新草稿。
