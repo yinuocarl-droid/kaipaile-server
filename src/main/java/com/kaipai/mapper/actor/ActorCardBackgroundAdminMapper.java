@@ -11,6 +11,9 @@ public interface ActorCardBackgroundAdminMapper {
     int updateMetadata(@Param("id") Long id, @Param("style") String style, @Param("sort") int sort, @Param("enabled") int enabled);
     @Select("SELECT COUNT(*) FROM card_scene_template WHERE template_id=#{id} AND deleted=0")
     int templateExists(@Param("id") Long id);
+    /** 00-267: 背景风格必须是已存在的风格模板（不论启停）。 */
+    @Select("SELECT COUNT(*) FROM card_scene_template WHERE template_scene_code=#{code} AND deleted=0")
+    int templateSceneCodeExists(@Param("code") String code);
     @Select("SELECT * FROM actor_card_decoration_editor_context WHERE template_id=#{id}")
     ActorCardDecorationEditorContext context(@Param("id") Long id);
     @Select("SELECT * FROM actor_card_decoration_editor_context WHERE template_id=#{id} FOR UPDATE")

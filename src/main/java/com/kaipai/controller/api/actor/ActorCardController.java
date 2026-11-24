@@ -146,7 +146,13 @@ public class ActorCardController {
 
     // ── T3: 背景图库 ───────────────────────────────────────────────────────────
 
-    @Operation(summary = "按风格加载背景图库（classic|urban|ancient|fresh）")
+    @Operation(summary = "首页模板创建：每个启用风格模板一张卡，封面为模板页面装修的编辑背景（00-267）")
+    @GetMapping("/template-cards")
+    public R<java.util.List<com.kaipai.model.actor.card.dto.ActorCardTemplateCardRespDTO>> templateCards() {
+        return R.ok(backgroundService.templateCards());
+    }
+
+    @Operation(summary = "按风格加载背景图库（风格 = 风格模板场景码，兼容旧值 ancient）")
     @GetMapping("/background-library")
     public R<ActorCardBackgroundLibraryRespDTO> backgroundLibrary(
             @RequestParam String style) {

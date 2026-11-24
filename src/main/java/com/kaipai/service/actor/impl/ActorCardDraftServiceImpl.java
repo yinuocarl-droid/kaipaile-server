@@ -28,6 +28,7 @@ import com.kaipai.service.actor.ActorCardMainVisualResolver;
 import com.kaipai.service.actor.ActorMediaAssetService;
 import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
 import com.kaipai.service.actor.support.ActorCardAttachmentCriterion;
+import com.kaipai.service.actor.support.ActorCardStyles;
 import com.kaipai.service.actor.support.ActorCardVisualInputReadSupport;
 import com.kaipai.service.actor.support.HeroBadgeText;
 import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
@@ -93,7 +94,8 @@ public class ActorCardDraftServiceImpl implements ActorCardDraftService {
         String previousSourceImageUrl = card.getSourceImageUrl();
         if (dto.getCurrentStep() != null) card.setCurrentStep(dto.getCurrentStep());
         if (StringUtils.hasText(dto.getTitle())) card.setTitle(dto.getTitle());
-        if (StringUtils.hasText(dto.getStyle())) card.setStyle(dto.getStyle());
+        // 00-267: 风格归一为风格模板场景码，兼容旧客户端的 ancient
+        if (StringUtils.hasText(dto.getStyle())) card.setStyle(ActorCardStyles.normalize(dto.getStyle()));
         boolean stepOneRequest = Integer.valueOf(1).equals(dto.getCurrentStep());
         if (dto.getBackgroundImageUrl() != null && (stepOneRequest || StringUtils.hasText(dto.getBackgroundImageUrl()))) {
             card.setBackgroundImageUrl(normalizeNullableUrl(dto.getBackgroundImageUrl()));

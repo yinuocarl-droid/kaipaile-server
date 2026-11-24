@@ -25,7 +25,7 @@ public class ActorCard extends BaseEntity {
     /** 演员卡名称，如「都市演员卡」 */
     private String title;
 
-    /** 风格: classic|urban|ancient|fresh */
+    /** 风格 = 风格模板场景码（00-267）；历史值 ancient 已迁移为 costume，fresh 等无模板旧值保留 */
     private String style;
 
     /** 最近编辑步骤 1-7 */

@@ -42,6 +42,16 @@ class ActorCardBackgroundCatalogTest {
   assertFalse(images.get(1).isDecorationReady());
   assertEquals("当前背景尚未绑定已发布装修版本",images.get(1).getDecorationUnavailableReason());
  }
+ // 00-267: 旧客户端传 ancient、或迁移前库里仍是 ancient，都按 costume 风格返回
+ @Test void legacyAncientRequestReturnsTheCostumeStyle() {
+  when(mapper.selectList(any())).thenReturn(List.of());
+  assertEquals("costume",service.listByStyle("ancient").getStyle());
+  assertEquals("costume",service.listByStyle("costume").getStyle());
+ }
+ @Test void blankStyleReturnsEmptyWithoutQuerying() {
+  assertTrue(service.listByStyle(" ").getImages().isEmpty());
+  verifyNoInteractions(mapper);
+ }
  private ActorCardBackground background(long id,int sortOrder){
   var bg=new ActorCardBackground();bg.setId(id);bg.setStyle("classic");bg.setImageUrl("https://bucket.cos/"+id+".png");bg.setThumbnailUrl(bg.getImageUrl());bg.setEnabled(1);bg.setSortOrder(sortOrder);return bg;
  }

@@ -12,6 +12,7 @@ import com.kaipai.model.actor.card.dto.AdminActorCardGovernanceQueryDTO;
 import com.kaipai.model.actor.card.entity.ActorCard;
 import com.kaipai.model.actor.entity.ActorProfile;
 import com.kaipai.model.user.entity.User;
+import com.kaipai.service.actor.support.ActorCardStyles;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -85,9 +86,9 @@ public class AdminActorCardGovernanceService {
         if (query.getUserId() != null) {
             wrapper.eq(ActorCard::getUserId, query.getUserId());
         }
-        String style = trimToNull(query.getStyle());
+        String style = ActorCardStyles.normalize(query.getStyle());
         if (style != null) {
-            wrapper.eq(ActorCard::getStyle, style);
+            wrapper.in(ActorCard::getStyle, ActorCardStyles.storedValues(style));
         }
         return wrapper;
     }
@@ -98,7 +99,7 @@ public class AdminActorCardGovernanceService {
         dto.setUserId(card.getUserId());
         dto.setStatus(card.getStatus());
         dto.setTitle(card.getTitle());
-        dto.setStyle(card.getStyle());
+        dto.setStyle(ActorCardStyles.normalize(card.getStyle()));
         dto.setCurrentStep(card.getCurrentStep());
         dto.setPublishedVersion(card.getPublishedVersion());
         dto.setPublishedAt(card.getPublishedAt());

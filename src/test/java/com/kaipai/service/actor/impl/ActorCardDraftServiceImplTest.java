@@ -411,6 +411,20 @@ class ActorCardDraftServiceImplTest {
     }
 
     @Test
+    void legacyAncientStyleFromOldClientsIsSavedAsTheCostumeTemplate() {
+        ActorCard card = draft();
+        when(cardMapper.selectById(CARD_ID)).thenReturn(card);
+        when(visualInputMapper.selectByCardId(CARD_ID)).thenReturn(visualInput("current", null));
+        ActorCardStepSaveReqDTO request = new ActorCardStepSaveReqDTO();
+        request.setCurrentStep(1);
+        request.setStyle("ancient");
+
+        service.saveStep(USER_ID, CARD_ID, request);
+
+        assertEquals("costume", persistedCard().getStyle());
+    }
+
+    @Test
     void legacyMainVisualWriteLocksTheOwnedCardBeforeCheckingVisualInput() {
         ActorCard card = draft();
         when(cardMapper.selectById(CARD_ID)).thenReturn(card);

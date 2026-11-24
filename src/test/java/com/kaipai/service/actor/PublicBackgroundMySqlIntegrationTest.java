@@ -36,7 +36,7 @@ class PublicBackgroundMySqlIntegrationTest {
   assertTrue(DockerClientFactory.instance().isDockerAvailable(),"isolated Docker MySQL required; no silent skips");
   mysql=new MySQLContainer<>("mysql:8.0.36").withDatabaseName("background_isolated");mysql.start();
   db=new DriverManagerDataSource(mysql.getJdbcUrl(),mysql.getUsername(),mysql.getPassword());jdbc=new JdbcTemplate(db);
-  jdbc.execute("CREATE TABLE card_scene_template(template_id BIGINT PRIMARY KEY,deleted INT DEFAULT 0)");jdbc.update("INSERT INTO card_scene_template VALUES(7,0)");
+  jdbc.execute("CREATE TABLE card_scene_template(template_id BIGINT PRIMARY KEY,template_scene_code VARCHAR(32),deleted INT DEFAULT 0)");jdbc.update("INSERT INTO card_scene_template VALUES(7,'classic',0),(8,'urban',0)");
   jdbc.execute("CREATE TABLE actor_card_background(id BIGINT AUTO_INCREMENT PRIMARY KEY,style VARCHAR(20) NOT NULL,image_url VARCHAR(2048) NOT NULL,thumbnail_url VARCHAR(2048),sort_order INT NOT NULL DEFAULT 0,enabled INT NOT NULL DEFAULT 1,create_time DATETIME DEFAULT CURRENT_TIMESTAMP,last_update DATETIME DEFAULT CURRENT_TIMESTAMP)");
   jdbc.execute("CREATE TABLE background_test_audit(id BIGINT AUTO_INCREMENT PRIMARY KEY,target_id BIGINT)");migrate();migrate();
   app=new AnnotationConfigApplicationContext(Config.class);admin=app.getBean(AdminActorCardBackgroundService.class);mini=app.getBean(ActorCardBackgroundService.class);
@@ -78,6 +78,7 @@ class PublicBackgroundMySqlIntegrationTest {
   @Bean AdminOperationLogger audit(AdminOperationLogService s,AdminAuthContext a){return new AdminOperationLogger(s,a,new ObjectMapper());}
   @Bean AdminActorCardBackgroundService admin(ActorCardBackgroundMapper m,ActorCardBackgroundAdminMapper a,AiGeneratedImageStorage s,AdminAuthContext auth,AdminOperationLogger audit){return new AdminActorCardBackgroundService(m,a,s,auth,audit);}
   @Bean ActorCardDecorationAssignmentService decorationAssignments(){return mock(ActorCardDecorationAssignmentService.class);}
-  @Bean ActorCardBackgroundService mini(ActorCardBackgroundMapper m,AiGeneratedImageStorage s,ActorCardDecorationAssignmentService d){return new ActorCardBackgroundService(m,s,d);}
+  // 00-267: 背景风格须为已存在的风格模板（classic/urban 已预置）；模板卡片依赖的模板服务在此用桩
+  @Bean ActorCardBackgroundService mini(ActorCardBackgroundMapper m,AiGeneratedImageStorage s,ActorCardDecorationAssignmentService d,ActorCardBackgroundAdminMapper a){return new ActorCardBackgroundService(m,s,d,mock(com.kaipai.service.card.CardSceneTemplateService.class),a);}
  }
 }

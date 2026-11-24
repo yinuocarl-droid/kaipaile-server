@@ -17,7 +17,7 @@ public class ActorCardPublicRespDTO {
 
     private String title;
 
-    /** 风格: classic|urban|ancient|fresh */
+    /** 风格 = 风格模板场景码（00-267） */
     private String style;
 
     /** 用户为演员卡选择的完整分享背景视觉。 */

@@ -14,7 +14,7 @@ public class ActorCardBackground {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 所属风格: classic|urban|ancient|fresh */
+    /** 所属风格 = 风格模板场景码（00-267）；fresh 等无模板旧分类保留，仅后台可见 */
     private String style;
 
     private String imageUrl;

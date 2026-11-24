@@ -23,6 +23,6 @@ public class AdminActorCardGovernanceQueryDTO {
     /** published | draft；为空表示全部 */
     private String status;
 
-    /** classic | urban | ancient | fresh；为空表示全部 */
+    /** 风格模板场景码（兼容旧值 ancient）；为空表示全部 */
     private String style;
 }

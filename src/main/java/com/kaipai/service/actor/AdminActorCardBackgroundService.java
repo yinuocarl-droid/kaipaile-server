@@ -9,6 +9,7 @@ import com.kaipai.mapper.actor.ActorCardBackgroundMapper;
 import com.kaipai.mapper.actor.ActorCardBackgroundAdminMapper;
 import com.kaipai.model.actor.card.dto.AdminActorCardBackgroundDTO.*;
 import com.kaipai.model.actor.card.entity.ActorCardBackground;
+import com.kaipai.service.actor.support.ActorCardStyles;
 import com.kaipai.service.ai.profilecard.AiGeneratedImageStorage;
 import java.io.*;
 import java.time.Duration;
@@ -29,15 +30,15 @@ public class AdminActorCardBackgroundService {
     private final AiGeneratedImageStorage storage;
     private final AdminAuthContext auth;
     private final AdminOperationLogger audit;
-    private static final Set<String> STYLES = Set.of("classic", "urban", "ancient", "fresh");
     private static final long MAX_BYTES = 10L * 1024 * 1024;
 
     /** Paged governance view; consumer endpoint uses the same rows, enabled filter and order. */
     public List<Item> list(String style, boolean includeDisabled, int page, int size) {
-        if (style != null && !style.isBlank()) requireStyle(style);
+        String filter = ActorCardStyles.normalize(style);
+        if (filter != null && filter.length() > 30) throw new BizException("背景风格不合法");
         if (page < 1 || page > 10000 || size < 1 || size > 100) throw new BizException("分页参数不合法");
         var q = new LambdaQueryWrapper<ActorCardBackground>()
-                .eq(style != null && !style.isBlank(), ActorCardBackground::getStyle, style)
+                .in(filter != null, ActorCardBackground::getStyle, ActorCardStyles.storedValues(filter))
                 .eq(!includeDisabled, ActorCardBackground::getEnabled, 1)
                 .orderByAsc(ActorCardBackground::getSortOrder, ActorCardBackground::getId)
                 .last("LIMIT " + size + " OFFSET " + ((page - 1) * size));
@@ -46,8 +47,9 @@ public class AdminActorCardBackgroundService {
 
     /** Validate/decode/reencode before storage; creating a new asset never replaces old IDs. */
     @Transactional(rollbackFor = Exception.class)
-    public Item upload(MultipartFile file, String style, int sortOrder) {
-        requireAdmin(); requireStyle(style); requireMetadata(sortOrder, 1);
+    public Item upload(MultipartFile file, String requestedStyle, int sortOrder) {
+        String style = ActorCardStyles.normalize(requestedStyle);
+        requireAdmin(); requireTemplateStyle(style); requireMetadata(sortOrder, 1);
         if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) throw new BizException("请上传不超过10MB的JPEG或PNG图片");
         byte[] clean; String type;
         try (var in = ImageIO.createImageInputStream(file.getInputStream())) {
@@ -80,14 +82,20 @@ public class AdminActorCardBackgroundService {
     /** Metadata-only governance under a row lock and explicit comparison with the client's old values. */
     @Transactional(rollbackFor = Exception.class)
     public Item update(Long id, UpdateReq req) {
-        requireAdmin(); requireStyle(req.style()); requireMetadata(req.sortOrder(), req.enabled());
+        String style = ActorCardStyles.normalize(req.style());
+        requireAdmin(); requireMetadata(req.sortOrder(), req.enabled());
+        if (style == null) throw new BizException("背景风格不能为空");
         var old = requireBackground(adminMapper.lockBackground(id));
-        if (!Objects.equals(old.getStyle(), req.expectedStyle()) || !Objects.equals(old.getSortOrder(), req.expectedSortOrder())
+        String oldStyle = ActorCardStyles.normalize(old.getStyle());
+        // 列表返回归一后的风格，比较时两侧同样归一
+        if (!Objects.equals(oldStyle, ActorCardStyles.normalize(req.expectedStyle())) || !Objects.equals(old.getSortOrder(), req.expectedSortOrder())
                 || !Objects.equals(old.getEnabled(), req.expectedEnabled())) throw new BizException(409, "背景已更新，请刷新图库再操作");
-        if (adminMapper.updateMetadata(id, req.style(), req.sortOrder(), req.enabled()) != 1) throw new BizException(409, "背景保存冲突");
-        log(id, "update_public_background", Map.of("style", req.style(), "enabled", req.enabled(), "sortOrder", req.sortOrder(),
+        // 只改排序/启停时允许保留无模板的旧分类；改分类必须落到已存在的风格模板
+        if (!Objects.equals(style, oldStyle)) requireTemplateStyle(style);
+        if (adminMapper.updateMetadata(id, style, req.sortOrder(), req.enabled()) != 1) throw new BizException(409, "背景保存冲突");
+        log(id, "update_public_background", Map.of("style", style, "enabled", req.enabled(), "sortOrder", req.sortOrder(),
                 "beforeStyle", old.getStyle(), "beforeEnabled", old.getEnabled(), "beforeSortOrder", old.getSortOrder()));
-        old.setStyle(req.style()); old.setSortOrder(req.sortOrder()); old.setEnabled(req.enabled());
+        old.setStyle(style); old.setSortOrder(req.sortOrder()); old.setEnabled(req.enabled());
         return item(old);
     }
 
@@ -125,10 +133,10 @@ public class AdminActorCardBackgroundService {
         String url = storage.issueReadUrl(bg.getImageUrl(), Duration.ofMinutes(10));
         String thumb = bg.getThumbnailUrl() == null || bg.getThumbnailUrl().isBlank() || bg.getThumbnailUrl().equals(bg.getImageUrl())
                 ? url : storage.issueReadUrl(bg.getThumbnailUrl(), Duration.ofMinutes(10));
-        return new Item(bg.getId(), bg.getStyle(), url, thumb, bg.getSortOrder(), bg.getEnabled());
+        return new Item(bg.getId(), ActorCardStyles.normalize(bg.getStyle()), url, thumb, bg.getSortOrder(), bg.getEnabled());
     }
     private Long requireAdmin() { Long id = auth.getCurrentAdminUserId(); if (id == null || id <= 0) throw new BizException(401, "请使用后台管理员身份"); return id; }
-    private void requireStyle(String style) { if (!STYLES.contains(style == null ? "" : style)) throw new BizException("背景风格仅支持classic/urban/ancient/fresh"); }
+    private void requireTemplateStyle(String style) { if (style == null || adminMapper.templateSceneCodeExists(style) < 1) throw new BizException("背景风格必须是已存在的风格模板"); }
     private void requireMetadata(int order, int enabled) { if (order < 0 || order > 99999 || enabled < 0 || enabled > 1) throw new BizException("排序或启用状态无效"); }
     private void requireTemplate(Long id) { if (id == null || id <= 0 || adminMapper.templateExists(id) != 1) throw new BizException(404, "模板不存在"); }
     private ActorCardBackground requireBackground(ActorCardBackground bg) { if (bg == null) throw new BizException(404, "背景不存在"); return bg; }
