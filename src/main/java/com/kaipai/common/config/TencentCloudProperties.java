@@ -21,5 +21,8 @@ public class TencentCloudProperties {
         private String region;
 
         private String bucketName;
+
+        /** Dedicated private bucket for 00-199 actor assets. No public-bucket fallback. */
+        private String privateBucketName;
     }
 }

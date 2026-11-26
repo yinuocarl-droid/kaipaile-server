@@ -9,5 +9,13 @@ public interface AiProfileImageProvider {
 
     String modelCode();
 
+    /**
+     * Declares only request shapes that this provider's concrete writer really emits.
+     * Providers remain single-reference unless they explicitly opt in.
+     */
+    default boolean supportsReferenceImageCount(int referenceImageCount) {
+        return referenceImageCount == 1;
+    }
+
     AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request);
 }

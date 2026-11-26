@@ -1,0 +1,3 @@
+package com.kaipai.model.ai.entity;
+import com.baomidou.mybatisplus.annotation.*; import com.kaipai.common.entity.BaseEntity; import lombok.*;
+@Data @EqualsAndHashCode(callSuper=true) @TableName("ai_profile_import_config_audit") public class AiProfileImportConfigAudit extends BaseEntity { @TableId(type=IdType.AUTO) private Long auditId; private Long configId; private String actionCode; private String beforePublicConfigJson; private String afterPublicConfigJson; private String beforeSecretMaskJson; private String afterSecretMaskJson; private Long operatorId; private String operatorName; private String resultStatus; private String message; }

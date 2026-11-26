@@ -27,10 +27,9 @@ import com.kaipai.integration.verify.IdCardCryptoSupport;
 import com.kaipai.integration.verify.RealNameVerificationCommand;
 import com.kaipai.integration.verify.RealNameVerificationProvider;
 import com.kaipai.integration.verify.RealNameVerificationResult;
-import com.kaipai.integration.verify.TencentIdCardVerificationClient;
-import com.kaipai.integration.verify.TencentIdCardVerificationResult;
 import com.kaipai.service.verify.IdentityVerificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DuplicateKeyException;
@@ -39,10 +38,12 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerificationMapper, IdentityVerification> implements IdentityVerificationService {
@@ -55,7 +56,6 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     private final ReferralRecordService referralRecordService;
     private final RealNameVerificationProvider realNameVerificationProvider;
     private final IdCardCryptoSupport idCardCryptoSupport;
-    private final TencentIdCardVerificationClient tencentIdCardVerificationClient;
 
     private static final int STATUS_PENDING = 1;
     private static final int STATUS_APPROVED = 2;
@@ -64,11 +64,17 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
     @Override
     public IdentityVerificationStatusRespDTO currentStatus(Long userId) {
         User user = userMapper.selectById(userId);
-        IdentityVerification latestRecord = selectLatestByUserId(userId);
+        IdentityVerificationStatusRespDTO defaultResp = buildDefaultStatusResp(user);
+        IdentityVerification latestRecord;
+        try {
+            latestRecord = selectLatestByUserId(userId);
+        } catch (RuntimeException error) {
+            log.warn("读取最新实名记录失败，回退到用户实名状态: userId={}, fallbackStatus={}",
+                    userId, defaultResp.getStatus(), error);
+            return defaultResp;
+        }
         if (latestRecord == null) {
-            IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
-            dto.setStatus(user == null || user.getRealAuthStatus() == null ? 0 : user.getRealAuthStatus());
-            return dto;
+            return defaultResp;
         }
         return toStatusResp(latestRecord);
     }
@@ -131,7 +137,6 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         record.setSnapshotProfileCompletion(profileCompletion);
         RealNameVerificationResult verificationResult = verifyRealName(userId, realName, normalizedIdCardNo);
         applyProviderResult(record, verificationResult);
-        applyProviderVerification(record, realName, normalizedIdCardNo);
         save(record);
 
         int status = record.getStatus() == null ? STATUS_PENDING : record.getStatus();
@@ -192,7 +197,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
             item.setRealName(record.getRealName());
             item.setStatus(record.getStatus());
             item.setSubmitTime(record.getCreateTime());
-            item.setVerifyProvider(record.getVerifyProvider());
+            item.setProviderCode(record.getProviderCode());
             item.setProviderResultCode(record.getProviderResultCode());
             User user = userMap.get(record.getUserId());
             if (user != null) {
@@ -214,8 +219,7 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
         dto.setVerificationId(record.getVerificationId());
         dto.setUserId(record.getUserId());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNoCipher(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
-        dto.setIdCardNoMasked(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
+        dto.setIdCardNoMasked(resolveMaskedIdCardNo(record.getIdCardNoMasked()));
         dto.setStatus(record.getStatus());
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmitTime(record.getCreateTime());
@@ -362,50 +366,29 @@ public class IdentityVerificationServiceImpl extends ServiceImpl<IdentityVerific
                 .last("LIMIT 1"));
     }
 
+    private IdentityVerificationStatusRespDTO buildDefaultStatusResp(User user) {
+        IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
+        dto.setStatus(user == null || user.getRealAuthStatus() == null ? 0 : user.getRealAuthStatus());
+        return dto;
+    }
+
     private IdentityVerificationStatusRespDTO toStatusResp(IdentityVerification record) {
         IdentityVerificationStatusRespDTO dto = new IdentityVerificationStatusRespDTO();
         dto.setStatus(record.getStatus());
         dto.setRealName(record.getRealName());
-        dto.setIdCardNo(record.getIdCardNoMasked() == null ? record.getIdCardNoCipher() : record.getIdCardNoMasked());
+        dto.setIdCardNo(resolveMaskedIdCardNo(record.getIdCardNoMasked()));
         dto.setRejectReason(record.getRejectReason());
         dto.setSubmittedAt(record.getCreateTime());
         dto.setReviewedAt(record.getReviewedAt());
         return dto;
     }
 
-    private void applyProviderVerification(IdentityVerification record, String realName, String idCardNo) {
-        if (!tencentIdCardVerificationClient.enabled()) {
-            record.setVerifyProvider("manual");
-            return;
+    private String resolveMaskedIdCardNo(String maskedIdCardNo) {
+        if (maskedIdCardNo == null) {
+            return null;
         }
-        TencentIdCardVerificationResult result = tencentIdCardVerificationClient.verify(realName, idCardNo);
-        record.setVerifyProvider("tencent_faceid");
-        record.setProviderResultCode(result.resultCode());
-        record.setProviderDescription(result.description());
-        record.setProviderRequestId(result.requestId());
-        record.setReviewedAt(LocalDateTime.now());
-        if (result.matched()) {
-            record.setStatus(STATUS_APPROVED);
-            record.setRejectReason(null);
-            return;
-        }
-        if (isProviderTemporarilyUnavailable(result.resultCode())) {
-            throw new BizException(providerRejectReason(result) + "，请稍后重试");
-        }
-        record.setStatus(STATUS_REJECTED);
-        record.setRejectReason(providerRejectReason(result));
-    }
-
-    private boolean isProviderTemporarilyUnavailable(String resultCode) {
-        return "-4".equals(resultCode) || "-6".equals(resultCode) || "-7".equals(resultCode);
-    }
-
-    private String providerRejectReason(TencentIdCardVerificationResult result) {
-        String description = result.description();
-        if (description == null || description.isBlank()) {
-            description = "身份证姓名核验未通过";
-        }
-        return description.length() > 255 ? description.substring(0, 255) : description;
+        String normalized = maskedIdCardNo.trim().toUpperCase(Locale.ROOT);
+        return normalized.matches("\\d{3}\\*{11}\\d{3}[\\dX]") ? normalized : null;
     }
 
     private String normalizeIdCardNo(String idCardNo) {

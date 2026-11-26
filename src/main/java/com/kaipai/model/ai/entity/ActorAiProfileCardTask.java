@@ -23,6 +23,12 @@ public class ActorAiProfileCardTask extends BaseEntity {
 
     private Long shareCardId;
 
+    private Long actorCardId;
+
+    private Long sourceAssetId;
+
+    private String sourceFingerprint;
+
     private String templateSceneCode;
 
     private String styleCode;

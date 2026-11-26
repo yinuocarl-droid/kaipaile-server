@@ -18,6 +18,7 @@ import com.kaipai.model.user.entity.User;
 import com.kaipai.mapper.actor.ActorExperienceMapper;
 import com.kaipai.mapper.actor.ActorProfileMapper;
 import com.kaipai.service.actor.ActorProfileService;
+import com.kaipai.service.actor.support.LegacyProfileWriteGuard;
 import com.kaipai.service.ai.AiResumeApplyRecorder;
 import com.kaipai.service.capability.CapabilityAccountService;
 import com.kaipai.service.referral.ReferralRecordService;
@@ -29,7 +30,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -43,6 +43,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     private final ObjectMapper objectMapper;
     private final AiResumeApplyRecorder aiResumeApplyRecorder;
     private final ReferralRecordService referralRecordService;
+    private final LegacyProfileWriteGuard legacyProfileWriteGuard;
 
     @Override
     public ActorProfileDTO mine(Long currentUserId) {
@@ -62,6 +63,7 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveProfile(Long currentUserId, ActorProfileSaveDTO dto) {
+        legacyProfileWriteGuard.assertCompatible(dto);
         User user = requireUser(currentUserId);
         ActorProfile profile = getOne(new LambdaQueryWrapper<ActorProfile>()
                 .eq(ActorProfile::getUserId, currentUserId)
@@ -85,16 +87,9 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         profile.setLocationCity(trimToNull(dto.getCity()));
         profile.setBirthday(parseBirthday(dto.getBirthday()));
         profile.setBirthHour(trimToNull(dto.getBirthHour()));
-        profile.setAvatarUrl(trimToNull(dto.getAvatar()));
         profile.setIntro(trimToNull(dto.getIntro()));
-        profile.setPhotoUrls(writeJson(safeList(dto.getPhotos())));
-        profile.setVideoUrl(trimToNull(dto.getVideoUrl()));
-        profile.setSkillTag(writeCommaSeparated(dto.getSkillTypes()));
-        profile.setStyleTag(writeStyleTags(dto));
-        profile.setExperienceDesc(writeExperienceSummary(dto.getWorkExperiences()));
         profile.setPhone(firstNonBlank(dto.getContactPhone(), user.getPhone(), null));
         profile.setIsCertified(user.getRealAuthStatus() != null && user.getRealAuthStatus() == 2);
-        profile.setExtendedField(writeJson(buildProfileExtras(dto, readProfileExtras(profile.getExtendedField()))));
 
         if (creating) {
             save(profile);
@@ -102,7 +97,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
             updateById(profile);
         }
 
-        syncExperiences(profile, dto.getWorkExperiences());
         referralRecordService.reconcileInviteeReferral(currentUserId);
         if (hasAiResumeApplyMeta(dto)) {
             aiResumeApplyRecorder.recordAppliedDraft(currentUserId, beforeProfile, dto);
@@ -214,71 +208,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
                 .toList();
     }
 
-    private void syncExperiences(ActorProfile profile, List<ActorWorkExperienceDTO> experiences) {
-        List<ActorExperience> existing = actorExperienceMapper.selectList(new LambdaQueryWrapper<ActorExperience>()
-                .eq(ActorExperience::getUserId, profile.getUserId())
-                .orderByDesc(ActorExperience::getSortNo)
-                .orderByDesc(ActorExperience::getExperienceId));
-        List<ActorWorkExperienceDTO> safeExperiences = safeList(experiences);
-        if (safeExperiences.isEmpty()) {
-            if (!existing.isEmpty()) {
-                actorExperienceMapper.delete(new LambdaQueryWrapper<ActorExperience>()
-                        .eq(ActorExperience::getUserId, profile.getUserId()));
-            }
-            return;
-        }
-
-        List<Long> retainedIds = new ArrayList<>();
-        for (int i = 0; i < safeExperiences.size(); i++) {
-            ActorWorkExperienceDTO item = safeExperiences.get(i);
-            if (!StringUtils.hasText(item.getProjectName())) {
-                continue;
-            }
-            ActorExperience experience = null;
-            if (item.getId() != null) {
-                for (ActorExperience current : existing) {
-                    if (Objects.equals(current.getExperienceId(), item.getId())) {
-                        experience = current;
-                        retainedIds.add(current.getExperienceId());
-                        break;
-                    }
-                }
-            }
-            boolean creating = experience == null;
-            if (creating) {
-                experience = new ActorExperience();
-                experience.setUserId(profile.getUserId());
-                experience.setActorProfileId(profile.getActorProfileId());
-            } else if (experience.getActorProfileId() == null) {
-                experience.setActorProfileId(profile.getActorProfileId());
-            }
-            experience.setDramaName(item.getProjectName().trim());
-            experience.setRoleName(trimToNull(item.getRoleName()));
-            experience.setShootYear(parseShootYear(item.getShootDate()));
-            experience.setShootMonth(parseShootMonth(item.getShootDate()));
-            experience.setRoleDesc(trimToNull(item.getDescription()));
-            experience.setSortNo(safeExperiences.size() - i);
-            experience.setExtendedField(writeJson(new ExperienceExtras(safeList(item.getPhotos()))));
-            if (creating) {
-                actorExperienceMapper.insert(experience);
-            } else {
-                actorExperienceMapper.updateById(experience);
-            }
-            item.setId(experience.getExperienceId());
-        }
-
-        if (!existing.isEmpty()) {
-            List<Long> removeIds = existing.stream()
-                    .map(ActorExperience::getExperienceId)
-                    .filter(Objects::nonNull)
-                    .filter(id -> !retainedIds.contains(id))
-                    .toList();
-            if (!removeIds.isEmpty()) {
-                actorExperienceMapper.deleteBatchIds(removeIds);
-            }
-        }
-    }
-
     private ActorWorkExperienceDTO toExperienceDto(ActorExperience item) {
         ExperienceExtras extras = readExperienceExtras(item.getExtendedField());
         ActorWorkExperienceDTO dto = new ActorWorkExperienceDTO();
@@ -304,19 +233,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
             return Boolean.TRUE.equals(profile.getIsCertified());
         }
         return user.getRealAuthStatus() != null && user.getRealAuthStatus() == 2;
-    }
-
-    private ProfileExtras buildProfileExtras(ActorProfileSaveDTO dto, ProfileExtras existing) {
-        ProfileExtras extras = new ProfileExtras();
-        extras.photoCategories = dto.getPhotoCategories() == null ? existing.photoCategories : dto.getPhotoCategories();
-        extras.bodyType = dto.getBodyType() == null ? existing.bodyType : trimToNull(dto.getBodyType());
-        extras.hairStyle = dto.getHairStyle() == null ? existing.hairStyle : trimToNull(dto.getHairStyle());
-        extras.languages = dto.getLanguages() == null ? existing.languages : safeList(dto.getLanguages());
-        extras.resumePdfUrl = dto.getResumePdfUrl() == null ? existing.resumePdfUrl : trimToNull(dto.getResumePdfUrl());
-        extras.resumePdfName = dto.getResumePdfName() == null ? existing.resumePdfName : trimToNull(dto.getResumePdfName());
-        extras.resumePdfPageCount = dto.getResumePdfPageCount() == null ? existing.resumePdfPageCount : dto.getResumePdfPageCount();
-        extras.resumePdfPageImageUrls = dto.getResumePdfPageImageUrls() == null ? existing.resumePdfPageImageUrls : safeList(dto.getResumePdfPageImageUrls());
-        return extras;
     }
 
     private ProfileExtras readProfileExtras(String raw) {
@@ -366,14 +282,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         }
     }
 
-    private String writeJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception e) {
-            throw new BizException("演员档案序列化失败");
-        }
-    }
-
     private List<String> splitCommaSeparated(String raw) {
         if (!StringUtils.hasText(raw)) {
             return new ArrayList<>();
@@ -391,26 +299,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
                 .filter(StringUtils::hasText)
                 .distinct()
                 .reduce((left, right) -> left + "," + right)
-                .orElse(null);
-    }
-
-    private String writeStyleTags(ActorProfileSaveDTO dto) {
-        List<String> tags = new ArrayList<>();
-        if (StringUtils.hasText(dto.getBodyType())) {
-            tags.add(dto.getBodyType().trim());
-        }
-        if (StringUtils.hasText(dto.getHairStyle())) {
-            tags.add(dto.getHairStyle().trim());
-        }
-        tags.addAll(safeList(dto.getLanguages()));
-        return writeCommaSeparated(tags);
-    }
-
-    private String writeExperienceSummary(List<ActorWorkExperienceDTO> experiences) {
-        return safeList(experiences).stream()
-                .filter(item -> StringUtils.hasText(item.getProjectName()) || StringUtils.hasText(item.getDescription()))
-                .map(item -> StringUtils.hasText(item.getDescription()) ? item.getDescription().trim() : item.getProjectName().trim())
-                .reduce((left, right) -> left + "；" + right)
                 .orElse(null);
     }
 
@@ -440,28 +328,6 @@ public class ActorProfileServiceImpl extends ServiceImpl<ActorProfileMapper, Act
         }
         try {
             return LocalDate.parse(birthday.trim());
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private Integer parseShootYear(String shootDate) {
-        if (!StringUtils.hasText(shootDate) || shootDate.length() < 4) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(shootDate.substring(0, 4));
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private Integer parseShootMonth(String shootDate) {
-        if (!StringUtils.hasText(shootDate) || shootDate.length() < 7) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(shootDate.substring(5, 7));
         } catch (Exception ignored) {
             return null;
         }

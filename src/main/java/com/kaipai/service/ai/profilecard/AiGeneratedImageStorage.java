@@ -5,6 +5,8 @@ import com.kaipai.common.exception.BizException;
 import com.kaipai.common.result.ResultCode;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.exception.CosClientException;
+import com.qcloud.cos.http.HttpMethodName;
+import com.qcloud.cos.model.GeneratePresignedUrlRequest;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.model.PutObjectRequest;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDate;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -48,10 +52,26 @@ public class AiGeneratedImageStorage {
     }
 
     public boolean isManagedUrl(String imageUrl) {
-        if (!StringUtils.hasText(imageUrl)) {
+        try {
+            return managedObjectKey(requireHttpImageUrl(imageUrl)) != null;
+        } catch (BizException ignored) {
             return false;
         }
-        return imageUrl.trim().startsWith(buildUrlPrefix());
+    }
+
+    public String issueReadUrl(String imageUrl, Duration duration) {
+        String normalizedUrl = requireHttpImageUrl(imageUrl);
+        String objectKey = managedObjectKey(normalizedUrl);
+        if (objectKey == null) {
+            return normalizedUrl;
+        }
+        if (duration == null || duration.isZero() || duration.isNegative()) {
+            throw new IllegalArgumentException("read URL duration must be positive");
+        }
+        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
+                bucketName(), objectKey, HttpMethodName.GET);
+        request.setExpiration(Date.from(Instant.now().plus(duration)));
+        return cosClient.generatePresignedUrl(request).toString();
     }
 
     public String upload(byte[] bytes, String contentType, String folder) {
@@ -115,11 +135,29 @@ public class AiGeneratedImageStorage {
         if (!StringUtils.hasText(imageUrl)) {
             throw new BizException("生成图片 URL 为空");
         }
-        String normalized = imageUrl.trim();
+        String normalized = stripUnexpectedUrlSuffix(imageUrl.trim());
         if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
             throw new BizException("生成图片 URL 必须是 http/https 地址");
         }
         return normalized;
+    }
+
+    /**
+     * 历史数据中出现过在合法图片 URL 后拼接 HTML/跳转片段的污染值。
+     * URL 的未编码引号、尖括号、反斜杠和空白均不应进入 HTTP 请求；
+     * 在读取边界截断可恢复原对象身份，并让受管私有 COS URL 继续走短时签名。
+     */
+    private String stripUnexpectedUrlSuffix(String value) {
+        int boundary = value.length();
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current == '\'' || current == '"' || current == '<' || current == '>'
+                    || current == '\\' || Character.isWhitespace(current)) {
+                boundary = i;
+                break;
+            }
+        }
+        return value.substring(0, boundary);
     }
 
     private String resolveDownloadedContentType(String contentType, String imageUrl) {
@@ -190,6 +228,26 @@ public class AiGeneratedImageStorage {
     private String buildUrlPrefix() {
         return String.format("https://%s.cos.%s.myqcloud.com/",
                 bucketName(), region());
+    }
+
+    private String managedObjectKey(String imageUrl) {
+        if (!StringUtils.hasText(imageUrl)) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(imageUrl.trim());
+            String expectedHost = String.format("%s.cos.%s.myqcloud.com", bucketName(), region());
+            String path = uri.getPath();
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || !expectedHost.equalsIgnoreCase(uri.getHost())
+                    || !StringUtils.hasText(path)
+                    || "/".equals(path)) {
+                return null;
+            }
+            return path.startsWith("/") ? path.substring(1) : path;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private String bucketName() {

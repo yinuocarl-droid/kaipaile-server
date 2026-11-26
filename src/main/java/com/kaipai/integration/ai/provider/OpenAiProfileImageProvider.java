@@ -41,6 +41,11 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
     }
 
     @Override
+    public boolean supportsReferenceImageCount(int referenceImageCount) {
+        return referenceImageCount >= 1 && referenceImageCount <= 16;
+    }
+
+    @Override
     public AiProfileImageGenerationResult generate(AiProfileImageGenerationRequest request) {
         AiProfileCardProperties.OpenAiProvider config = properties.getOpenai();
         AiImageProviderRuntimeConfig runtime = aiImageProviderConfigService.findRuntimeConfig(providerCode()).orElse(null);
@@ -62,9 +67,14 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                     .build();
-            SourceImage sourceImage = downloadSourceImage(client, request.sourceImageUrl(), readTimeoutMs);
+            SourceImage sourceImage = downloadSourceImage(
+                    client, request.sourceImageUrl(), readTimeoutMs, "person");
+            SourceImage backgroundImage = StringUtils.hasText(request.backgroundImageUrl())
+                    ? downloadSourceImage(client, request.backgroundImageUrl(), readTimeoutMs, "background")
+                    : null;
             String boundary = "----KaipaiAiProfileCard" + UUID.randomUUID().toString().replace("-", "");
-            byte[] body = buildMultipartBody(boundary, request, sourceImage, size, quality, outputFormat);
+            byte[] body = buildMultipartBody(
+                    boundary, request, sourceImage, backgroundImage, size, quality, outputFormat);
 
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
                     .timeout(Duration.ofMillis(readTimeoutMs))
@@ -86,7 +96,8 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
 
     private SourceImage downloadSourceImage(HttpClient client,
                                             String sourceImageUrl,
-                                            int readTimeoutMs) throws Exception {
+                                            int readTimeoutMs,
+                                            String fileStem) throws Exception {
         if (!StringUtils.hasText(sourceImageUrl) || !sourceImageUrl.startsWith("http")) {
             throw new BizException("OpenAI 图生图需要可访问的源图片 URL");
         }
@@ -101,12 +112,13 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
         String contentType = response.headers().firstValue("content-type")
                 .map(value -> value.split(";")[0].trim().toLowerCase())
                 .orElseGet(() -> guessContentType(sourceImageUrl));
-        return new SourceImage(response.body(), contentType, fileNameForContentType(contentType));
+        return new SourceImage(response.body(), contentType, fileNameForContentType(contentType, fileStem));
     }
 
     private byte[] buildMultipartBody(String boundary,
                                       AiProfileImageGenerationRequest request,
                                       SourceImage sourceImage,
+                                      SourceImage backgroundImage,
                                       String size,
                                       String quality,
                                       String outputFormat) throws Exception {
@@ -123,7 +135,13 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
         if (StringUtils.hasText(outputFormat)) {
             writeTextPart(output, boundary, "output_format", outputFormat.trim());
         }
-        writeFilePart(output, boundary, "image", sourceImage.fileName(), sourceImage.contentType(), sourceImage.bytes());
+        String imageField = backgroundImage == null ? "image" : "image[]";
+        writeFilePart(output, boundary, imageField,
+                sourceImage.fileName(), sourceImage.contentType(), sourceImage.bytes());
+        if (backgroundImage != null) {
+            writeFilePart(output, boundary, imageField,
+                    backgroundImage.fileName(), backgroundImage.contentType(), backgroundImage.bytes());
+        }
         output.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         return output.toByteArray();
     }
@@ -186,14 +204,15 @@ public class OpenAiProfileImageProvider implements AiProfileImageProvider {
         return "image/png";
     }
 
-    private String fileNameForContentType(String contentType) {
+    private String fileNameForContentType(String contentType, String fileStem) {
+        String normalizedStem = StringUtils.hasText(fileStem) ? fileStem.trim() : "source";
         if ("image/jpeg".equals(contentType)) {
-            return "source.jpg";
+            return normalizedStem + ".jpg";
         }
         if ("image/webp".equals(contentType)) {
-            return "source.webp";
+            return normalizedStem + ".webp";
         }
-        return "source.png";
+        return normalizedStem + ".png";
     }
 
     private String firstText(String primary, String fallback) {

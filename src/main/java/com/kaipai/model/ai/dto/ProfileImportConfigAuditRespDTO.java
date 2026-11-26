@@ -1,0 +1,1 @@
+package com.kaipai.model.ai.dto; import java.time.LocalDateTime; import lombok.Data; @Data public class ProfileImportConfigAuditRespDTO { private Long auditId; private String actionCode; private Long operatorId; private String operatorName; private String resultStatus; private String message; private LocalDateTime createTime; }

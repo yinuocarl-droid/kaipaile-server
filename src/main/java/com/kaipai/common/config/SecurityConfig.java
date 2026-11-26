@@ -80,7 +80,9 @@ public class SecurityConfig {
                                 "/ai/profile-card/artifacts/*",
                                 "/api/ai/profile-card/artifacts/*",
                                 "/ai/profile-card/share-cards/*/artifact",
-                                "/api/ai/profile-card/share-cards/*/artifact").permitAll()
+                                "/api/ai/profile-card/share-cards/*/artifact",
+                                "/actor-card/public/*",
+                                "/api/actor-card/public/*").permitAll()
                         .requestMatchers(WHITE_LIST).permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()

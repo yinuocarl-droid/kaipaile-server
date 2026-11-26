@@ -22,6 +22,13 @@ public class ActorExperience extends BaseEntity {
     private String dramaName;
 
     private String roleName;
+    private String normalizedDramaName;
+    private String normalizedRoleName;
+    private String dedupeKey;
+    private String sourceType;
+    private String publishStatus;
+    private String workTypeCode;
+    private String roleLevelCode;
 
     /** 作品类型: 1短剧, 2电影, 3电视剧, 4广告, 5其他 */
     private Integer dramaType;
@@ -31,6 +38,9 @@ public class ActorExperience extends BaseEntity {
     private Integer shootMonth;
 
     private String platform;
+    private String syncSoundStatus;
+    private String collaboratorsJson;
+    private String achievementText;
 
     private String roleDesc;
 

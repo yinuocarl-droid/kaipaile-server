@@ -1,0 +1,5 @@
+# Test admin origin is deliberately isolated from the production allow-list.
+kaipai:
+  cors:
+    allowed-origins:
+      - https://test.kplyyk.com

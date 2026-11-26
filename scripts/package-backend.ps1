@@ -53,8 +53,14 @@ try {
 
   Write-Host "Package succeeded:"
   Write-Host "  Jar: $($jar.FullName)"
-  Write-Host "Runtime reminder:"
-  Write-Host "  Set SPRING_PROFILES_ACTIVE=$Environment and NACOS_ENABLED=$resolvedNacosEnabled when starting this jar."
+  if ($Environment -eq 'dev') {
+    Write-Host "Local runtime command:"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts/start-local-backend.ps1 -Restart"
+    Write-Host "  The launcher validates and injects gitignored WeChat config before starting the jar."
+  } else {
+    Write-Host "Runtime reminder:"
+    Write-Host "  Set SPRING_PROFILES_ACTIVE=$Environment and NACOS_ENABLED=$resolvedNacosEnabled when starting this jar."
+  }
 } finally {
   Pop-Location
 }

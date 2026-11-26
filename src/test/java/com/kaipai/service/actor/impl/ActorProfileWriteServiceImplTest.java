@@ -1,0 +1,245 @@
+package com.kaipai.service.actor.impl;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kaipai.common.exception.BizException;
+import com.kaipai.mapper.actor.ActorProfileMapper;
+import com.kaipai.mapper.user.UserMapper;
+import com.kaipai.model.user.entity.User;
+import com.kaipai.model.actor.dto.ActorProfileCareerUpdateDTO;
+import com.kaipai.model.actor.dto.ActorProfileCoreUpdateDTO;
+import com.kaipai.model.actor.dto.ActorProfileMineUpdateDTO;
+import com.kaipai.model.actor.entity.ActorProfile;
+import com.kaipai.service.actor.ActorMediaAssetOwnershipVerifier;
+import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+class ActorProfileWriteServiceImplTest {
+
+    private ActorProfileMapper profileMapper;
+    private ActorMediaAssetOwnershipVerifier assetVerifier;
+    private ActorProfileWriteServiceImpl service;
+    private ActorProfile current;
+    private UserMapper userMapper;
+    private User user;
+
+    @BeforeEach
+    void setUp() {
+        profileMapper = org.mockito.Mockito.mock(ActorProfileMapper.class);
+        assetVerifier = org.mockito.Mockito.mock(ActorMediaAssetOwnershipVerifier.class);
+        userMapper = org.mockito.Mockito.mock(UserMapper.class);
+        service = new ActorProfileWriteServiceImpl(profileMapper, assetVerifier, new ObjectMapper(), userMapper);
+        user = new User();
+        user.setUserId(7L);
+        user.setUserName("旧昵称");
+        when(userMapper.selectById(7L)).thenReturn(user);
+        when(userMapper.updateById(any(User.class))).thenAnswer(invocation -> {
+            user.setUserName(((User) invocation.getArgument(0)).getUserName());
+            return 1;
+        });
+        current = new ActorProfile();
+        current.setActorProfileId(11L);
+        current.setUserId(7L);
+        current.setVersion(3);
+        current.setWorkLibraryVersion(12L);
+        when(profileMapper.selectOne(any())).thenReturn(current);
+        when(profileMapper.updateById(any())).thenReturn(1);
+    }
+
+    @Test
+    void saveMineRejectsStaleExpectedVersionBeforeMutation() {
+        ActorProfileMineUpdateDTO request = validRequest();
+        request.setExpectedProfileVersion(2);
+
+        BizException error = assertThrows(BizException.class, () -> service.saveMine(7L, request));
+
+        assertEquals(46010, error.getCode());
+        verify(assetVerifier, never()).requireOwnedReadyPhoto(any(), any());
+        verify(profileMapper, never()).updateById(any());
+    }
+
+    @Test
+    void saveMineWritesOnlyCoreCareerIntroAndAvatar() {
+        var response = service.saveMine(7L, validRequest());
+
+        verify(assetVerifier).requireOwnedReadyPhoto(7L, 81L);
+        ArgumentCaptor<ActorProfile> profileCaptor = ArgumentCaptor.forClass(ActorProfile.class);
+        verify(profileMapper).updateById(profileCaptor.capture());
+        ActorProfile saved = profileCaptor.getValue();
+        assertEquals("王火火", saved.getNickName());
+        assertEquals(2, saved.getGender());
+        assertEquals(45, saved.getWeight());
+        assertEquals("中国香港", saved.getOriginPlace());
+        assertEquals(81L, saved.getAvatarAssetId());
+        assertEquals(12L, response.getWorkLibraryVersion());
+    }
+
+    @Test
+    void mineReturnsVersionedCareerProfile() {
+        current.setNickName("王火火");
+        current.setWeight(45);
+        current.setLanguageTagsJson("[\"粤语\",\"英语\"]");
+
+        var response = service.mine(7L);
+
+        assertEquals(3, response.getProfileVersion());
+        assertEquals(12L, response.getWorkLibraryVersion());
+        assertEquals("王火火", response.getPublicName());
+        assertEquals(45, response.getWeight());
+        assertEquals(List.of("粤语", "英语"), response.getLanguageTags());
+    }
+
+    @Test
+    void mineReturnsEmptyDraftWhenProfileDoesNotExist() {
+        when(profileMapper.selectOne(any())).thenReturn(null);
+
+        var response = service.mine(7L);
+
+        assertNotNull(response);
+        assertNull(response.getActorProfileId());
+        assertEquals(7L, response.getUserId());
+        assertEquals(0, response.getProfileVersion());
+        assertEquals(0L, response.getWorkLibraryVersion());
+        assertNull(response.getGender());
+        assertEquals(List.of(), response.getLanguageTags());
+    }
+
+    @Test
+    void saveMineCreatesProfileWhenExpectedVersionIsZeroAndProfileDoesNotExist() {
+        when(profileMapper.selectOne(any())).thenReturn(null);
+        when(profileMapper.insert(any())).thenReturn(1);
+        ActorProfileMineUpdateDTO request = validRequest();
+        request.setExpectedProfileVersion(0);
+
+        var response = service.saveMine(7L, request);
+
+        verify(assetVerifier).requireOwnedReadyPhoto(7L, 81L);
+        ArgumentCaptor<ActorProfile> profileCaptor = ArgumentCaptor.forClass(ActorProfile.class);
+        verify(profileMapper).insert(profileCaptor.capture());
+        verify(profileMapper, never()).updateById(any());
+        ActorProfile saved = profileCaptor.getValue();
+        assertEquals(7L, saved.getUserId());
+        assertEquals(0, saved.getVersion());
+        assertEquals(0L, saved.getWorkLibraryVersion());
+        assertEquals(1, saved.getProfileStatus());
+        assertEquals("王火火", response.getPublicName());
+        assertEquals(0, response.getProfileVersion());
+    }
+
+    @Test
+    void nicknameIsSavedSeparatelyFromPublicNameAndReturned() {
+        var request = validRequest();
+        request.setNickname("  一诺  ");
+        var response = service.saveMine(7L, request);
+        assertEquals("一诺", response.getNickname());
+        assertEquals("王火火", response.getPublicName());
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        assertEquals(7L, captor.getValue().getUserId());
+        assertEquals("一诺", captor.getValue().getUserName());
+        assertNull(captor.getValue().getAvatarUrl());
+    }
+
+    @Test
+    void legacyRequestPreservesAccountNickname() {
+        var response = service.saveMine(7L, validRequest());
+        assertEquals("旧昵称", response.getNickname());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void invalidNicknameIsRejectedBeforeAnyProfileWrite() {
+        for (String nickname : List.of("", "  ", "a".repeat(65))) {
+            var request = validRequest();
+            request.setNickname(nickname);
+            assertThrows(BizException.class, () -> service.saveMine(7L, request));
+        }
+        verify(profileMapper, never()).updateById(any());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void failedNicknameWriteDoesNotReportSuccessfulProfileSave() {
+        when(userMapper.updateById(any(User.class))).thenReturn(0);
+        var request = validRequest();
+        request.setNickname("新昵称");
+        assertThrows(BizException.class, () -> service.saveMine(7L, request));
+    }
+
+    private ActorProfileMineUpdateDTO validRequest() {
+        ActorProfileCoreUpdateDTO core = new ActorProfileCoreUpdateDTO();
+        core.setPublicName("王火火");
+        core.setGender("female");
+        core.setAge(21);
+        core.setHeight(170);
+        core.setCurrentCity("杭州");
+
+        ActorProfileCareerUpdateDTO career = new ActorProfileCareerUpdateDTO();
+        career.setWeight(45);
+        career.setOriginPlace("中国香港");
+        career.setSchoolName("浙江传媒学院");
+        career.setMajorName("表演专业");
+        career.setLanguageTags(List.of("粤语", "英语"));
+
+        ActorProfileMineUpdateDTO request = new ActorProfileMineUpdateDTO();
+        request.setExpectedProfileVersion(3);
+        request.setAvatarAssetId(81L);
+        request.setCore(core);
+        request.setCareer(career);
+        request.setIntro("演员");
+        return request;
+    }
+
+    @Test void badgeMineRoundTripsTrimmedTextAndExplicitEmptyClears() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        var request = validRequest();
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":\"  剧宣合作  \"}");
+        assertEquals("剧宣合作", json.valueToTree(service.saveMine(7L, request)).path("heroBadgeText").asText());
+        request.setExpectedProfileVersion(current.getVersion());
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":\"\"}");
+        assertEquals("", json.valueToTree(service.saveMine(7L, request)).path("heroBadgeText").asText());
+        assertEquals("", json.valueToTree(current).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeOmittedOrNullInOldMineRequestsPreservesExistingValue() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        json.readerForUpdating(current).readValue("{\"heroBadgeText\":\"已存文案\"}");
+        assertEquals("已存文案", json.valueToTree(service.mine(7L)).path("heroBadgeText").asText());
+        var request = validRequest();
+        assertEquals("已存文案", json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+        request.setExpectedProfileVersion(current.getVersion());
+        json.readerForUpdating(request).readValue("{\"heroBadgeText\":null}");
+        assertEquals("已存文案", json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeRejectsUnsafeTextAndCountsUtf16AfterTrim() throws Exception {
+        var json = new ObjectMapper().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        for (String value : List.of("a".repeat(41), "😀".repeat(21), "a\nb", "a\tb", "a\u0000b", "<b>", "a\u2028b")) {
+            var request = validRequest();
+            json.readerForUpdating(request).readValue(json.writeValueAsString(java.util.Map.of("heroBadgeText",value)));
+            assertThrows(BizException.class, () -> service.saveMine(7L,request));
+        }
+        verify(profileMapper, never()).updateById(any());
+        var request = validRequest();
+        json.readerForUpdating(request).readValue(json.writeValueAsString(java.util.Map.of("heroBadgeText","  " + "😀".repeat(20) + "  ")));
+        assertEquals("😀".repeat(20), json.valueToTree(service.saveMine(7L,request)).path("heroBadgeText").asText());
+    }
+
+    @Test void badgeMineJsonRejectsScalarCoercionInsteadOfInventingText() {
+        var json = new ObjectMapper();
+        for (String value : List.of("12","true","[]","{}")) {
+            assertThrows(com.fasterxml.jackson.core.JsonProcessingException.class,
+                    () -> json.readValue("{\"heroBadgeText\":" + value + "}",ActorProfileMineUpdateDTO.class));
+        }
+    }
+}

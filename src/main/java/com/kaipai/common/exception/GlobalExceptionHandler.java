@@ -2,6 +2,8 @@ package com.kaipai.common.exception;
 
 import com.kaipai.common.result.R;
 import com.kaipai.common.result.ResultCode;
+import com.kaipai.model.actor.dto.ProfileDomainErrorCode;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,9 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -31,7 +36,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public R<Void> handleBizException(BizException e) {
         log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
+        return Arrays.stream(ProfileDomainErrorCode.values()).filter(code -> code.code() == e.getCode()).findFirst()
+                .map(code -> R.<Void>fail(e.getCode(), code.errorCode(), e.getMessage()))
+                .orElseGet(() -> R.fail(e.getCode(), e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -96,8 +103,13 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public R<Void> handleException(Exception e) {
-        log.error("系统异常: ", e);
-        return R.fail(ResultCode.FAILED);
+    public R<Void> handleException(Exception e, HttpServletRequest request) {
+        String errorCode = "INTERNAL_ERROR_" + UUID.randomUUID().toString()
+                .replace("-", "")
+                .toUpperCase(Locale.ROOT);
+        String method = request == null || request.getMethod() == null ? "UNKNOWN" : request.getMethod();
+        String uri = request == null || request.getRequestURI() == null ? "UNKNOWN" : request.getRequestURI();
+        log.error("系统异常: errorCode={}, method={}, uri={}", errorCode, method, uri, e);
+        return R.fail(ResultCode.FAILED.getCode(), errorCode, ResultCode.FAILED.getMessage());
     }
 }

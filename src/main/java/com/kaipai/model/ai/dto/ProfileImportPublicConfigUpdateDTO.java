@@ -1,0 +1,1 @@
+package com.kaipai.model.ai.dto; import lombok.Data; @Data public class ProfileImportPublicConfigUpdateDTO { private String endpoint; private String modelName; private Integer connectTimeoutMs; private Integer readTimeoutMs; private Integer maxInputChars; private Integer maxOutputTokens; private Integer perUserDailyLimit; }

@@ -39,11 +39,7 @@ public class IdentityVerification extends BaseEntity {
     /** profile completion snapshot captured on submit */
     private Integer snapshotProfileCompletion;
 
-    private String verifyProvider;
-
     private String providerResultCode;
-
-    private String providerDescription;
 
     private String providerRequestId;
 

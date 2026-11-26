@@ -62,12 +62,7 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
                     .connectTimeout(Duration.ofMillis(runtime.connectTimeoutMs(10000)))
                     .build();
             JsonNode root = callTencent(client, secretId, secretKey, runtime, imageUrl.trim());
-            List<String> snippets = extractBlockedSnippets(root);
-            if (!snippets.isEmpty()) {
-                String reason = "封面成图检测到文字：" + String.join(" | ", snippets);
-                return AiProfileCardImageQualityInspection.rejected(reason);
-            }
-            return AiProfileCardImageQualityInspection.accept();
+            return inspectTencentResponse(root);
         } catch (BizException error) {
             if (isOcrUnavailable(error)) {
                 String message = "腾讯 OCR 服务不可用，封面质检无法执行";
@@ -109,12 +104,24 @@ public class TencentOcrAiProfileCardImageQualityInspector implements AiProfileCa
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new BizException("腾讯 OCR API 返回异常：" + response.statusCode() + " " + truncate(response.body()));
         }
-        JsonNode root = objectMapper.readTree(response.body());
+        return objectMapper.readTree(response.body());
+    }
+
+    private AiProfileCardImageQualityInspection inspectTencentResponse(JsonNode root) {
         JsonNode error = root.at("/Response/Error");
         if (error != null && !error.isMissingNode()) {
+            String code = error.path("Code").asText("").trim();
+            if ("FailedOperation.ImageNoText".equals(code)) {
+                return AiProfileCardImageQualityInspection.accept();
+            }
             throw new BizException("腾讯 OCR API 错误：" + truncate(error.toString()));
         }
-        return root;
+        List<String> snippets = extractBlockedSnippets(root);
+        if (!snippets.isEmpty()) {
+            String reason = "封面成图检测到文字：" + String.join(" | ", snippets);
+            return AiProfileCardImageQualityInspection.rejected(reason);
+        }
+        return AiProfileCardImageQualityInspection.accept();
     }
 
     private List<String> extractBlockedSnippets(JsonNode root) {

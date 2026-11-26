@@ -1,0 +1,1 @@
+package com.kaipai.model.ai.dto; import lombok.Data; @Data public class ProfileImportExtractReqDTO { private String requestId; private String rawText; private String scene; private Long profileVersion=0L; private Long workLibraryVersion=0L; }
